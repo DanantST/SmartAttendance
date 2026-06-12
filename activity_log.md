@@ -1358,4 +1358,22 @@ New cloud backend created with 4 files:
   * **On-Device User Manager Extension:** Redesigned the on-device "User Management" settings app screen. Enlarged cards to display the Name, Role Badge (Orange/Blue/Green), Matric/Student ID, Phone/Telegram link status, and the list of Enrolled Courses (retrieved via `db_get_user_courses`), alongside the red delete trash bin.
   * **Python 3.13 Compatibility Hotfix:** Patched `python-telegram-bot` v21.3's `__slots__` definition inside `_application.py` to include `__stop_running_marker`, resolving the `AttributeError: no __dict__ for setting new attributes` initialization crash on Python 3.13.
 
+---
 
+### [2026-06-12 18:50] — Home Screen "Users" App, Settings Redesign & Git Integration
+
+- **Category:** Feature Realignment / User Interface / Cloud Deployment / Version Control
+- **Altered Files:**
+  - `main/ui/ui_main.cpp` (modified)
+  - `main/ui/ui_settings.cpp` (modified)
+  - `main/ui/ui_user_manager.cpp` (modified)
+  - `telegram_bot/db.py` (modified)
+  - `telegram_bot/DEPLOYMENT.md` (new)
+  - `.gitignore` (new)
+- **Status:** ✅ Completed, Flashed & Hardware-Verified on COM5
+- **Log:**
+  * **Dedicated Home Screen "Users" App:** Promoted the user management list to a first-class "Users" app on the home screen launcher grid. It is PIN-protected using `ui_show_pin_prompt()` (just like settings) and correctly routes navigation back to the main desktop dashboard upon exit.
+  * **Settings Cleanup & Redesign:** Removed the duplicate "User Management" entry button from the settings panel. Re-aligned the "Change PIN", "Enroll Admin", and "Factory Reset" buttons in the device management card into a clean, symmetric 180px layout.
+  * **Recent Apps Mapping Bugfix:** Corrected the app names/icons array mismatch in the recent apps drawer that previously offset index 4 ("Files") to "Recorder" and caused closed-app mapping offsets.
+  * **Render Cloud Hosting Integration:** Updated the bot SQLite connection block to read `DATABASE_PATH` from the environment if present, allowing the database to write to mounted persistent storage disks on Render. Added a comprehensive guide `DEPLOYMENT.md` detailing Render setup.
+  * **Git Repository Configuration:** Initialized the local Git repository, set up a `.gitignore` file to ignore build folders, environment files, and SQLite database caches, and performed the initial repository commit.
