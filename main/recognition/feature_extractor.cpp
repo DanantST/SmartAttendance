@@ -13,6 +13,7 @@
 #include "human_face_recognition.hpp"
 #include "dl_tensor_base.hpp"
 #include <vector>
+#include <math.h>
 
 #pragma GCC diagnostic pop
 
@@ -54,12 +55,16 @@ esp_err_t feature_extractor_run(aligned_face_t *aligned, face_embedding_t *embed
         return ESP_FAIL;
     }
 
-    int8_t* out_data = output_base->get_element_ptr<int8_t>();
+    float* out_data = output_base->get_element_ptr<float>();
     int elements = output_base->get_size();
     
-    /* Copy data to output embedding structure */
+    /* Copy and quantize float features to int8 embedding structure */
     for (int i = 0; i < EMBEDDING_DIM && i < elements; i++) {
-        embedding->values[i] = out_data[i];
+        float val = out_data[i] * 127.0f;
+        int rounded = (int)roundf(val);
+        if (rounded < -128) rounded = -128;
+        if (rounded > 127)  rounded = 127;
+        embedding->values[i] = (int8_t)rounded;
     }
     
     return ESP_OK;

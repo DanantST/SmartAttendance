@@ -57,6 +57,15 @@ void recognizer_load_cache(void) {
         s_cache_size = to_load;
         free(users);
         ESP_LOGI(TAG, "Loaded %d users into recognition cache", s_cache_size);
+        for (int i = 0; i < s_cache_size; i++) {
+            ESP_LOGI(TAG, "  User %s: id=%u, role=%s, embedding sample=%d %d %d %d %d",
+                     s_user_cache[i].name, (unsigned int)s_user_cache[i].id, s_user_cache[i].role,
+                     s_user_cache[i].embedding.values[0],
+                     s_user_cache[i].embedding.values[1],
+                     s_user_cache[i].embedding.values[2],
+                     s_user_cache[i].embedding.values[3],
+                     s_user_cache[i].embedding.values[4]);
+        }
     } else {
         s_cache_size = 0;
         ESP_LOGI(TAG, "No users found or failed to load");

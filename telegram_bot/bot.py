@@ -2,6 +2,7 @@ import logging
 import asyncio
 import datetime
 import time
+import os
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -17,6 +18,12 @@ from telegram.ext import (
 )
 import db
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # Setup Logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -24,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Telegram Bot Token
-BOT_TOKEN = "8315939667:AAHfJeTBFy5i7K2HFgQ9gpzRn7qeofEXOV0"
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
 # Conversation States for Scheduling
 COURSE_CODE, COURSE_TITLE, DATE, START_TIME, END_TIME = range(5)
@@ -572,6 +579,10 @@ async def main():
     # 1. Initialize SQLite Database
     db.init_db()
     
+    if not BOT_TOKEN:
+        logger.error("TELEGRAM_BOT_TOKEN environment variable is not set! Please set it and try again.")
+        return
+        
     # 2. Build Telegram Bot Application
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
     
@@ -635,21 +646,40 @@ async def main():
         await bot_app.updater.start_polling()
         logger.info("Telegram Bot polling started.")
     
-    # 3. Configure and Start Uvicorn Server for REST API
-    logger.info("Starting REST API Web Server...")
-    port = int(os.environ.get("PORT", 8000))
-    config = uvicorn.Config(app=web_app, host="0.0.0.0", port=port, log_level="info")
-    server = uvicorn.Server(config)
+    # Check if we should start the web server (default is True)
+    start_web_server = os.environ.get("START_WEB_SERVER", "true").lower() == "true"
     
-    try:
-        await server.serve()
-    finally:
-        logger.info("Shutting down Telegram Bot...")
-        if bot_app.updater and bot_app.updater.running:
-            await bot_app.updater.stop()
-        await bot_app.stop()
-        await bot_app.shutdown()
-        logger.info("Shutdown completed.")
+    if start_web_server:
+        # 3. Configure and Start Uvicorn Server for REST API
+        logger.info("Starting REST API Web Server...")
+        port = int(os.environ.get("PORT", 8000))
+        config = uvicorn.Config(app=web_app, host="0.0.0.0", port=port, log_level="info")
+        server = uvicorn.Server(config)
+        
+        try:
+            await server.serve()
+        finally:
+            logger.info("Shutting down Telegram Bot...")
+            if bot_app.updater and bot_app.updater.running:
+                await bot_app.updater.stop()
+            await bot_app.stop()
+            await bot_app.shutdown()
+            logger.info("Shutdown completed.")
+    else:
+        # Just block forever while polling runs in the background
+        logger.info("Web server disabled (START_WEB_SERVER=false). Running bot in polling mode only.")
+        try:
+            while True:
+                await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            logger.info("Shutting down Telegram Bot...")
+            if bot_app.updater and bot_app.updater.running:
+                await bot_app.updater.stop()
+            await bot_app.stop()
+            await bot_app.shutdown()
+            logger.info("Shutdown completed.")
 
 if __name__ == "__main__":
     try:

@@ -525,9 +525,7 @@ static void detection_recognition_task(void *pvParameters) {
     user_t *matched_user;
     float confidence;
     
-    /* NOTE: Do NOT add this task to the WDT.
-     * Face recognition inference legitimately runs for multiple seconds,
-     * so WDT supervision would always trigger false panics. */
+
     
     while (1) {
         /* [T1-7] Suspend during factory reset / shutdown */
@@ -589,6 +587,9 @@ static void detection_recognition_task(void *pvParameters) {
         /* Match against database */
         recognizer_identify(&embedding, &matched_user, &confidence);
         
+        ESP_LOGI(TAG, "Recognition run: matched_user=%s, confidence=%.3f (threshold=%.2f)",
+                 (matched_user != NULL) ? matched_user->name : "None/Unknown", confidence, RECOGNITION_THRESHOLD);
+        
         /* Update UI with bounding box and recognition result (scaled to 480x360 UI preview size) */
         if (ui_acquire()) {
             int scaled_x = (frame.fb->width > 0) ? (face->x * 480 / frame.fb->width) : face->x;
@@ -635,8 +636,7 @@ static void detection_recognition_task(void *pvParameters) {
         face_alignment_free(&aligned_face);
         camera_return_frame(frame.fb);
         
-        /* Reset watchdog for long AI inference */
-        esp_task_wdt_reset();
+
         
         /* Progress log */
         static int det_cnt = 0;
@@ -888,6 +888,11 @@ static esp_err_t process_enrollment_frames_for_user(user_t* new_user) {
             if (rounded > 127)  rounded = 127;
             final_embedding.values[m] = (int8_t)rounded;
         }
+        ESP_LOGI(TAG, "Master vector generated: target_norm=%.3f, avg_norm=%.3f, scale=%.3f", target_norm, avg_norm, scale);
+        ESP_LOGI(TAG, "Master embedding sample: %d %d %d %d %d", 
+                 final_embedding.values[0], final_embedding.values[1], 
+                 final_embedding.values[2], final_embedding.values[3], 
+                 final_embedding.values[4]);
     }
     
     /* Check if user is already enrolled */
