@@ -25,7 +25,7 @@ jobs:
           # Initialize clean repository and push
           cd deploy_dir
           git init
-          git checkout -b master
+          git checkout -b main
           git add .
           git commit -m "Deploy bot to Hugging Face Spaces"
-          git push --force https://DanantST:$HF_TOKEN@huggingface.co/spaces/DanantST/smart-attendance-bot master
+          git push --force https://DanantST:$HF_TOKEN@huggingface.co/spaces/DanantST/smart-attendance-bot main
