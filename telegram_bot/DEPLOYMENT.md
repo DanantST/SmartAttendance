@@ -1,105 +1,79 @@
-# Hosting the Smart Attendance Bot on Hugging Face Spaces (Docker)
+# Cloud Deployment Guide (Fly.io & Hugging Face Spaces)
 
-This guide provides instructions for deploying the cloud Telegram bot backend on **Hugging Face Spaces** using the provided `Dockerfile`. 
+This guide provides step-by-step instructions for hosting the cloud Telegram bot. 
 
-This setup runs the bot in **long-polling** mode, starts a lightweight FastAPI web server on Hugging Face's required port (`7860`), exposes a health-check endpoint to keep the container active, and stores the SQLite database in a writable directory.
-
----
-
-## Why Hugging Face Spaces?
-1. **Strictly Free:** Basic CPU spaces are 100% free and do **not** require entering credit card or payment information.
-2. **Indefinite Uptime:** The bot runs continuously as long as the exposed health check responds on port `7860`.
-3. **Environment Secrets:** Your Telegram Token is securely injected and hidden from public view using Hugging Face Space secrets.
+You can choose between two free hosting targets:
+1. **Fly.io (Recommended):** Fully persistent, free 3GB storage volume, and avoids the IP address blocklists that Telegram imposes on AWS (Hugging Face).
+2. **Hugging Face Spaces:** 100% free (no credit card required), but has ephemeral storage and may experience TLS/connection timeouts when communicating with Telegram due to AWS IP blocks.
 
 ---
 
-## Step 1: Create a Space on Hugging Face
+## Target A: Deploying on Fly.io (Recommended)
 
-1. Go to [huggingface.co](https://huggingface.co/) and sign up or log in.
-2. Click on your profile picture in the top-right corner and select **New Space** (or go to [huggingface.co/new-space](https://huggingface.co/new-space)).
-3. Configure the Space:
-   *   **Space Name:** `smart-attendance-bot` (or any custom name)
-   *   **License:** `mit` (or leave blank)
-   *   **SDK:** Select **Docker** (very important).
-   *   **Docker Template:** Select **Blank** (this will automatically build using the `Dockerfile` at the root of our repository).
-   *   **Space Hardware:** Select **CPU basic • 2 vCPU • 16 GB • Free** (default).
-   *   **Space Visibility:** Set to **Public** or **Private** (we store the bot token in secrets, so it's safe either way).
-4. Click **Create Space**.
+Fly.io runs your Docker container in a micro-VM. It provides a free tier with 3 shared-CPU VMs and 3 GB of persistent disk volume, which is perfect for securing your SQLite database.
 
----
+### Step 1: Install the Fly.io CLI (flyctl)
+Open your terminal (PowerShell on Windows) and run:
+```powershell
+iwr https://fly.io/install.ps1 -useb | iex
+```
+*(Restart your terminal window after installation so the `fly` command is added to your PATH).*
 
-## Step 2: Inject Your Environment Secrets
-
-1. Once the Space is created, click the **Settings** tab at the top-right of your Space's page.
-2. Scroll down to the **Variables and secrets** section.
-3. Click **New secret** and add your Telegram token:
-   *   **Name:** `TELEGRAM_BOT_TOKEN`
-   *   **Value:** `your_actual_bot_token_here` (obtained from `@BotFather`)
-4. Click **Save**.
-
----
-
-## Step 3: Deploy Your Code to Hugging Face
-
-There are two easy methods to deploy the code to your Hugging Face Space:
-
-### Method A: Direct Git Push (Easiest)
-In your local terminal inside the repository, add the Hugging Face Space as a remote and push your code:
-
+### Step 2: Log In or Sign Up
+Authenticate your account:
 ```bash
-# 1. Add Hugging Face Space remote (replace USERNAME and SPACE_NAME with yours)
-git remote add huggingface https://huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE_NAME
+fly auth login
+```
+*(Note: Fly.io requires a credit card to verify your identity to prevent spam, but you will not be charged under their free tier).*
 
-# 2. Push to Hugging Face
-git push huggingface master --force
+### Step 3: Launch the Application
+Run the launch utility from the root of the project:
+```bash
+fly launch
+```
+During the prompt:
+1. **An existing fly.toml was found. Copy config?** Type `y` (Yes).
+2. **Would you like to set up a Postgres database / Redis?** Type `n` (No).
+3. **Would you like to deploy now?** Type `n` (No) — *we must create our storage volume and token secret first.*
+
+### Step 4: Create a Persistent Storage Volume
+To ensure your SQLite database persists across redeploys, create a 1 GB volume (replace `bos` with the region you selected during `fly launch`):
+```bash
+fly volumes create bot_db_volume --size 1 --region bos
 ```
 
-### Method B: GitHub Actions Auto-Sync
-If you prefer pushing only to GitHub and having Hugging Face sync automatically:
-1. Create a **Hugging Face Write Token** by going to your HF profile -> **Settings > Access Tokens** -> click **New token** (type: **Write**).
-2. Go to your GitHub repository -> **Settings > Secrets and variables > Actions** -> Click **New repository secret**.
-   *   **Name:** `HF_TOKEN`
-   *   **Value:** `your_hf_access_token`
-3. Add a GitHub Action workflow file in your repository at `.github/workflows/hf_sync.yml`:
-   ```yaml
-   name: Sync to Hugging Face Spaces
-   on:
-     push:
-       branches: [master]
-   jobs:
-     sync:
-       runs-on: ubuntu-latest
-       steps:
-         - uses: actions/checkout@v3
-           with:
-             fetch-depth: 0
-             lfs: true
-         - name: Push to HF
-           env:
-             HF_TOKEN: ${{ secrets.HF_TOKEN }}
-           run: git push --force https://YOUR_USERNAME:$HF_TOKEN@huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE_NAME master
-   ```
+### Step 5: Inject Your Bot Token
+Inject your Telegram Bot Token securely into the environment variables:
+```bash
+fly secrets set TELEGRAM_BOT_TOKEN="your_actual_bot_token_here"
+```
+
+### Step 6: Deploy to Fly.io
+Deploy your application:
+```bash
+fly deploy
+```
+Once deployed, Fly.io will give you a public URL (e.g. `https://smart-attendance-bot.fly.dev`). Set this URL in your physical ESP32-P4 device settings!
 
 ---
 
-## Step 4: Verify the Deployment
+## Target B: Deploying on Hugging Face Spaces (Docker)
 
-1. Go to your Space homepage on Hugging Face. You should see the status transition to **Building**, then **Running**.
-2. Once the status shows **Running**, click the "Embed" or "App" link, or append `.hf.space` to the URL.
-3. Open the public endpoint: `https://YOUR_USERNAME-YOUR_SPACE_NAME.hf.space`
-4. It should respond with:
-   ```json
-   {"status":"ok","message":"Smart Attendance Bot is running"}
-   ```
-5. You can view the real-time bot execution logs by clicking the **Logs** tab at the top of your Space page.
+If you do not have a credit card to verify a Fly.io account, you can use Hugging Face Spaces.
 
----
+### Step 1: Create a Space on Hugging Face
+1. Log in to [huggingface.co](https://huggingface.co/) and click **New Space**.
+2. Set **Space Name** to `smart-attendance-bot`.
+3. Select **Docker** as the SDK and choose the **Blank** template.
+4. Keep the hardware as **CPU basic (Free)** and click **Create Space**.
 
-## Step 5: Update Device Sync Configuration
+### Step 2: Inject Your Bot Token
+1. Go to your Space **Settings** tab.
+2. Scroll to **Variables and secrets** and click **New secret**:
+   *   **Name:** `TELEGRAM_BOT_TOKEN`
+   *   **Value:** `your_actual_bot_token_here`
 
-To connect your physical attendance device to the cloud bot:
-1. Turn on the ESP32-P4 device.
-2. Open the captive portal or the **Settings** screen on the device.
-3. Update the **Cloud Server URL / API Endpoint** to point to your Hugging Face Space URL:
-   `https://YOUR_USERNAME-YOUR_SPACE_NAME.hf.space`
-4. Press **Save** on the device settings to apply the configuration.
+### Step 3: Configure GitHub Actions Auto-Sync
+If you set up the GitHub secret (`HF_TOKEN` containing your Hugging Face write token), every push to your GitHub `master` branch will automatically build and deploy your Space.
+
+*Note: If the Space logs show a `ConnectTimeout` to `api.telegram.org`, Telegram's DDoS firewall has temporarily blocked the AWS IP address assigned to your Hugging Face container. Restarting the Space (to assign a new IP) or switching to Fly.io will resolve this.*
