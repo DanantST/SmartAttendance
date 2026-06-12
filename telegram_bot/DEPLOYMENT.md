@@ -1,161 +1,105 @@
-# Hosting the Smart Attendance Bot on Google Cloud Engine (Always Free)
+# Hosting the Smart Attendance Bot on Hugging Face Spaces (Docker)
 
-This guide provides instructions for deploying the cloud Telegram bot backend on a free **Google Compute Engine (GCE) e2-micro** instance. This setup runs the bot in long-polling mode (meaning no web server or exposed ports are required) and persists the SQLite database directly on the VM's persistent storage.
+This guide provides instructions for deploying the cloud Telegram bot backend on **Hugging Face Spaces** using the provided `Dockerfile`. 
 
----
-
-## Google Cloud "Always Free" Tier Benefits
-Google Cloud offers a free tier that includes:
-1. **1 `e2-micro` VM instance** per month (24/7 runtime).
-2. **30 GB** of Standard Persistent Disk (HDD) storage.
-3. Free external IP address.
-*(Note: To qualify for the free tier, you must choose a VM in US regions: **Oregon (us-west1)**, **Iowa (us-central1)**, or **South Carolina (us-east1)**).*
+This setup runs the bot in **long-polling** mode, starts a lightweight FastAPI web server on Hugging Face's required port (`7860`), exposes a health-check endpoint to keep the container active, and stores the SQLite database in a writable directory.
 
 ---
 
-## Step 1: Create the VM Instance in Google Cloud
-
-1. Log in to the [Google Cloud Console](https://console.cloud.google.com/).
-2. Navigate to **Compute Engine > VM Instances** and click **Create Instance**.
-3. Configure the following fields exactly to qualify for the Free Tier:
-   *   **Name:** `smart-attendance-bot`
-   *   **Region:** Select either `us-central1` (Iowa), `us-west1` (Oregon), or `us-east1` (South Carolina).
-   *   **Zone:** Any zone in the selected region.
-   *   **Machine configuration:**
-       *   **Series:** `E2`
-       *   **Machine type:** `e2-micro` (2 vCPUs, 1 GB RAM).
-   *   **Boot Disk:** Click **Change** and configure:
-       *   **Operating System:** `Ubuntu`
-       *   **Version:** `Ubuntu 24.04 LTS` (or `Ubuntu 22.04 LTS`)
-       *   **Boot disk type:** **Standard Persistent Disk** (HDD) — *Do NOT select SSD or Balanced SSD*.
-       *   **Size (GB):** `30` (maximum free tier limit).
-       *   Click **Select**.
-   *   **Firewall:** Leave both HTTP and HTTPS traffic options **unchecked** (unexposed and secure).
-4. Click **Create** at the bottom of the page.
+## Why Hugging Face Spaces?
+1. **Strictly Free:** Basic CPU spaces are 100% free and do **not** require entering credit card or payment information.
+2. **Indefinite Uptime:** The bot runs continuously as long as the exposed health check responds on port `7860`.
+3. **Environment Secrets:** Your Telegram Token is securely injected and hidden from public view using Hugging Face Space secrets.
 
 ---
 
-## Step 2: Access the VM Terminal via SSH
+## Step 1: Create a Space on Hugging Face
 
-1. Once the instance status shows a green checkmark, look at the instance row on the dashboard.
-2. Click the **SSH** button in the "Connect" column. This opens a secure terminal window inside your browser.
-
----
-
-## Step 3: Install Python and Clone the Codebase
-
-Inside the browser SSH terminal, run the following commands to install dependencies:
-
-```bash
-# 1. Update system package index
-sudo apt update && sudo apt upgrade -y
-
-# 2. Install Git, Python3, and Virtualenv package
-sudo apt install -y git python3-pip python3-venv
-```
-
-Now, clone your GitHub repository:
-
-```bash
-# 3. Clone repository (replace with your repository link if different)
-git clone https://github.com/DanantST/SmartAttendance.git
-cd SmartAttendance
-```
+1. Go to [huggingface.co](https://huggingface.co/) and sign up or log in.
+2. Click on your profile picture in the top-right corner and select **New Space** (or go to [huggingface.co/new-space](https://huggingface.co/new-space)).
+3. Configure the Space:
+   *   **Space Name:** `smart-attendance-bot` (or any custom name)
+   *   **License:** `mit` (or leave blank)
+   *   **SDK:** Select **Docker** (very important).
+   *   **Docker Template:** Select **Blank** (this will automatically build using the `Dockerfile` at the root of our repository).
+   *   **Space Hardware:** Select **CPU basic • 2 vCPU • 16 GB • Free** (default).
+   *   **Space Visibility:** Set to **Public** or **Private** (we store the bot token in secrets, so it's safe either way).
+4. Click **Create Space**.
 
 ---
 
-## Step 4: Set Up Virtual Environment & Environment Variables
+## Step 2: Inject Your Environment Secrets
 
-Create the Python virtual environment and install requirements:
-
-```bash
-# 1. Initialize virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# 2. Install Python dependencies
-pip install -r telegram_bot/requirements.txt
-```
-
-Create a production environment file:
-
-```bash
-# 3. Create a .env configuration file
-nano telegram_bot/.env
-```
-
-Paste the following variables (replacing the token with your own token from `@BotFather`):
-
-```env
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-START_WEB_SERVER=false
-DATABASE_PATH=telegram_bot/bot_data.db
-```
-*Press `Ctrl+O` then `Enter` to save, and `Ctrl+X` to exit nano.*
+1. Once the Space is created, click the **Settings** tab at the top-right of your Space's page.
+2. Scroll down to the **Variables and secrets** section.
+3. Click **New secret** and add your Telegram token:
+   *   **Name:** `TELEGRAM_BOT_TOKEN`
+   *   **Value:** `your_actual_bot_token_here` (obtained from `@BotFather`)
+4. Click **Save**.
 
 ---
 
-## Step 5: Configure the Bot as a Persistent Background Service
+## Step 3: Deploy Your Code to Hugging Face
 
-To keep the bot running 24/7, even after you close the SSH terminal or if the VM restarts, register it as a system service:
+There are two easy methods to deploy the code to your Hugging Face Space:
 
-```bash
-# 1. Create a systemd service definition file
-sudo nano /etc/systemd/system/telegram-bot.service
-```
-
-Paste the following configuration:
-
-```ini
-[Unit]
-Description=Telegram Attendance Bot Background Service
-After=network.target
-
-[Service]
-Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu/SmartAttendance
-EnvironmentFile=/home/ubuntu/SmartAttendance/telegram_bot/.env
-ExecStart=/home/ubuntu/SmartAttendance/.venv/bin/python telegram_bot/bot.py
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-*Press `Ctrl+O` then `Enter` to save, and `Ctrl+X` to exit nano.*
-
-Now enable and start the service:
+### Method A: Direct Git Push (Easiest)
+In your local terminal inside the repository, add the Hugging Face Space as a remote and push your code:
 
 ```bash
-# 2. Reload daemon configuration
-sudo systemctl daemon-reload
+# 1. Add Hugging Face Space remote (replace USERNAME and SPACE_NAME with yours)
+git remote add huggingface https://huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE_NAME
 
-# 3. Enable the service to launch automatically on system boot
-sudo systemctl enable telegram-bot.service
-
-# 4. Start the service
-sudo systemctl start telegram-bot.service
+# 2. Push to Hugging Face
+git push huggingface master --force
 ```
+
+### Method B: GitHub Actions Auto-Sync
+If you prefer pushing only to GitHub and having Hugging Face sync automatically:
+1. Create a **Hugging Face Write Token** by going to your HF profile -> **Settings > Access Tokens** -> click **New token** (type: **Write**).
+2. Go to your GitHub repository -> **Settings > Secrets and variables > Actions** -> Click **New repository secret**.
+   *   **Name:** `HF_TOKEN`
+   *   **Value:** `your_hf_access_token`
+3. Add a GitHub Action workflow file in your repository at `.github/workflows/hf_sync.yml`:
+   ```yaml
+   name: Sync to Hugging Face Spaces
+   on:
+     push:
+       branches: [master]
+   jobs:
+     sync:
+       runs-on: ubuntu-latest
+       steps:
+         - uses: actions/checkout@v3
+           with:
+             fetch-depth: 0
+             lfs: true
+         - name: Push to HF
+           env:
+             HF_TOKEN: ${{ secrets.HF_TOKEN }}
+           run: git push --force https://YOUR_USERNAME:$HF_TOKEN@huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE_NAME master
+   ```
 
 ---
 
-## Step 6: Verify Service Status and Logs
+## Step 4: Verify the Deployment
 
-You can monitor your bot's execution logs in real-time with:
+1. Go to your Space homepage on Hugging Face. You should see the status transition to **Building**, then **Running**.
+2. Once the status shows **Running**, click the "Embed" or "App" link, or append `.hf.space` to the URL.
+3. Open the public endpoint: `https://YOUR_USERNAME-YOUR_SPACE_NAME.hf.space`
+4. It should respond with:
+   ```json
+   {"status":"ok","message":"Smart Attendance Bot is running"}
+   ```
+5. You can view the real-time bot execution logs by clicking the **Logs** tab at the top of your Space page.
 
-```bash
-sudo journalctl -u telegram-bot.service -f
-```
+---
 
-It should show:
-```text
-db - INFO - Database initialized successfully.
-__main__ - INFO - Initializing Telegram Bot...
-telegram.ext.Application - INFO - Application started
-__main__ - INFO - No public URL detected, starting bot in polling mode...
-__main__ - INFO - Telegram Bot polling started.
-__main__ - INFO - Web server disabled (START_WEB_SERVER=false). Running bot in polling mode only.
-```
+## Step 5: Update Device Sync Configuration
 
-Your cloud bot is now successfully deployed and fully operational!
+To connect your physical attendance device to the cloud bot:
+1. Turn on the ESP32-P4 device.
+2. Open the captive portal or the **Settings** screen on the device.
+3. Update the **Cloud Server URL / API Endpoint** to point to your Hugging Face Space URL:
+   `https://YOUR_USERNAME-YOUR_SPACE_NAME.hf.space`
+4. Press **Save** on the device settings to apply the configuration.

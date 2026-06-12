@@ -50,6 +50,10 @@ bot_app = None
 
 # ----------------- FastAPI REST Endpoints -----------------
 
+@web_app.get("/")
+async def root_health():
+    return {"status": "ok", "message": "Smart Attendance Bot is running"}
+
 @web_app.post("/telegram_webhook")
 async def telegram_webhook(request: Request):
     """
