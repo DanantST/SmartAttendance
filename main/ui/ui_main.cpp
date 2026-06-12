@@ -35,6 +35,7 @@ LV_FONT_DECLARE(lv_font_montserrat_48);
 #include "ui_enrollment.h"
 #include "ui_settings.h"
 #include "ui_reports.h"
+#include "ui_user_manager.h"
 #include "wifi_manager.h"
 
 static void update_time_task(lv_timer_t *timer);
@@ -461,12 +462,16 @@ static void launch_app_by_id(int app_id) {
         /* Spawn the enrollment task to manage BLE and system state */
         xTaskCreate(start_enrollment_task, "enrollment", 8192, NULL, 5, NULL);
     } else if (app_id == 2 && s_nav_callback) {
-        ui_show_reports_screen();
+        ui_show_pin_prompt(false, [](bool success) {
+            if (success) ui_show_user_manager();
+        });
     } else if (app_id == 3 && s_nav_callback) {
+        ui_show_reports_screen();
+    } else if (app_id == 4 && s_nav_callback) {
         ui_show_pin_prompt(false, [](bool success) {
             if (success) ui_show_settings_screen();
         });
-    } else if (app_id == 4) {
+    } else if (app_id == 5) {
         ui_show_file_manager_screen();
     }
 }
@@ -512,11 +517,11 @@ static void create_main_content(void) {
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
-    const char* app_names[] = {"Scanner", "Enroll", "Reports", "Settings", "Files"};
-    const char* app_icons[] = {LV_SYMBOL_VIDEO, LV_SYMBOL_PLUS, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS, LV_SYMBOL_DIRECTORY};
-    const uint32_t app_colors[] = {0x3A6EA5, 0x4CAF50, 0xFF9800, 0x9E9E9E, 0x673AB7};
+    const char* app_names[] = {"Scanner", "Enroll", "Users", "Reports", "Settings", "Files"};
+    const char* app_icons[] = {LV_SYMBOL_VIDEO, LV_SYMBOL_PLUS, LV_SYMBOL_LIST, LV_SYMBOL_FILE, LV_SYMBOL_SETTINGS, LV_SYMBOL_DIRECTORY};
+    const uint32_t app_colors[] = {0x3A6EA5, 0x4CAF50, 0x00A8FF, 0xFF9800, 0x9E9E9E, 0x673AB7};
 
-    for(int i = 0; i < 5; i++) {
+    for(int i = 0; i < 6; i++) {
         lv_obj_t* icon_btn = lv_btn_create(grid);
         lv_obj_set_size(icon_btn, 80, 80);
         lv_obj_set_style_bg_color(icon_btn, lv_color_hex(app_colors[i]), 0);
@@ -1306,9 +1311,9 @@ void ui_show_recent_apps(void) {
     lv_obj_set_flex_flow(flex_box, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(flex_box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
-    const char* app_names[] = {"Scanner", "Enroll", "Reports", "Settings", "Recorder", "Files"};
-    const char* app_icons[] = {LV_SYMBOL_VIDEO, LV_SYMBOL_PLUS, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS, LV_SYMBOL_AUDIO, LV_SYMBOL_DIRECTORY};
-    const uint32_t app_colors[] = {0x3A6EA5, 0x4CAF50, 0xFF9800, 0x9E9E9E, 0xE91E63, 0x673AB7};
+    const char* app_names[] = {"Scanner", "Enroll", "Users", "Reports", "Settings", "Files"};
+    const char* app_icons[] = {LV_SYMBOL_VIDEO, LV_SYMBOL_PLUS, LV_SYMBOL_LIST, LV_SYMBOL_FILE, LV_SYMBOL_SETTINGS, LV_SYMBOL_DIRECTORY};
+    const uint32_t app_colors[] = {0x3A6EA5, 0x4CAF50, 0x00A8FF, 0xFF9800, 0x9E9E9E, 0x673AB7};
     
     for (int i = 0; i < 5; i++) {
         int app_id = s_recent_apps[i];
@@ -1373,9 +1378,10 @@ void ui_show_recent_apps(void) {
                 // Close and purge from RAM
                 if (app_id == 0) ui_close_attendance_screen();
                 else if (app_id == 1) ui_close_enrollment_screen();
-                else if (app_id == 2) ui_close_reports_screen();
-                else if (app_id == 3) ui_close_settings_screen();
-                else if (app_id == 4) ui_close_file_manager_screen();
+                else if (app_id == 2) ui_close_user_manager();
+                else if (app_id == 3) ui_close_reports_screen();
+                else if (app_id == 4) ui_close_settings_screen();
+                else if (app_id == 5) ui_close_file_manager_screen();
             }
             
             if (s_recents_panel) {

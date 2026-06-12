@@ -34,7 +34,7 @@ void ui_close_user_manager(void) {
     if (!s_user_screen) return;
     s_user_screen = NULL;
     s_user_list = NULL;
-    ui_show_settings_screen();
+    ui_return_to_main();
 }
 
 static void create_user_manager_screen(void) {

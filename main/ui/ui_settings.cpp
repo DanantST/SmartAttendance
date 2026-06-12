@@ -36,7 +36,6 @@ static lv_obj_t* s_telegram_token_input = NULL;
 static lv_obj_t* s_telegram_chat_input = NULL;
 static lv_obj_t* s_api_endpoint_input = NULL;
 static lv_obj_t* s_about_label = NULL;
-static lv_obj_t* s_user_mgr_btn = NULL;
 static lv_obj_t* s_factory_reset_btn = NULL;
 static lv_obj_t* s_known_networks_btn = NULL;
 static lv_obj_t* s_wifi_status_label = NULL;
@@ -49,7 +48,6 @@ static void theme_switch_event(lv_event_t* e);
 static void wifi_connect_btn_event(lv_event_t* e);
 static void wifi_scan_btn_event(lv_event_t* e);
 static void wifi_scan_item_event_handler(lv_event_t* e);
-static void user_mgr_btn_event(lv_event_t* e);
 static void known_networks_btn_event(lv_event_t* e);
 static void factory_reset_btn_event(lv_event_t* e);
 static void factory_reset_confirm_cb(lv_event_t* e);
@@ -311,12 +309,8 @@ static void create_settings_screen(void) {
     lv_label_set_text(device_title, "Device Management");
     lv_obj_set_pos(device_title, 15, 10);
     
-    s_user_mgr_btn = ui_create_button(device_card, "User Management", 200, 40);
-    lv_obj_set_pos(s_user_mgr_btn, 15, 45);
-    lv_obj_add_event_cb(s_user_mgr_btn, user_mgr_btn_event, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t* change_pin_btn = ui_create_button(device_card, "Change PIN", 150, 40);
-    lv_obj_set_pos(change_pin_btn, 230, 45);
+    lv_obj_t* change_pin_btn = ui_create_button(device_card, "Change PIN", 180, 40);
+    lv_obj_set_pos(change_pin_btn, 15, 45);
     lv_obj_add_event_cb(change_pin_btn, [](lv_event_t* e) {
         ui_show_pin_prompt(true, [](bool ok) {
             if (!ok) return;
@@ -336,13 +330,8 @@ static void create_settings_screen(void) {
         });
     }, LV_EVENT_CLICKED, NULL);
     
-    s_factory_reset_btn = ui_create_button(device_card, "Factory Reset", 150, 40);
-    lv_obj_set_pos(s_factory_reset_btn, 15, 95);
-    lv_obj_set_style_bg_color(s_factory_reset_btn, lv_color_hex(0xCC3333), 0);
-    lv_obj_add_event_cb(s_factory_reset_btn, factory_reset_btn_event, LV_EVENT_CLICKED, NULL);
-
     lv_obj_t* enroll_admin_btn = ui_create_button(device_card, "Enroll Admin", 180, 40);
-    lv_obj_set_pos(enroll_admin_btn, 180, 95);
+    lv_obj_set_pos(enroll_admin_btn, 210, 45);
     lv_obj_set_style_bg_color(enroll_admin_btn, lv_color_hex(0x00A8FF), 0);
     lv_obj_add_event_cb(enroll_admin_btn, [](lv_event_t* e) {
         lv_obj_t* screen = lv_obj_get_screen((lv_obj_t*)lv_event_get_target(e));
@@ -352,6 +341,11 @@ static void create_settings_screen(void) {
         }
         ui_show_admin_setup_wizard();
     }, LV_EVENT_CLICKED, NULL);
+
+    s_factory_reset_btn = ui_create_button(device_card, "Factory Reset", 180, 40);
+    lv_obj_set_pos(s_factory_reset_btn, 15, 95);
+    lv_obj_set_style_bg_color(s_factory_reset_btn, lv_color_hex(0xCC3333), 0);
+    lv_obj_add_event_cb(s_factory_reset_btn, factory_reset_btn_event, LV_EVENT_CLICKED, NULL);
     
     /* About section */
     lv_obj_t* about_card = ui_create_card(content, DISPLAY_WIDTH - 40, 120);
@@ -485,10 +479,6 @@ static void wifi_scan_item_event_handler(lv_event_t* e) {
     
     lv_obj_delete_async(modal);
     lv_label_set_text(s_wifi_status_label, "SSID selected");
-}
-
-static void user_mgr_btn_event(lv_event_t* e) {
-    ui_show_user_manager();
 }
 
 static void known_networks_btn_event(lv_event_t* e) {

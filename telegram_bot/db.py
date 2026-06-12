@@ -5,7 +5,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "bot_data.db")
+DB_PATH = os.environ.get("DATABASE_PATH", os.path.join(os.path.dirname(__file__), "bot_data.db"))
 
 def init_db():
     """Initializes the database schema."""
