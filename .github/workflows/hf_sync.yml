@@ -22,6 +22,17 @@ jobs:
           cp -r telegram_bot deploy_dir/telegram_bot
           cp Dockerfile deploy_dir/Dockerfile
           
+          # Create Hugging Face metadata README.md
+          echo "---" > deploy_dir/README.md
+          echo "title: Smart Attendance Bot" >> deploy_dir/README.md
+          echo "emoji: 🚀" >> deploy_dir/README.md
+          echo "colorFrom: blue" >> deploy_dir/README.md
+          echo "colorTo: indigo" >> deploy_dir/README.md
+          echo "sdk: docker" >> deploy_dir/README.md
+          echo "app_port: 7860" >> deploy_dir/README.md
+          echo "pinned: false" >> deploy_dir/README.md
+          echo "---" >> deploy_dir/README.md
+          
           # Initialize clean repository and push
           cd deploy_dir
           git init
