@@ -1,0 +1,13 @@
+description: opencv-mobile prebuilt lib with picolibc.
+license: Apache-2.0
+targets:
+- esp32
+- esp32c2
+- esp32c3
+- esp32c5
+- esp32c6
+- esp32p4
+- esp32s2
+- esp32s3
+url: https://github.com/espressif/opencv-mobile
+version: 0.2.0

@@ -1,0 +1,302 @@
+## Elaborate Response: SD Card & Display/Touch Configurations That Worked
+
+Based on a thorough review of the conversation history and the official Elecrow documentation, here is the complete reference for both the SD card configuration used for face detection and the display/touch configuration that proved successful in Phase 1.
+
+---
+
+## 🧭 SD Card Configuration (for Face Detection)
+
+The SD card was configured using the **SDMMC 1‑bit mode** with the following pin assignments, as defined in `board_v1_0.h`:
+
+```c
+/* SD Card – SDMMC 1-bit mode */
+#define SDMMC_CLK_IO  36
+#define SDMMC_CMD_IO  35
+#define SDMMC_D0_IO   37
+```
+
+> **⚠️ Important Note:** The official Elecrow product page lists different SD card pins: **`SD1_CMD(IO44); SD1_SCK(IO43); SD1_D0(IO39)`**. These are the secondary SDMMC peripheral pins (`SDMMC_HOST_SLOT_1`), while the pins we used (35, 36, 37) correspond to `SDMMC_HOST_SLOT_0`. During debugging, the SD card mount **never successfully completed**—the serial log hung immediately after `gpio: GPIO[35]`, indicating a bus conflict. If you wish to restore SD card functionality, use the **official Elecrow pins** with `SDMMC_HOST_SLOT_1` (or switch to SPI mode with appropriate CS).
+
+The SD card mount function used was:
+
+```c
+static bool mount_sdcard(void) {
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.slot = SDMMC_HOST_SLOT_0;
+    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+
+    sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
+    slot_config.clk = SDMMC_CLK_IO;
+    slot_config.cmd = SDMMC_CMD_IO;
+    slot_config.d0  = SDMMC_D0_IO;
+    slot_config.width = 1;  // 1‑bit mode for stability
+
+    esp_vfs_fat_mount_config_t mount_config = {
+        .format_if_mount_failed = false,
+        .max_files = 5,
+        .allocation_unit_size = 16 * 1024
+    };
+
+    sdmmc_card_t *card;
+    esp_err_t ret = esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot_config,
+                                             &mount_config, &card);
+    // ...
+}
+```
+
+The face detection models (`human_face_detect_mnp_s8_v1.espdl` and `human_face_detect_msr_s8_v1.espdl`) were embedded directly in the firmware via the ESP-IDF component `espressif/human_face_detect`, so face **detection** worked without the SD card. The recognition database (`faces.db`) was expected at `/sdcard/faces.db` but never created due to the mount failure.
+
+---
+
+## 🖥️ Display Configuration (Phase 1 – Working)
+
+The display is a **7‑inch 1024 × 600 IPS panel** driven by an **EK79007 MIPI‑DSI bridge IC**. The working configuration was derived from the Elecrow reference code (`bsp_illuminate.c`) and verified step‑by‑step.
+
+### MIPI‑DSI Bus
+
+```c
+esp_lcd_dsi_bus_config_t bus_cfg = {
+    .bus_id             = 0,
+    .num_data_lanes     = 2,              // 2 data lanes
+    .phy_clk_src        = MIPI_DSI_PHY_CLK_SRC_DEFAULT,
+    .lane_bit_rate_mbps = 900,           // 900 Mbps per lane
+};
+ESP_ERROR_CHECK(esp_lcd_new_dsi_bus(&bus_cfg, &dsi_bus));
+```
+
+### DBI Command Interface
+
+```c
+esp_lcd_dbi_io_config_t dbi_cfg = {
+    .virtual_channel = 0,
+    .lcd_cmd_bits    = 8,
+    .lcd_param_bits  = 8,
+};
+ESP_ERROR_CHECK(esp_lcd_new_panel_io_dbi(dsi_bus, &dbi_cfg, &mipi_dbi_io));
+```
+
+### DPI Video Configuration
+
+```c
+lcd_color_rgb_pixel_format_t pixel_fmt = LCD_COLOR_PIXEL_FORMAT_RGB565;
+esp_lcd_dpi_panel_config_t dpi_cfg = {
+    .dpi_clk_src       = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
+    .dpi_clock_freq_mhz = 51,            // 51 MHz pixel clock
+    .virtual_channel   = 0,
+    .pixel_format      = pixel_fmt,
+    .num_fbs           = 1,
+    .video_timing      = {
+        .h_size            = 1024,       // LCD_HSYNC
+        .v_size            = 600,        // LCD_VSYNC
+        .hsync_back_porch  = 160,
+        .hsync_pulse_width = 70,
+        .hsync_front_porch = 160,
+        .vsync_back_porch  = 23,
+        .vsync_pulse_width = 10,
+        .vsync_front_porch = 12,
+    },
+    .flags.use_dma2d  = true,
+};
+```
+
+### EK79007 Panel Instantiation
+
+```c
+ek79007_vendor_config_t vendor = {
+    .mipi_config = {
+        .dsi_bus    = dsi_bus,
+        .dpi_config = &dpi_cfg,
+    },
+};
+esp_lcd_panel_dev_config_t panel_cfg = {
+    .reset_gpio_num   = -1,
+    .rgb_ele_order    = LCD_RGB_ELEMENT_ORDER_RGB,
+    .bits_per_pixel   = 16,             // RGB565
+    .vendor_config    = &vendor,
+};
+esp_lcd_panel_handle_t panel = NULL;
+ESP_ERROR_CHECK(esp_lcd_new_panel_ek79007(mipi_dbi_io, &panel_cfg, &panel));
+ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
+ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
+```
+
+### LVGL Display Attachment
+
+```c
+const lvgl_port_display_cfg_t disp_cfg = {
+    .io_handle      = mipi_dbi_io,
+    .panel_handle   = display,
+    .control_handle = display,
+    .buffer_size    = (1024 * 600 * ((16 + 7) / 8)),   // full frame buffer
+    .double_buffer  = true,
+    .hres           = 1024,
+    .vres           = 600,
+    .monochrome     = false,
+    .rotation       = { .swap_xy = false, .mirror_x = false, .mirror_y = false },
+    .flags          = {
+        .buff_dma    = false,
+        .buff_spiram = true,            // buffers in PSRAM
+        .sw_rotate   = true,
+        .swap_bytes  = false,           // critical for correct color!
+        .full_refresh = false,
+        .direct_mode  = false,
+    },
+};
+const lvgl_port_display_dsi_cfg_t dsi_cfg = {
+    .flags = { .avoid_tearing = false },
+};
+lv_display_t *lv_disp = lvgl_port_add_disp_dsi(&disp_cfg, &dsi_cfg);
+```
+
+> **The `swap_bytes = false` setting is critical.** With `swap_bytes = true`, the red and blue channels were swapped, producing thick green saturation. This was definitively resolved by setting it to `false`.
+
+### Backlight
+
+```c
+#define LCD_GPIO_BLIGHT  31
+#define BLIGHT_PWM_Hz    30000
+
+// PWM timer
+ledc_timer_config_t tim = {
+    .clk_cfg         = LEDC_USE_PLL_DIV_CLK,
+    .duty_resolution = LEDC_TIMER_11_BIT,
+    .freq_hz         = 30000,
+    .speed_mode      = LEDC_LOW_SPEED_MODE,
+    .timer_num       = LEDC_TIMER_0,
+};
+// PWM channel
+ledc_channel_config_t ch = {
+    .gpio_num   = 31,
+    .speed_mode = LEDC_LOW_SPEED_MODE,
+    .channel    = LEDC_CHANNEL_0,
+    .intr_type  = LEDC_INTR_DISABLE,
+    .timer_sel  = LEDC_TIMER_0,
+    .duty       = 0,
+    .hpoint     = 0,
+};
+```
+
+The backlight duty formula used was:
+```c
+uint32_t duty = (percent != 0) ? ((percent * 18) + 200) : 0;
+```
+
+---
+
+## 👆 Touch Configuration (Phase 1 – Working)
+
+The touch controller is a **Goodix GT911** on the shared I2C bus (`I2C_NUM_0`).
+
+### I2C Bus
+
+| Signal | GPIO |
+|--------|------|
+| SDA    | 45   |
+| SCL    | 46   |
+
+These pins are confirmed by the official Elecrow documentation. The I2C bus is shared with the camera SCCB interface (SC2336 sensor).
+
+### Manual Reset Sequence (The Key That Made Touch Work)
+
+The GT911 requires a specific power‑on sequence to latch its I2C address (0x5D). The **INT pin must be held low while RST is released**. This was implemented as a manual GPIO sequence *before* handing control to the driver:
+
+```c
+/* Manual reset – hold INT low while releasing RST to force I2C address 0x5D */
+gpio_set_direction(40, GPIO_MODE_OUTPUT);   // RST
+gpio_set_direction(42, GPIO_MODE_OUTPUT);   // INT
+gpio_set_level(40, 0);                // RST low
+gpio_set_level(42, 0);                // INT low
+vTaskDelay(pdMS_TO_TICKS(1));         // hold for >100 µs
+gpio_set_level(40, 1);                // release RST while INT stays low
+vTaskDelay(pdMS_TO_TICKS(50));        // wait for chip to latch I2C address (5‑50 ms)
+gpio_set_level(42, 1);                // release INT → chip now at address 0x5D
+vTaskDelay(pdMS_TO_TICKS(20));        // let chip stabilise
+```
+
+### GT911 Driver Configuration
+
+After the manual reset, the driver was initialised with **RST and INT both set to `GPIO_NUM_NC`** (since they were already handled):
+
+```c
+esp_lcd_panel_io_i2c_config_t io_cfg = {
+    .dev_addr             = 0x5D,          // primary I2C address
+    .control_phase_bytes  = 1,
+    .dc_bit_offset        = 0,
+    .lcd_cmd_bits         = 16,            // GT911 requires 16‑bit commands
+    .lcd_param_bits       = 16,
+    .flags.dc_low_on_data = 0,
+    .flags.disable_control_phase = 1,
+    // scl_speed_hz is LEFT UNSET (default) – the legacy I2C driver rejects it
+};
+
+const esp_lcd_touch_config_t tp_cfg = {
+    .x_max = 1024,
+    .y_max = 600,
+    .rst_gpio_num = GPIO_NUM_NC,           // already handled manually
+    .int_gpio_num = GPIO_NUM_NC,           // already handled manually
+    .levels = { .reset = 0, .interrupt = 0 },
+    .flags  = {
+        .swap_xy  = 0,
+        .mirror_x = 1,                     // mirror X axis
+        .mirror_y = 1,                     // mirror Y axis
+    },
+};
+ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io, &tp_cfg, &tp));
+```
+
+### GT911 Wake‑Up Sequence
+
+```c
+vTaskDelay(pdMS_TO_TICKS(1000));           // wait for full boot
+esp_lcd_touch_exit_sleep(tp);              // wake the chip from sleep mode
+vTaskDelay(pdMS_TO_TICKS(10));             // stabilise after wake
+```
+
+This wake‑up sequence is essential: without it, the GT911 remains in sleep mode and never generates touch interrupts.
+
+### LVGL Touch Attachment
+
+```c
+const lvgl_port_touch_cfg_t touch_cfg = {
+    .disp   = lv_disp,
+    .handle = touch_handle,
+};
+lvgl_port_add_touch(&touch_cfg);
+```
+
+---
+
+## 📊 Summary Table: All Critical Pins & Settings
+
+| Peripheral     | Signal | GPIO  | Notes |
+|---------------|--------|-------|-------|
+| **Display**   | MIPI‑DSI | (internal) | 2 lanes, 900 Mbps, DPI clock 51 MHz |
+| **Backlight** | PWM    | 31    | 30 kHz, LEDC timer 0, channel 0 |
+| **Touch I2C** | SDA    | 45    | Shared with camera SCCB |
+|               | SCL    | 46    | |
+| **Touch RST** | RST    | 40    | Manual reset: hold INT low while releasing RST |
+| **Touch INT** | INT    | 42    | Set to `GPIO_NUM_NC` in driver after manual reset |
+| **Camera SCCB**| SDA   | 12    | Separate I2C bus (`I2C_NUM_1`) for SC2336 |
+|               | SCL    | 13    | |
+| **SD Card**   | CLK    | 36    | ⚠️ May need to use IO43/44/39 per official docs |
+|               | CMD    | 35    | |
+|               | D0     | 37    | |
+
+---
+
+## 🔑 Why the Touch Stopped Working in Later Phases
+
+When the project grew to include face detection and recognition, two changes broke the touch:
+
+1. **The INT pin was given to the GT911 driver** (`int_gpio_num = 42`) after the manual reset. The driver then reconfigured the GPIO, inadvertently disabling the interrupt that had been set up correctly by the manual sequence.
+
+2. **The SD card mount attempt hung the main task** before the touch initialisation could complete. Since `mount_sdcard()` was called before `init_touch()`, and the SD card bus was misconfigured, the entire system stalled.
+
+The proven working approach is:
+- **Do not give the driver RST or INT pins** (set both to `GPIO_NUM_NC`).
+- **Perform the manual reset sequence** exactly as shown above.
+- **Mount the SD card AFTER touch initialisation**, or use the official Elecrow SD card pins (IO43, IO44, IO39) with `SDMMC_HOST_SLOT_1`.
+
+---
+
+This comprehensive reference should enable you to restore touch functionality and correctly configure the SD card for the face recognition database. If you need me to provide a complete, integrated `main.c` that merges the working display, touch, and face detection without the SD card hang, just ask.

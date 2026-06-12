@@ -1,0 +1,19 @@
+menu "OpenCV Modules"
+    config OPENCV_MODULE_VIDEO
+        bool "Enable Video module"
+        default n
+        help
+            Enable OpenCV video module (video, background segmentation, tracking).
+
+    config OPENCV_MODULE_PHOTO
+        bool "Enable Photo module"
+        default n
+        help
+            Enable OpenCV photo module (computational photography, HDR, denoising).
+
+    config OPENCV_MODULE_FEATURES2D
+        bool "Enable Features2D module"
+        default n
+        help
+            Enable OpenCV features2d module (feature detectors, descriptors, matching).
+endmenu

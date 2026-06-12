@@ -1,0 +1,143 @@
+The following document summarizes every rule, discovery, configuration, and mistake from the SmartAttendance project on the Elecrow CrowPanel ESP32‑P4 Advanced 7" v1.0. Keep it as a permanent reference.
+
+SmartAttendance Project – Knowledge Base
+🔧 Development Rules (Established During the Project)
+No stubs – Provide complete, compilable code.
+
+Use only compatible libraries and programs – Verify component targets (ESP32‑P4) before adding dependencies.
+
+Be clear and detailed with instructions – Every file path and command must be explicit.
+
+No assumptions – Pause and confirm any query before proceeding.
+
+Learn from progress – Do not repeat past mistakes.
+
+No guesswork – Confirm any uncertainty from verified sources (official docs, GitHub, etc.).
+
+Always prefer idf.py fullclean + rebuild when linking errors appear.
+
+🧱 Hardware Specifics & Discoveries (Elecrow CrowPanel v1.0)
+Backlight
+GPIO31 is the backlight PWM pin (not PCA9557 on this board revision).
+
+PWM frequency 30 kHz, resolution 11‑bit.
+
+Brightness formula: duty = (percent != 0) ? ((percent * 18) + 200) : 0.
+
+Display (MIPI‑DSI, EK79007 bridge)
+Lane bit rate 900 Mbps, 2 data lanes.
+
+DPI clock 51 MHz, video timing: 1024×600, porch values from Elecrow reference.
+
+Must pass ek79007_vendor_config_t with dpi_config inside mipi_config.
+
+Do not call esp_lcd_panel_disp_on_off – not supported by EK79007.
+
+LVGL 9 settings: swap_bytes = false, buff_spiram = true, double_buffer = true.
+
+Touch (GT911)
+I2C address 0x5D (requires INT pin held low during RST release to select this address).
+
+Pins: RST=40, INT=42, SDA=45, SCL=46.
+
+Known issue: when int_gpio_num = GPIO_NUM_NC, the driver does not receive touch events.
+
+Currently unresolved: even with INT pin given to driver, touch events do not reach LVGL. Suspect missing interrupt handling or mirror flag mismatch. Use auto‑enrollment as workaround.
+
+Camera (SC2336, 24‑pin MIPI‑CSI)
+Label on module: AS‑AG638A32 M1‑25 → sensor SC2336.
+
+SCCB I2C address 0x36 (alternate from 0x30).
+
+Bayer order: BGGR (native). Do not enable HMIRROR unless you switch ISP to GBRG.
+
+Best exposure/gain settings (indoor):
+
+exposure_us = 15000, exposure_val = 1100, gain = 4000 → bright, minimal rolling shutter.
+
+Format: MIPI_2lane_24Minput_RAW8_1280x720_30fps (the only supported format).
+
+Must disable HMIRROR and VFLIP to keep Bayer BGGR.
+
+PSRAM
+ESP32‑P4 uses Hex mode PSRAM (16‑line).
+
+Speed must be 200 MHz; enable CONFIG_IDF_EXPERIMENTAL_FEATURES=y to unlock 200 MHz option in menuconfig.
+
+Required sdkconfig symbols:
+
+text
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_RODATA=y
+SD Card
+SDMMC 1‑bit mode pins: CLK=36, CMD=35, D0=37.
+
+Mount point: /sdcard.
+
+Must add fatfs to main/CMakeLists.txt REQUIRES.
+
+⚠️ Critical Mistakes to Avoid
+Forgetting LDO3 (2.5 V) and LDO4 (3.3 V) – Display won't power up.
+
+Not enabling PSRAM or using wrong mode/clock → no memory for frame buffer or underrun.
+
+Using esp_cam_ctlr_receive in a loop → blocks CSI callbacks and causes queue‑full errors. Use semaphore‑callback architecture (no receive).
+
+Calling LVGL functions from a different core without proper locking → watchdog triggers / random crashes.
+
+Large local arrays in tasks → stack overflow (e.g., uint8_t crop[112*112*3] inside a task with 8192 stack → crash). Use heap allocation (PSRAM).
+
+Missing fatfs dependency when including esp_vfs_fat.h.
+
+Forgetting to mount SD card → database file not found; recognition fails.
+
+Format specifier mismatches – use PRIu32 for uint32_t, cast to int for %d.
+
+Using C++ lambdas in C files – compile error. Use plain C callbacks.
+
+Partition table too small for large firmware – increase factory partition to 6 MB and flash size to 16 MB.
+
+Conflicting I2C drivers (old driver/i2c.h vs new i2c_master) – set CONFIG_I2C_SKIP_LEGACY_CONFLICT_CHECK=y.
+
+📝 Essential Configurations & Calibrations
+sdkconfig mandatory additions
+text
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_LCD_DSI_PANEL_IO=y
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_HUMAN_FACE_RECOGNITION_MODEL_LOCATION=2
+CONFIG_HUMAN_FACE_RECOGNITION_MODEL_SDCARD_DIR="models/p4"
+CONFIG_HUMAN_FACE_RECOGNITION_DEFAULT_MODEL=0
+CONFIG_BSP_SD_MOUNT_POINT="/sdcard"
+Partition table (partitions_singleapp.csv)
+text
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     ,        0x6000,
+phy_init, data, phy,     ,        0x1000,
+factory,  app,  factory,  ,       0x600000,
+Camera Exposure/Gain (indoor baseline)
+text
+exposure_us = 15000
+exposure_val = 1100
+gain = 4000
+HMIRROR = 0, VFLIP = 0
+ISP Bayer = BGGR
+LVGL Display Config (Critical)
+text
+swap_bytes = false
+buff_spiram = true
+sw_rotate = true
+double_buffer = true
+Face Detection/Recognition Model Files on SD Card
+text
+/sdcard/models/p4/  (human_face_detect_msr_s8_v1.espdl, human_face_detect_mnp_s8_v1.espdl, mfn_s8_v1.espdl)

@@ -1,0 +1,26 @@
+menu "SmartAttendance Camera Configuration"
+
+    choice SMARTATTENDANCE_CAMERA_SENSOR
+        prompt "Camera sensor type"
+        default CAMERA_SENSOR_OV2640
+        help
+            Select the camera sensor connected to the board.
+            OV2640 uses the DVP (parallel) interface via esp_camera.
+            OV5647 uses the MIPI-CSI 2-lane interface via esp_driver_cam.
+
+        config CAMERA_SENSOR_OV2640
+            bool "OV2640 (DVP / parallel interface)"
+            help
+                Use the OV2640 camera module via the legacy DVP interface.
+                This uses the esp_camera component.
+
+        config CAMERA_SENSOR_OV5647
+            bool "OV5647 (MIPI-CSI 2-lane interface, ESP32-P4 only)"
+            depends on IDF_TARGET_ESP32P4
+            help
+                Use the OV5647 MIPI-CSI camera module.
+                Requires ESP32-P4 and the esp_driver_cam + esp_cam_sensor components.
+
+    endchoice
+
+endmenu

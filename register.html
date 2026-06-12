@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartAttendance - Remote Student Registration</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --card-bg: rgba(22, 30, 49, 0.7);
+            --primary: #3b82f6;
+            --primary-glow: rgba(59, 130, 246, 0.4);
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.4);
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: rgba(255, 255, 255, 0.08);
+            --border-focus: rgba(59, 130, 246, 0.6);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow-x: hidden;
+            position: relative;
+            padding: 20px;
+        }
+
+        /* Decorative ambient glow background */
+        body::before {
+            content: '';
+            position: absolute;
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle, var(--primary-glow) 0%, transparent 70%);
+            top: -100px;
+            left: -100px;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        body::after {
+            content: '';
+            position: absolute;
+            width: 500px;
+            height: 500px;
+            background: radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, transparent 70%);
+            bottom: -150px;
+            right: -150px;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 480px;
+            background: var(--card-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 32px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            z-index: 1;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 28px;
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 16px;
+        }
+
+        .logo-icon {
+            width: 48px;
+            height: 48px;
+            fill: none;
+            stroke: var(--primary);
+            stroke-width: 2;
+            filter: drop-shadow(0 0 8px var(--primary-glow));
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+            margin-bottom: 6px;
+        }
+
+        .subtitle {
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+
+        /* Card Section Switching */
+        .section {
+            display: none;
+            animation: fadeIn 0.4s ease forwards;
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Info Display */
+        .info-box {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 24px;
+            font-size: 14px;
+            line-height: 1.5;
+            color: var(--text-muted);
+        }
+
+        .info-box strong {
+            color: var(--text-main);
+        }
+
+        /* Form Controls */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px 16px;
+            font-size: 15px;
+            color: var(--text-main);
+            font-family: inherit;
+            transition: all 0.2s ease;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        /* Buttons */
+        .btn {
+            width: 100%;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 14px;
+            padding: 16px;
+            font-size: 16px;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+            background: #2563eb;
+        }
+
+        .btn:active {
+            transform: translateY(1px);
+        }
+
+        .btn:disabled {
+            background: var(--text-muted);
+            box-shadow: none;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        /* Connect / Status Screen */
+        .status-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 30px 0;
+            text-align: center;
+        }
+
+        .spinner-outer {
+            position: relative;
+            width: 100px;
+            height: 100px;
+            margin-bottom: 24px;
+        }
+
+        .pulse-ring {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: var(--primary-glow);
+            animation: pulse 2s infinite ease-in-out;
+            z-index: 1;
+        }
+
+        .spinner-icon {
+            position: absolute;
+            top: 25px;
+            left: 25px;
+            width: 50px;
+            height: 50px;
+            fill: none;
+            stroke: var(--primary);
+            stroke-width: 2.5;
+            z-index: 2;
+        }
+
+        .spinner-icon.connected {
+            stroke: var(--success);
+            filter: drop-shadow(0 0 8px var(--success-glow));
+        }
+
+        .pulse-ring.success-pulse {
+            background: var(--success-glow);
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            50% { transform: scale(1.2); opacity: 0; }
+            100% { transform: scale(0.8); opacity: 0.5; }
+        }
+
+        .status-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .status-desc {
+            font-size: 14px;
+            color: var(--text-muted);
+            max-width: 280px;
+            margin: 0 auto;
+        }
+
+        /* Queued/Success details list */
+        .student-details {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 20px;
+            text-align: left;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .detail-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .detail-label {
+            color: var(--text-muted);
+        }
+
+        .detail-val {
+            font-weight: 500;
+        }
+
+        /* Error Banner */
+        .error-banner {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--danger);
+            border-radius: 12px;
+            color: #fca5a5;
+            padding: 12px;
+            font-size: 14px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        /* Footer info */
+        .footer-note {
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 24px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container" id="mainContainer">
+        <div class="header">
+            <div class="logo-container">
+                <svg class="logo-icon" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 6v6l4 2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+            <h1>SmartAttendance</h1>
+            <p class="subtitle">Enrollment Portal</p>
+        </div>
+
+        <div class="error-banner" id="errorBanner"></div>
+
+        <!-- STEP 1: Search & Connect -->
+        <div class="section active" id="secConnect">
+            <div class="info-box">
+                Before scanning, make sure <strong>BLE Remote Enrollment</strong> screen is open on the CrowPanel device. It will display the active Bluetooth MAC address and a temporary PIN.
+            </div>
+            <button class="btn" id="btnConnect">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+                    <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                    <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+                    <line x1="12" y1="20" x2="12.01" y2="20"/>
+                </svg>
+                Scan & Connect Device
+            </button>
+            <div class="footer-note">
+                Requires Google Chrome or a Web Bluetooth compatible browser on Android.
+            </div>
+        </div>
+
+        <!-- STEP 2: Connection Status & PIN Auth -->
+        <div class="section" id="secStatus">
+            <div class="status-container">
+                <div class="spinner-outer">
+                    <div class="pulse-ring" id="statusPulse"></div>
+                    <svg class="spinner-icon" id="statusIcon" viewBox="0 0 24 24">
+                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <div class="status-title" id="statusTitle">Connecting...</div>
+                <p class="status-desc" id="statusDesc">Establishing contact with the attendance scanner. Please wait.</p>
+            </div>
+
+            <!-- PIN authentication fields -->
+            <div id="pinForm" style="display: none; margin-top: 10px;">
+                <div class="form-group">
+                    <label for="inputPin">6-Digit Device PIN</label>
+                    <input type="text" id="inputPin" maxlength="6" placeholder="Enter PIN from device screen" inputmode="numeric" pattern="[0-9]*">
+                </div>
+                <button class="btn" id="btnVerifyPin" disabled>Verify PIN & Proceed</button>
+            </div>
+        </div>
+
+        <!-- STEP 3: Student Registration Form -->
+        <div class="section" id="secForm">
+            <div class="form-group">
+                <label for="inputName">Full Name</label>
+                <input type="text" id="inputName" placeholder="Enter full name" maxlength="32">
+            </div>
+            <div class="form-group">
+                <label for="inputId">Student ID / Roll Number</label>
+                <input type="text" id="inputId" placeholder="Enter student ID" maxlength="16">
+            </div>
+            <div class="form-group">
+                <label for="inputDept">Department</label>
+                <input type="text" id="inputDept" placeholder="e.g. Computer Science, Mechanical" maxlength="32">
+            </div>
+            <button class="btn" id="btnRegister">Submit to Device</button>
+        </div>
+
+        <!-- STEP 4: Success / Queued State -->
+        <div class="section" id="secSuccess">
+            <div class="status-container">
+                <div class="spinner-outer">
+                    <div class="pulse-ring success-pulse"></div>
+                    <svg class="spinner-icon connected" viewBox="0 0 24 24">
+                        <polyline points="20 6 9 17 4 12" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <div class="status-title" id="successTitle">Added to Queue!</div>
+                <p class="status-desc" id="successDesc">Please look at the Attendance Device. The admin will capture your face template next.</p>
+                
+                <div class="student-details" id="successDetails">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+            <button class="btn" id="btnBackToHome" style="margin-top: 10px;">Register Another Student</button>
+        </div>
+
+    </div>
+
+    <script>
+        // BLE Specs
+        const SERVICE_UUID         = '0000aaaa-0000-1000-8000-00805f9b34fb';
+        const CHAR_PIN_UUID        = '0000bbb0-0000-1000-8000-00805f9b34fb';
+        const CHAR_NAME_UUID       = '0000bbb1-0000-1000-8000-00805f9b34fb';
+        const CHAR_STUDENT_ID_UUID = '0000bbb2-0000-1000-8000-00805f9b34fb';
+        const CHAR_DEPT_UUID       = '0000bbb3-0000-1000-8000-00805f9b34fb';
+        const CHAR_STATUS_UUID     = '0000bbb4-0000-1000-8000-00805f9b34fb';
+
+        // DOM elements
+        const btnConnect = document.getElementById('btnConnect');
+        const errorBanner = document.getElementById('errorBanner');
+        const secConnect = document.getElementById('secConnect');
+        const secStatus = document.getElementById('secStatus');
+        const secForm = document.getElementById('secForm');
+        const secSuccess = document.getElementById('secSuccess');
+
+        const statusTitle = document.getElementById('statusTitle');
+        const statusDesc = document.getElementById('statusDesc');
+        const statusIcon = document.getElementById('statusIcon');
+        const statusPulse = document.getElementById('statusPulse');
+
+        const pinForm = document.getElementById('pinForm');
+        const inputPin = document.getElementById('inputPin');
+        const btnVerifyPin = document.getElementById('btnVerifyPin');
+
+        const inputName = document.getElementById('inputName');
+        const inputId = document.getElementById('inputId');
+        const inputDept = document.getElementById('inputDept');
+        const btnRegister = document.getElementById('btnRegister');
+
+        const successTitle = document.getElementById('successTitle');
+        const successDesc = document.getElementById('successDesc');
+        const successDetails = document.getElementById('successDetails');
+        const btnBackToHome = document.getElementById('btnBackToHome');
+
+        // Bluetooth Variables
+        let gattServer = null;
+        let bleService = null;
+        let charPin = null;
+        let charName = null;
+        let charId = null;
+        let charDept = null;
+        let charStatus = null;
+
+        // UI Helpers
+        function showSection(section) {
+            document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active'));
+            section.classList.add('active');
+        }
+
+        function showError(msg) {
+            errorBanner.textContent = msg;
+            errorBanner.style.display = 'block';
+            setTimeout(() => {
+                errorBanner.style.scrollIntoView({ behavior: 'smooth' });
+            }, 50);
+        }
+
+        function clearError() {
+            errorBanner.style.display = 'none';
+            errorBanner.textContent = '';
+        }
+
+        // Event: PIN field input length validation
+        inputPin.addEventListener('input', () => {
+            btnVerifyPin.disabled = inputPin.value.length !== 6;
+        });
+
+        // BLE Scanning & Connection
+        btnConnect.addEventListener('click', async () => {
+            clearError();
+            if (!navigator.bluetooth) {
+                showError("Web Bluetooth is not supported on this browser or platform. Please use Google Chrome on Android.");
+                return;
+            }
+
+            try {
+                showSection(secStatus);
+                statusTitle.textContent = "Requesting Device...";
+                statusDesc.textContent = "Select 'Attendance' from the Bluetooth device dialog.";
+
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'Attendance' }],
+                    optionalServices: [SERVICE_UUID]
+                });
+
+                device.addEventListener('gattserverdisconnected', onDisconnected);
+
+                statusTitle.textContent = "Connecting...";
+                statusDesc.textContent = "Connecting to the GATT server on " + device.name;
+
+                gattServer = await device.gatt.connect();
+                
+                statusTitle.textContent = "Discovering Services...";
+                bleService = await gattServer.getPrimaryService(SERVICE_UUID);
+
+                statusTitle.textContent = "Configuring Characteristics...";
+                charPin = await bleService.getCharacteristic(CHAR_PIN_UUID);
+                charName = await bleService.getCharacteristic(CHAR_NAME_UUID);
+                charId = await bleService.getCharacteristic(CHAR_STUDENT_ID_UUID);
+                charDept = await bleService.getCharacteristic(CHAR_DEPT_UUID);
+                charStatus = await bleService.getCharacteristic(CHAR_STATUS_UUID);
+
+                // Start notifications for live status updates from ESP32
+                await charStatus.startNotifications();
+                charStatus.addEventListener('characteristicvaluechanged', onStatusNotification);
+
+                // Connection successful, prompt for PIN Verification
+                statusTitle.textContent = "Device Paired Successfully";
+                statusDesc.textContent = "Please enter the 6-digit PIN currently displayed on the Attendance device to authenticate.";
+                statusIcon.innerHTML = `<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke-linecap="round" stroke-linejoin="round"/>`;
+                statusIcon.classList.add('connected');
+                statusPulse.style.display = 'none';
+
+                pinForm.style.display = 'block';
+                inputPin.focus();
+
+            } catch (err) {
+                console.error(err);
+                showSection(secConnect);
+                if (err.name !== 'NotFoundError') {
+                    showError("Connection failed: " + err.message);
+                }
+            }
+        });
+
+        // PIN Verification
+        btnVerifyPin.addEventListener('click', async () => {
+            clearError();
+            const pinVal = inputPin.value.trim();
+            if (pinVal.length !== 6) return;
+
+            btnVerifyPin.disabled = true;
+            btnVerifyPin.textContent = "Authenticating...";
+
+            try {
+                const encoder = new TextEncoder();
+                // Write PIN to CHAR_PIN_UUID
+                await charPin.writeValueWithResponse(encoder.encode(pinVal));
+                
+                // If the write succeeds without throwing an error, the PIN matches.
+                // Reset form fields
+                inputName.value = '';
+                inputId.value = '';
+                inputDept.value = '';
+                
+                clearError();
+                showSection(secForm);
+            } catch (err) {
+                console.error(err);
+                btnVerifyPin.disabled = false;
+                btnVerifyPin.textContent = "Verify PIN & Proceed";
+                showError("Authentication failed: Check PIN on screen and try again.");
+            }
+        });
+
+        // Data Submission to Device
+        btnRegister.addEventListener('click', async () => {
+            clearError();
+            const name = inputName.value.trim();
+            const id = inputId.value.trim();
+            const dept = inputDept.value.trim();
+
+            if (!name || !id || !dept) {
+                showError("All fields are required for enrollment.");
+                return;
+            }
+
+            btnRegister.disabled = true;
+            btnRegister.textContent = "Submitting Data...";
+
+            try {
+                const encoder = new TextEncoder();
+
+                // Note: The device registers a student queue entry ONLY after ALL three parameters
+                // (Name, ID, Department) have been successfully written.
+                
+                // Write Name
+                statusTitle.textContent = "Sending Name...";
+                await charName.writeValueWithResponse(encoder.encode(name));
+                
+                // Write ID
+                statusTitle.textContent = "Sending Student ID...";
+                await charId.writeValueWithResponse(encoder.encode(id));
+                
+                // Write Department
+                statusTitle.textContent = "Sending Department...";
+                await charDept.writeValueWithResponse(encoder.encode(dept));
+                
+                // Change UI to success waiting state
+                successTitle.textContent = "Submitted successfully";
+                successDesc.textContent = "Student details transmitted to device. Please stand in front of the camera when the admin starts the scan.";
+                successDetails.innerHTML = `
+                    <div class="detail-row">
+                        <span class="detail-label">Name:</span>
+                        <span class="detail-val">${name}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Student ID:</span>
+                        <span class="detail-val">${id}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Department:</span>
+                        <span class="detail-val">${dept}</span>
+                    </div>
+                `;
+                
+                showSection(secSuccess);
+            } catch (err) {
+                console.error(err);
+                btnRegister.disabled = false;
+                btnRegister.textContent = "Submit to Device";
+                showError("Submission failed: " + err.message);
+            }
+        });
+
+        // Live notification event handler
+        function onStatusNotification(event) {
+            const rawValue = event.target.value;
+            const decoder = new TextDecoder();
+            const dataStr = decoder.decode(rawValue);
+            
+            // Value comes in as "status_code:message"
+            const separatorIdx = dataStr.indexOf(':');
+            if (separatorIdx === -1) return;
+
+            const code = parseInt(dataStr.slice(0, separatorIdx), 10);
+            const message = dataStr.slice(separatorIdx + 1);
+
+            console.log("Status code:", code, "Msg:", message);
+
+            // Update UI feedback based on ESP32 enrollment status
+            // Status codes match C enum: 
+            // 0: QUEUED, 1: CAPTURING, 2: SUCCESS, 3: FAILED
+            if (code === 0) {
+                successTitle.textContent = "Queued for Capture";
+                successDesc.textContent = "Admin has received your details. Please look at the device camera screen to enroll your face.";
+            } else if (code === 1) {
+                successTitle.textContent = "Enrolling Face...";
+                successDesc.textContent = message || "Please look straight at the camera. Turning/tilting head as prompted by the admin.";
+            } else if (code === 2) {
+                successTitle.textContent = "Enrollment Complete!";
+                successDesc.textContent = message || "Your face template has been successfully saved to the database. You are now registered!";
+                btnRegister.disabled = false;
+                btnRegister.textContent = "Submit to Device";
+            } else if (code === 3) {
+                successTitle.textContent = "Enrollment Failed";
+                successDesc.textContent = message || "An error occurred during face scan. Please try again.";
+                btnRegister.disabled = false;
+                btnRegister.textContent = "Submit to Device";
+            }
+        }
+
+        // Connection loss cleanups
+        function onDisconnected() {
+            gattServer = null;
+            bleService = null;
+            charPin = null;
+            charName = null;
+            charId = null;
+            charDept = null;
+            charStatus = null;
+            
+            btnVerifyPin.disabled = false;
+            btnVerifyPin.textContent = "Verify PIN & Proceed";
+            btnRegister.disabled = false;
+            btnRegister.textContent = "Submit to Device";
+            pinForm.style.display = 'none';
+            statusIcon.innerHTML = `<path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" stroke-linecap="round" stroke-linejoin="round"/>`;
+            statusIcon.classList.remove('connected');
+            statusPulse.style.display = 'block';
+
+            showSection(secConnect);
+            showError("Bluetooth disconnected. Please reconnect.");
+        }
+
+        btnBackToHome.addEventListener('click', () => {
+            showSection(secConnect);
+            clearError();
+        });
+    </script>
+</body>
+</html>

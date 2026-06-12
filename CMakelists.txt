@@ -1,0 +1,16 @@
+# Top-level CMakeLists.txt for Smart Attendance System
+cmake_minimum_required(VERSION 3.16)
+
+# Include necessary components
+set(EXTRA_COMPONENT_DIRS 
+    components/esp-dl/esp-dl
+    components/esp-dl/models/human_face_detect
+    components/esp-dl/models/human_face_recognition
+    components/lvgl
+)
+
+# Include the ESP-IDF project infrastructure
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+
+# Define the project name
+project(SmartAttendance)

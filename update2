@@ -1,0 +1,131 @@
+## SD Card Configuration (from Phase 4)
+
+The SD card was mounted in `main.c` using the **SDMMC 1‑bit mode** with the following verified pins for your CrowPanel v1.0 board:
+
+| Parameter | Value |
+|-----------|-------|
+| **CLK** | GPIO 36 |
+| **CMD** | GPIO 35 |
+| **D0** | GPIO 37 |
+| **Bus width** | 1‑bit |
+| **Mount point** | `/sdcard` |
+| **Filesystem** | FAT32 (no auto‑format) |
+
+The exact code used:
+
+```c
+#define SDMMC_CLK_IO  36
+#define SDMMC_CMD_IO  35
+#define SDMMC_D0_IO   37
+
+static bool mount_sdcard(void) {
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.slot = SDMMC_HOST_SLOT_0;
+    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+
+    sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
+    slot_config.clk = SDMMC_CLK_IO;
+    slot_config.cmd = SDMMC_CMD_IO;
+    slot_config.d0  = SDMMC_D0_IO;
+    slot_config.width = 1;
+
+    esp_vfs_fat_mount_config_t mount_config = {
+        .format_if_mount_failed = false,
+        .max_files = 5,
+        .allocation_unit_size = 16 * 1024
+    };
+
+    sdmmc_card_t *card;
+    esp_err_t ret = esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot_config,
+                                             &mount_config, &card);
+    // ...
+}
+```
+
+The model files were placed in `/sdcard/models/p4/` and the database path was `/sdcard/faces.db`.
+
+---
+
+## Touchscreen Configuration (Phase 1 – the *only* version that worked)
+
+The touchscreen **only worked during Phase 1** with the following exact configuration. Every subsequent attempt to change it broke touch input.
+
+### GT911 Pin Mapping
+
+| Pin | GPIO |
+|-----|------|
+| **I2C SDA** | GPIO 45 |
+| **I2C SCL** | GPIO 46 |
+| **RST** | GPIO 40 |
+| **INT** | GPIO 42 |
+| **I2C address** | 0x5D |
+
+### Working Initialization Code (Phase 1)
+
+```c
+static esp_lcd_touch_handle_t init_touch(void)
+{
+    i2c_config_t i2c_conf = {
+        .mode          = I2C_MODE_MASTER,
+        .sda_io_num    = 45,
+        .scl_io_num    = 46,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = 100000,
+    };
+    ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_0, &i2c_conf));
+    ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0));
+
+    /* Manual reset – hold RST low, then release while INT is low */
+    gpio_set_direction(40, GPIO_MODE_OUTPUT);
+    gpio_set_direction(42, GPIO_MODE_OUTPUT);
+    gpio_set_level(40, 0);                // RST low
+    gpio_set_level(42, 0);                // INT low
+    vTaskDelay(pdMS_TO_TICKS(1));
+    gpio_set_level(40, 1);                // release RST while INT stays low
+    vTaskDelay(pdMS_TO_TICKS(50));
+    gpio_set_level(42, 1);                // release INT → chip at address 0x5D
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    esp_lcd_panel_io_i2c_config_t io_cfg = {
+        .dev_addr             = 0x5D,
+        .control_phase_bytes  = 1,
+        .dc_bit_offset        = 0,
+        .lcd_cmd_bits         = 16,
+        .lcd_param_bits       = 16,
+        .flags.dc_low_on_data = 0,
+        .flags.disable_control_phase = 1,
+    };
+    esp_lcd_panel_io_handle_t tp_io = NULL;
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c((esp_lcd_i2c_bus_handle_t)I2C_NUM_0, &io_cfg, &tp_io));
+
+    esp_lcd_touch_handle_t tp = NULL;
+    const esp_lcd_touch_config_t tp_cfg = {
+        .x_max = 1024,
+        .y_max = 600,
+        .rst_gpio_num = GPIO_NUM_NC,    // already handled
+        .int_gpio_num = GPIO_NUM_NC,    // already handled
+        .levels = { .reset = 0, .interrupt = 0 },
+        .flags  = { .swap_xy = 0, .mirror_x = 1, .mirror_y = 1 },
+    };
+    ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io, &tp_cfg, &tp));
+
+    /* Wake-up sequence */
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_lcd_touch_exit_sleep(tp);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    return tp;
+}
+```
+
+### Key Points for Touch to Work
+
+1. **Manual reset** (GPIOs 40/42) must be done **before** calling `esp_lcd_touch_new_i2c_gt911`.
+2. **`lcd_cmd_bits` and `lcd_param_bits` must be 16** — this was the critical fix discovered during Phase 1 debugging.
+3. **RST and INT must be set to `GPIO_NUM_NC`** in the driver config because they were already handled manually.
+4. **Wake‑up sequence**: 1 second delay + `esp_lcd_touch_exit_sleep()` is mandatory for the GT911.
+
+---
+
+If you want to restore touch functionality, use the **exact Phase 1 `init_touch()` code above** — it was the only version confirmed working in this project. The later modifications to give the driver control of RST/INT broke it.
