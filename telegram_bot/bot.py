@@ -646,7 +646,6 @@ async def main():
     await bot_app.start()
     
     # Check if we should use Webhook (Render/Koyeb) or Polling (Local Dev)
-    import os
     public_url = os.environ.get("PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL")
     if public_url:
         logger.info(f"Setting Telegram webhook to: {public_url}/telegram_webhook")
