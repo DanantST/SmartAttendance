@@ -1,71 +1,74 @@
-# Cloud Deployment Guide (Koyeb & Hugging Face Spaces)
+# Cloud Deployment Guide (Hugging Face Spaces)
 
-This guide provides step-by-step instructions for hosting the cloud Telegram bot backend.
+This guide provides step-by-step instructions for deploying the cloud Telegram bot backend on **Hugging Face Spaces** (Docker SDK) for free, with no credit card required.
 
-You can choose between two free hosting targets:
-1. **Koyeb (Recommended):** 100% free (no credit card required on the Hobby plan), avoids Telegram's IP blocklists, and runs the bot alongside the FastAPI web server.
-2. **Hugging Face Spaces:** Free (no credit card), but may experience `ConnectTimeout` errors because Telegram blocks AWS IP addresses.
+This setup runs the bot in **Webhook mode** using a FastAPI web server on Hugging Face's exposed port (`7860`). This allows the bot to wake up instantly on any incoming message even if Hugging Face puts the container to sleep after 1 hour of inactivity.
 
 ---
 
-## Target A: Deploying on Koyeb (Recommended)
-
-Koyeb runs your Docker container as a free Web Service. Because Koyeb does not run on AWS, its IP addresses are **not** blocked by Telegram, ensuring your bot can connect and long-poll without timeouts.
-
-### Step 1: Sign Up on Koyeb
-1. Go to [koyeb.com](https://www.koyeb.com/) and click **Sign Up**.
-2. Create an account and select the **Hobby** plan (which is free and does **not** require a credit card).
-
-### Step 2: Create a New Service
-1. On your Koyeb Dashboard, click **Create Service**.
-2. Select **GitHub** as the deployment method and authorize your GitHub account.
-3. Select your `SmartAttendance` repository from the list.
-
-### Step 3: Configure Deployment Fields
-In the configuration screen, set the following options:
-*   **Service Type:** **Web Service** (default).
-*   **Builder:** Select **Docker** (Koyeb will automatically detect the `Dockerfile` at the root of our repository).
-*   **Ports:** 
-    *   Set the port number to **`8000`** (change from the default 80 if needed) and protocol to **HTTP**.
-*   **Environment Variables:** Click **Add Variable** to configure:
-    
-    | Key | Value | Description |
-    | :--- | :--- | :--- |
-    | `TELEGRAM_BOT_TOKEN` | `your_bot_token_here` | Your token from `@BotFather` |
-    | `START_WEB_SERVER` | `true` | Starts the web server (required for Webhooks and Koyeb's health checks) |
-    | `PORT` | `8000` | Overrides the internal container port to match Koyeb's routing |
-    | `DATABASE_PATH` | `/app/data/bot_data.db` | Path to the SQLite database |
-    | `PUBLIC_URL` | `https://your-app-name.koyeb.app` | **Your Koyeb app URL** (enables Webhook mode so Telegram wakes up the bot on any new message) |
-
-### Step 4: Deploy the Service
-1. Click **Deploy** at the bottom of the page.
-2. The service will build and transition to **Healthy**.
-3. Koyeb will provide a public URL (e.g. `https://smart-attendance-bot-yourname.koyeb.app`). Ensure you copy this URL and add it to your `PUBLIC_URL` environment variable in the service settings (or redeploy after launch to set it).
-4. Set this URL as the cloud server endpoint in your ESP32-P4 device settings!
-
-> [!NOTE]
-> **Koyeb Scale-to-Zero Behavior:** 
-> Since Koyeb Free Instances sleep (scale to zero) after 1 hour of inactivity, configuring the `PUBLIC_URL` is important. This enables **Telegram Webhook** mode. When a user sends a message, Telegram makes a POST request to your webhook, which immediately wakes up the Koyeb container to process the message. When the ESP32 device pings the `/api/` endpoints, it will also wake the service automatically.
+## Why Hugging Face Spaces?
+1. **100% Free:** Basic CPU spaces are free and do **not** require any credit card registration.
+2. **Auto-Sleep Compatible:** Webhook mode ensures the container automatically boots up whenever Telegram sends a message or when the physical ESP32 device pings the API.
+3. **Environment Secrets:** Your Telegram Token is securely injected using Hugging Face Space secrets.
 
 ---
 
-## Target B: Deploying on Hugging Face Spaces (Docker)
+## Step 1: Create a Space on Hugging Face
 
-Hugging Face Spaces is another free hosting option (no credit card required), but is prone to connection timeouts since Telegram frequently blocks AWS IP addresses.
+1. Go to [huggingface.co](https://huggingface.co/) and sign up or log in.
+2. Click **New Space** (or go to [huggingface.co/new-space](https://huggingface.co/new-space)).
+3. Configure the Space:
+   *   **Space Name:** `smart-attendance-bot` (or any custom name)
+   *   **SDK:** Select **Docker** (very important).
+   *   **Docker Template:** Select **Blank**.
+   *   **Space Hardware:** Select **CPU basic (Free)**.
+   *   **Space Visibility:** Set to **Public** or **Private**.
+4. Click **Create Space**.
 
-### Step 1: Create a Space on Hugging Face
-1. Log in to [huggingface.co](https://huggingface.co/) and click **New Space**.
-2. Set **Space Name** to `smart-attendance-bot`.
-3. Select **Docker** as the SDK and choose the **Blank** template.
-4. Keep the hardware as **CPU basic (Free)** and click **Create Space**.
+---
 
-### Step 2: Inject Your Bot Token
-1. Go to your Space **Settings** tab.
-2. Scroll to **Variables and secrets** and click **New secret**:
-   *   **Name:** `TELEGRAM_BOT_TOKEN`
-   *   **Value:** `your_actual_bot_token_here`
+## Step 2: Inject Your Environment Secrets
 
-### Step 3: Configure GitHub Actions Auto-Sync
-If you set up the GitHub secret (`HF_TOKEN` containing your Hugging Face write token), every push to your GitHub `master` branch will automatically build and deploy your Space.
+1. Go to the **Settings** tab of your newly created Space.
+2. Scroll to the **Variables and secrets** section.
+3. Click **New secret** to add your variables:
+   
+   | Name | Value | Description |
+   | :--- | :--- | :--- |
+   | `TELEGRAM_BOT_TOKEN` | `your_bot_token_here` | Obtained from `@BotFather` |
+   | `PUBLIC_URL` | `https://YOUR_USERNAME-YOUR_SPACE_NAME.hf.space` | **Your public Hugging Face URL** (replace `YOUR_USERNAME` and `YOUR_SPACE_NAME` with your actual details, using hyphens instead of slashes. E.g. `https://danantst-smart-attendance-bot.hf.space`). This activates Webhook mode. |
+   
+4. Click **Save** for each secret.
 
-*Note: If the Space logs show a `ConnectTimeout` to `api.telegram.org`, Telegram's DDoS firewall has blocked the AWS IP address assigned to your Hugging Face container. Restarting the Space (to get a new IP) or switching to Koyeb will resolve this.*
+---
+
+## Step 3: Configure GitHub Actions Auto-Sync
+
+Every push you make to your GitHub `master` branch will automatically build and deploy your Hugging Face Space:
+
+1. **Create Hugging Face Write Token:** Go to [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens), click **New token**, name it `github-sync`, select the **Write** permission type, and copy the token.
+2. **Add to GitHub Secrets:**
+   * Go to your GitHub repository -> **Settings > Secrets and variables > Actions > New repository secret**.
+   * Name: **`HF_TOKEN`**
+   * Value: *Paste the token you copied from Hugging Face.*
+3. **Push / Sync:** The next push to GitHub will automatically trigger the action and deploy your code to Hugging Face.
+
+---
+
+## Step 4: Verify the Space is Running
+
+1. Once the build completes and shows a green **Running** badge, click your Space's public URL:
+   `https://YOUR_USERNAME-YOUR_SPACE_NAME.hf.space`
+2. It should respond with:
+   `{"status":"ok","message":"Smart Attendance Bot is running"}`
+3. You can monitor execution logs in the **Logs** tab of your Space page.
+
+---
+
+## Step 5: Update Device Sync Configuration
+
+To connect your physical attendance device to the cloud bot:
+1. Turn on the ESP32-P4 device.
+2. Open the captive portal or the **Settings** screen on the device.
+3. Update the **Cloud Server URL / API Endpoint** to point to your Hugging Face Space URL (e.g. `https://danantst-smart-attendance-bot.hf.space`).
+4. Press **Save** on the device to apply.
