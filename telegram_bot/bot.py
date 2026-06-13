@@ -105,7 +105,22 @@ async def sync_users(request: Request):
         # Reconcile: delete users on the bot database that were deleted from the device
         db.reconcile_users(received_uuids)
         
-        return JSONResponse(status_code=200, content={"status": "success", "count": len(users)})
+        # Fetch all users who have linked their Telegram account
+        import sqlite3
+        conn = sqlite3.connect(db.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT uuid, telegram_id FROM users WHERE telegram_id IS NOT NULL AND telegram_id != ''")
+        rows = cursor.fetchall()
+        conn.close()
+        
+        mappings = [{"uuid": r["uuid"], "telegram_id": r["telegram_id"]} for r in rows]
+        
+        return JSONResponse(status_code=200, content={
+            "status": "success", 
+            "count": len(users),
+            "users": mappings
+        })
     except Exception as e:
         logger.error(f"Error syncing users: {e}")
         return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
