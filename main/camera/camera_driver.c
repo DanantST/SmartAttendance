@@ -64,6 +64,10 @@ static uint16_t s_cam_height = 720;
 static uint16_t s_out_width  = 480;
 static uint16_t s_out_height = 360;
 
+/* AE statistics tracking */
+static volatile uint32_t s_latest_luminance = 120;
+static volatile bool s_ae_stats_ready = false;
+
 /* ------------------------------------------------------------------ */
 /* CSI callbacks (IRAM-safe)                                           */
 /* ------------------------------------------------------------------ */
@@ -132,6 +136,21 @@ static bool awb_stats_cb(isp_awb_ctlr_t awb_ctlr,
     return true;
 }
 
+static IRAM_ATTR bool ae_stats_cb(isp_ae_ctlr_t ae_ctlr,
+                                  const esp_isp_ae_env_detector_evt_data_t *edata,
+                                  void *user_data)
+{
+    uint32_t sum = 0;
+    for (int i = 0; i < 5; i++) {
+        for (int j = 0; j < 5; j++) {
+            sum += edata->ae_result.luminance[i][j];
+        }
+    }
+    s_latest_luminance = sum / 25;
+    s_ae_stats_ready = true;
+    return false;
+}
+
 static esp_err_t isp_init_proc(void)
 {
     esp_isp_processor_cfg_t isp_cfg = {
@@ -186,6 +205,10 @@ static esp_err_t isp_init_proc(void)
     isp_ae_ctlr_t ae_ctlr = NULL;
     err = esp_isp_new_ae_controller(s_isp_proc, &ae_cfg, &ae_ctlr);
     if (err == ESP_OK) {
+        esp_isp_ae_env_detector_evt_cbs_t ae_cbs = {
+            .on_env_statistics_done = ae_stats_cb,
+        };
+        esp_isp_ae_env_detector_register_event_callbacks(ae_ctlr, &ae_cbs, NULL);
         esp_isp_ae_controller_enable(ae_ctlr);
         esp_isp_ae_controller_start_continuous_statistics(ae_ctlr);
     }
@@ -409,6 +432,54 @@ camera_fb_t *camera_capture_frame(void)
         /* Invalidate CPU-side cache so the CPU reads the fresh pixels
          * written by the CSI DMA (M2C = Memory-to-CPU direction). */
         esp_cache_msync(s_frame_buffer, s_frame_buf_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+        
+        /* Run software auto-exposure loop every 10 frames */
+        static int ae_frame_count = 0;
+        ae_frame_count++;
+        if (ae_frame_count >= 10) {
+            ae_frame_count = 0;
+            if (s_ae_stats_ready && s_cam_dev) {
+                s_ae_stats_ready = false;
+                uint32_t current_lum = s_latest_luminance;
+                static uint32_t s_current_exposure = 200;
+                static uint32_t s_current_gain = 100;
+                static bool s_ae_initialized = false;
+                if (!s_ae_initialized) {
+                    s_current_exposure = 200;
+                    s_current_gain = 100;
+                    s_ae_initialized = true;
+                }
+                
+                uint32_t target_lum = 120;
+                uint32_t deadband = 15;
+                
+                if (current_lum < target_lum - deadband) {
+                    // Too dark -> increase brightness
+                    if (s_current_exposure < 1500) {
+                        s_current_exposure += 50;
+                        esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_EXPOSURE_VAL, &s_current_exposure, sizeof(uint32_t));
+                    } else if (s_current_gain < 6000) {
+                        s_current_gain += 150;
+                        esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_GAIN, &s_current_gain, sizeof(uint32_t));
+                    }
+                    ESP_LOGD(TAG, "AE: lum=%lu < %lu (too dark) -> set exp=%lu gain=%lu", (unsigned long)current_lum, (unsigned long)(target_lum - deadband), (unsigned long)s_current_exposure, (unsigned long)s_current_gain);
+                } else if (current_lum > target_lum + deadband) {
+                    // Too bright -> decrease brightness
+                    if (s_current_gain > 100) {
+                        if (s_current_gain >= 150) {
+                            s_current_gain -= 150;
+                        } else {
+                            s_current_gain = 100;
+                        }
+                        esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_GAIN, &s_current_gain, sizeof(uint32_t));
+                    } else if (s_current_exposure > 50) {
+                        s_current_exposure -= 50;
+                        esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_EXPOSURE_VAL, &s_current_exposure, sizeof(uint32_t));
+                    }
+                    ESP_LOGD(TAG, "AE: lum=%lu > %lu (too bright) -> set exp=%lu gain=%lu", (unsigned long)current_lum, (unsigned long)(target_lum + deadband), (unsigned long)s_current_exposure, (unsigned long)s_current_gain);
+                }
+            }
+        }
         
         uint16_t req_w = (s_current_framesize == FRAMESIZE_QVGA) ? 320 : 640;
         uint16_t req_h = (s_current_framesize == FRAMESIZE_QVGA) ? 240 : 480;

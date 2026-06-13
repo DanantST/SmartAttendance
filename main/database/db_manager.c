@@ -637,6 +637,33 @@ esp_err_t db_delete_user_by_uuid(const char* uuid) {
     return ESP_OK;
 }
 
+esp_err_t db_update_user_telegram_id(const char* uuid, const char* telegram_id) {
+    if (!s_initialized) return ESP_ERR_INVALID_STATE;
+    if (!uuid || !telegram_id) return ESP_ERR_INVALID_ARG;
+
+    DB_LOCK();
+    sqlite3_stmt *stmt;
+    const char *sql = "UPDATE users SET telegram_id = ?, updated_at = strftime('%s','now') WHERE uuid = ?";
+    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        ESP_LOGE(TAG, "Prepare update telegram_id failed: %s", sqlite3_errmsg(s_db));
+        DB_UNLOCK();
+        return ESP_FAIL;
+    }
+    sqlite3_bind_text(stmt, 1, telegram_id, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, uuid, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    DB_UNLOCK();
+
+    if (rc != SQLITE_DONE) {
+        ESP_LOGE(TAG, "Update telegram_id failed: %s", sqlite3_errmsg(s_db));
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "Updated telegram_id=%s for user UUID %s", telegram_id, uuid);
+    return ESP_OK;
+}
+
 esp_err_t db_delete_user_by_student_id(const char* student_id) {
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
     if (!student_id) return ESP_ERR_INVALID_ARG;

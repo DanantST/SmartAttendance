@@ -260,7 +260,11 @@ static void ui_nav_callback_handler(ui_nav_button_t button) {
                 /* Set event bit to trigger internal task immediately */
                 xEventGroupSetBits(g_system_event_group, SYSTEM_EVENT_TOUCH_MENU);
                 ui_acquire();
-                ui_show_notification(NOTIFY_INFO, "Sync Started", "Connecting to Wi-Fi...", 3000);
+                if (wifi_manager_get_status() == WIFI_STATUS_CONNECTED) {
+                    ui_show_notification(NOTIFY_INFO, "Sync Started", "Syncing with cloud...", 3000);
+                } else {
+                    ui_show_notification(NOTIFY_INFO, "Sync Started", "Connecting to Wi-Fi...", 3000);
+                }
                 ui_release();
             }
             break;
@@ -333,6 +337,9 @@ void app_main(void) {
         ESP_LOGE(TAG, "Queue creation failed");
         return;
     }
+
+    /* Set event bit to trigger cloud sync cycle immediately on boot */
+    xEventGroupSetBits(g_system_event_group, SYSTEM_EVENT_TOUCH_MENU);
 
     /* Allocate detection frame buffer in SPIRAM once (supports up to VGA size) */
     s_detection_fb_buf = (uint8_t *)heap_caps_malloc(640 * 480 * 2, MALLOC_CAP_SPIRAM);
@@ -1132,8 +1139,21 @@ static void network_ble_init_task(void *pvParameters) {
  */
 static void network_sync_task(void *pvParameters) {
     while (1) {
-        /* Wait for sync interval or manual trigger (SYSTEM_EVENT_TOUCH_MENU) */
-        xEventGroupWaitBits(g_system_event_group, SYSTEM_EVENT_TOUCH_MENU, pdTRUE, pdFALSE, pdMS_TO_TICKS(CLOUD_SYNC_INTERVAL_MS));
+        uint32_t sync_interval_ms = CLOUD_SYNC_INTERVAL_MS;
+        nvs_handle_t nvs_int;
+        if (nvs_open("storage", NVS_READONLY, &nvs_int) == ESP_OK) {
+            nvs_get_u32(nvs_int, "sync_ms", &sync_interval_ms);
+            nvs_close(nvs_int);
+        }
+        
+        ESP_LOGI(TAG, "Sync task waiting. Interval: %lu ms", (unsigned long)sync_interval_ms);
+        
+        if (sync_interval_ms == 0) {
+            /* "Never" - wait indefinitely for manual trigger */
+            xEventGroupWaitBits(g_system_event_group, SYSTEM_EVENT_TOUCH_MENU, pdTRUE, pdFALSE, portMAX_DELAY);
+        } else {
+            xEventGroupWaitBits(g_system_event_group, SYSTEM_EVENT_TOUCH_MENU, pdTRUE, pdFALSE, pdMS_TO_TICKS(sync_interval_ms));
+        }
         
         if (get_system_state() == SYSTEM_STATE_NORMAL) {
             set_system_state(SYSTEM_STATE_SYNCING);
@@ -1144,11 +1164,43 @@ static void network_sync_task(void *pvParameters) {
             
             ESP_LOGI(TAG, "Starting brief-connect sync cycle");
             
-            /* 1. Connect Wi-Fi using saved credentials */
-            if (wifi_manager_connect_saved() == ESP_OK) {
-                /* 2. Sync Time (SNTP) */
-                sntp_sync_init();
-                if (sntp_sync_wait_for_sync(10000) == ESP_OK) {
+            /* 1. Connect Wi-Fi using saved credentials if not already connected */
+            bool already_connected = (wifi_manager_get_status() == WIFI_STATUS_CONNECTED);
+            bool connect_ok = false;
+            
+            if (already_connected) {
+                connect_ok = true;
+            } else {
+                if (wifi_manager_connect_saved() == ESP_OK) {
+                    /* Wait for Wi-Fi connection to establish (up to 30 seconds) */
+                    int wait_limit = 600; // 600 * 50ms = 30 seconds
+                    while (wifi_manager_get_status() != WIFI_STATUS_CONNECTED &&
+                           wifi_manager_get_status() != WIFI_STATUS_CONNECTION_FAILED &&
+                           wait_limit > 0) {
+                        vTaskDelay(pdMS_TO_TICKS(50));
+                        wait_limit--;
+                    }
+                    if (wifi_manager_get_status() == WIFI_STATUS_CONNECTED) {
+                        connect_ok = true;
+                    }
+                }
+            }
+            
+            if (connect_ok) {
+                /* 2. Sync Time (SNTP) if not already synchronized */
+                bool sync_ok = false;
+                if (sntp_sync_is_synchronized()) {
+                    sync_ok = true;
+                } else {
+                    esp_err_t init_err = sntp_sync_init();
+                    if (init_err == ESP_OK || init_err == ESP_ERR_INVALID_STATE) {
+                        if (sntp_sync_wait_for_sync(10000) == ESP_OK) {
+                            sync_ok = true;
+                        }
+                    }
+                }
+                
+                if (sync_ok) {
                     /* 3. Run Cloud Sync (Telegram) — clear the done bit first */
                     xEventGroupClearBits(g_system_event_group, SYSTEM_EVENT_CLOUD_SYNC_DONE);
                     cloud_sync_start();
@@ -1159,8 +1211,12 @@ static void network_sync_task(void *pvParameters) {
                                         pdTRUE, pdFALSE, pdMS_TO_TICKS(30000));
                 }
                 
-                /* 4. Disconnect Wi-Fi to save power */
-                wifi_manager_disconnect();
+                /* 4. Disconnect Wi-Fi to save power ONLY if we connected it in this task */
+                if (!already_connected) {
+                    wifi_manager_disconnect();
+                }
+            } else {
+                ESP_LOGE(TAG, "Wi-Fi connection failed or timed out. Status: %d", wifi_manager_get_status());
             }
             
             if (ui_acquire()) {
@@ -1202,6 +1258,9 @@ static void battery_task(void *pvParameters) {
         
         battery_monitor_check_idle_sleep();
         #endif
+        
+        /* Update Wi-Fi status icon on the status bar (top-right) */
+        ui_set_wifi_status(wifi_manager_get_status() == WIFI_STATUS_CONNECTED, wifi_manager_get_rssi());
         
         vTaskDelay(pdMS_TO_TICKS(BATTERY_CHECK_INTERVAL_MS));
     }

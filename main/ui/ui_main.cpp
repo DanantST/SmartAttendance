@@ -1124,8 +1124,12 @@ void ui_show_quick_settings(void) {
     lv_label_set_text(sync_lbl, LV_SYMBOL_REFRESH " Start Sync");
     lv_obj_center(sync_lbl);
     lv_obj_add_event_cb(sync_btn, [](lv_event_t* e) {
-        cloud_sync_start();
-        ui_show_notification(NOTIFY_SUCCESS, "Sync", "Cloud synchronization started", 3000);
+        if (s_nav_callback) {
+            s_nav_callback(NAV_SYNC);
+        } else {
+            cloud_sync_start();
+            ui_show_notification(NOTIFY_SUCCESS, "Sync", "Cloud synchronization started", 3000);
+        }
     }, LV_EVENT_CLICKED, NULL);
 
     /* Battery & SD Status */

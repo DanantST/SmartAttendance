@@ -145,6 +145,10 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         wifi_manager_connect_saved();
     } 
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        if (s_wifi_status == WIFI_STATUS_DISCONNECTED) {
+            ESP_LOGI(TAG, "Wi-Fi disconnected intentionally. Bypassing automatic reconnection.");
+            return;
+        }
         s_retry_count++;
         ESP_LOGW(TAG, "Wi-Fi disconnected, retry count: %d", s_retry_count);
         
@@ -171,8 +175,12 @@ static void event_handler(void* arg, esp_event_base_t event_base,
 static esp_err_t wifi_init_sta(void) {
     if (strlen(s_current_ssid) == 0) {
         ESP_LOGW(TAG, "No SSID configured");
+        s_wifi_status = WIFI_STATUS_CONNECTION_FAILED;
         return ESP_FAIL;
     }
+    
+    s_wifi_status = WIFI_STATUS_CONNECTING;
+    s_retry_count = 0;
     
     wifi_config_t wifi_config = {0};
     wifi_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;

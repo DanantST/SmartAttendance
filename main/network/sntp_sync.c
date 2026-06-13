@@ -50,12 +50,16 @@ bool sntp_sync_is_synchronized(void) {
 esp_err_t sntp_sync_wait_for_sync(uint32_t timeout_ms) {
     ESP_LOGI(TAG, "Waiting for system time to be set... (timeout %" PRIu32 "ms)", timeout_ms);
     
-    esp_err_t ret = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(timeout_ms));
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to update system time within timeout");
-    } else {
-        ESP_LOGI(TAG, "System time synchronized");
+    uint32_t waited = 0;
+    while (waited < timeout_ms) {
+        if (sntp_sync_is_synchronized()) {
+            ESP_LOGI(TAG, "System time synchronized");
+            return ESP_OK;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+        waited += 100;
     }
     
-    return ret;
+    ESP_LOGW(TAG, "Failed to update system time within timeout");
+    return ESP_ERR_TIMEOUT;
 }

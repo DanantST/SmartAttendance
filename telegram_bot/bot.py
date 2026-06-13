@@ -125,6 +125,24 @@ async def sync_users(request: Request):
         logger.error(f"Error syncing users: {e}")
         return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
 
+
+@web_app.get("/api/dump_db")
+async def dump_db():
+    import sqlite3
+    try:
+        conn = sqlite3.connect(db.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users")
+        users = [dict(r) for r in cursor.fetchall()]
+        cursor.execute("SELECT * FROM schedules")
+        schedules = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        return {"users": users, "schedules": schedules}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 @web_app.get("/api/get_schedules")
 async def get_schedules(since: int = 0):
     """

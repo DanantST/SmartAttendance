@@ -103,6 +103,11 @@ esp_err_t db_delete_user(uint32_t user_id);
 esp_err_t db_delete_user_by_uuid(const char* uuid);
 
 /**
+ * @brief Update the telegram_id of a user by UUID
+ */
+esp_err_t db_update_user_telegram_id(const char* uuid, const char* telegram_id);
+
+/**
  * @brief Delete a user by their student ID
  */
 esp_err_t db_delete_user_by_student_id(const char* student_id);

@@ -1377,3 +1377,188 @@ New cloud backend created with 4 files:
   * **Recent Apps Mapping Bugfix:** Corrected the app names/icons array mismatch in the recent apps drawer that previously offset index 4 ("Files") to "Recorder" and caused closed-app mapping offsets.
   * **Render Cloud Hosting Integration:** Updated the bot SQLite connection block to read `DATABASE_PATH` from the environment if present, allowing the database to write to mounted persistent storage disks on Render. Added a comprehensive guide `DEPLOYMENT.md` detailing Render setup.
   * **Git Repository Configuration:** Initialized the local Git repository, set up a `.gitignore` file to ignore build folders, environment files, and SQLite database caches, and performed the initial repository commit.
+
+---
+
+### [2026-06-13 01:55] — Webhook Integration & Public Space Configuration
+
+- **Category:** Cloud Integration / Networking
+- **Altered Files:**
+  - `telegram_bot/bot.py` (modified)
+  - `telegram_bot/DEPLOYMENT.md` (modified)
+- **Status:** ✅ Completed
+- **Log:**
+  * **Webhook Integration:** Configured the bot to support webhook registration via `PUBLIC_URL` or `RENDER_EXTERNAL_URL` environment variables, automatically registering the webhook with Telegram to allow Koyeb/Render/Hugging Face instances to wake up on incoming messages.
+
+### [2026-06-13 02:28] — Global IPv4 Socket Patch & HF Spaces Deployment Migration
+
+- **Category:** Networking / Cloud Deployment
+- **Altered Files:**
+  - `telegram_bot/bot.py` (modified)
+  - `telegram_bot/DEPLOYMENT.md` (modified)
+- **Status:** ✅ Completed
+- **Log:**
+  * **IPv4 Address Resolution Monkey-Patch:** Added a global monkey-patch to `socket.getaddrinfo` forcing IPv4 DNS resolution for all outgoing requests. This resolves connection timeouts/latency issues on Hugging Face Spaces caused by IPv6 routing issues. Migrated the deployment guide to focus on Hugging Face Spaces (Docker) with automatic GitHub Actions sync.
+
+### [2026-06-13 03:16] — Telegram API custom URL (Cloudflare Worker Proxy Bypass)
+
+- **Category:** Cloud Integration / Security / Bypassing Firewalls
+- **Altered Files:**
+  - `telegram_bot/bot.py` (modified)
+  - `telegram_bot/DEPLOYMENT.md` (modified)
+- **Status:** ✅ Completed
+- **Log:**
+  * **Custom API Endpoint Support:** Added support for a custom `TELEGRAM_API_URL` environment variable. Documented setting up a free, secure Cloudflare Worker to act as a personal proxy (`api.telegram.org` proxy) to bypass Telegram's AWS firewall blocking.
+
+### [2026-06-13 04:54] — UnboundLocalError Scope Bugfix in Python Server
+
+- **Category:** Bug Fix — Backend
+- **Altered Files:**
+  - `telegram_bot/bot.py` (modified)
+- **Status:** ✅ Completed
+- **Log:**
+  * **Scoping Resolution:** Resolved an `UnboundLocalError: cannot access local variable 'os' where it is not associated with a value` in `main()` by removing a redundant local `import os` statement that shadowed the global `os` module context.
+
+### [2026-06-13 05:54] — Wi-Fi Auto-Connect Daemon & Scan Optimization
+
+- **Category:** Networking / System Stability
+- **Altered Files:**
+  - `main/network/wifi_manager.c` (modified)
+- **Status:** ✅ Completed & Flashed/Verified on COM5
+- **Log:**
+  * **Wi-Fi Auto-Connect Daemon:** Implemented a periodic background Wi-Fi scanning and auto-reconnection daemon (`wifi_auto_connect_daemon`). Running at priority 4 (with a 3072-byte stack), the task checks the network status every 5 minutes (initially delayed by 30 seconds). If not connected/connecting, it performs a scan to automatically connect to a saved network (using NVS credentials).
+  * **Scan & Loop Protection:** Refactored `connect_saved_task` to take a boolean parameter (`force_connect`). When calling background auto-connection (`force_connect = false`), if no scanned network matches saved credentials, it bypasses attempting a connection on index 0 to avoid continuous retry loops and warning storms.
+
+
+---
+
+
+### [2026-06-13 17:30] — Camera Auto-Exposure, Wi-Fi Connection Wait & Telegram ID Sync
+
+- **Category:** Camera / Sync / Database / Backend
+- **Altered Files:**
+  - `main/camera/camera_driver.c` (modified)
+  - `main/database/db_manager.c` / `db_manager.h` (modified)
+  - `main/network/cloud_sync.c` (modified)
+  - `main/main.c` (modified)
+  - `telegram_bot/bot.py` (modified)
+- **Status:** ✅ Completed
+
+---
+
+#### Detailed Summary of Issues & Technical Resolutions
+
+##### 1. Camera Auto-Exposure (AE) Control Feedback Loop
+- **The Issue:**
+  The camera feed was either too dark in low light or too bright in natural sunlight, making face recognition similarity scores drop and leading to unreliable recognition in non-controlled lighting.
+- **The Resolution:**
+  Implemented a software AE feedback loop using the ESP32-P4's hardware ISP AE environment statistics. We register an AE environment detector statistics callback `ae_stats_cb` in IRAM which calculates the average luminance across the 5x5 sample grid. Every 10 frames (~330ms), a proportional feedback loop compares this average luminance to a target of `120` (within a deadband of `15`). If too dark, it increments exposure (`ESP_CAM_SENSOR_EXPOSURE_VAL`) up to 1500, then gain (`ESP_CAM_SENSOR_GAIN`) up to 6000. If too bright, it decrements gain, then exposure.
+- **Code Implementation Details (`main/camera/camera_driver.c`):**
+  ```c
+  static IRAM_ATTR bool ae_stats_cb(isp_ae_ctlr_t ae_ctlr,
+                                    const esp_isp_ae_env_detector_evt_data_t *edata,
+                                    void *user_data)
+  {
+      uint32_t sum = 0;
+      for (int i = 0; i < 5; i++) {
+          for (int j = 0; j < 5; j++) {
+              sum += edata->ae_result.luminance[i][j];
+          }
+      }
+      s_latest_luminance = sum / 25;
+      s_ae_stats_ready = true;
+      return false;
+  }
+  ```
+
+##### 2. Wi-Fi Connection Wait in Sync Cycle
+- **The Issue:**
+  The `network_sync_task` in `main.c` was immediately running time sync and cloud sync right after calling `wifi_manager_connect_saved()`. Since Wi-Fi connection is asynchronous, the requests would run before an IP address was obtained, causing SNTP and cloud sync requests to fail with immediate network timeouts.
+- **The Resolution:**
+  Added a connection status wait loop to block `network_sync_task` until the status transitions to `WIFI_STATUS_CONNECTED` (or a timeout of 30 seconds is reached) before attempting SNTP sync and cloud sync.
+- **Code Implementation Details (`main/main.c`):**
+  ```c
+  if (wifi_manager_connect_saved() == ESP_OK) {
+      int wait_limit = 600; // 600 * 50ms = 30 seconds
+      while (wifi_manager_get_status() != WIFI_STATUS_CONNECTED &&
+             wifi_manager_get_status() != WIFI_STATUS_CONNECTION_FAILED &&
+             wait_limit > 0) {
+          vTaskDelay(pdMS_TO_TICKS(50));
+          wait_limit--;
+      }
+      if (wifi_manager_get_status() == WIFI_STATUS_CONNECTED) {
+          sntp_sync_init();
+          // ... proceed with cloud sync
+      }
+  }
+  ```
+
+##### 3. Telegram ID Mapping & Sync-Down
+- **The Issue:**
+  Users who registered their Telegram account with the bot had their `telegram_id` set in the cloud database, but this change never synced back to the device SQLite database, leaving the device UI permanently displaying "Telegram ID: Not Linked".
+- **The Resolution:**
+  Extended the backend `sync_users` endpoint in `bot.py` to select all users with non-empty `telegram_id` and return them as a list of mappings (`[{"uuid": ..., "telegram_id": ...}]`). Added `db_update_user_telegram_id()` to the device SQLite manager to update `telegram_id` for a user UUID. Modified `sync_users()` in `cloud_sync.c` to parse the returned mappings list and call `db_update_user_telegram_id()` for each mapping.
+- **Code Implementation Details (`main/database/db_manager.c`):**
+  ```c
+  esp_err_t db_update_user_telegram_id(const char* uuid, const char* telegram_id) {
+      if (!s_initialized) return ESP_ERR_INVALID_STATE;
+      if (!uuid || !telegram_id) return ESP_ERR_INVALID_ARG;
+      DB_LOCK();
+      sqlite3_stmt *stmt;
+      const char *sql = "UPDATE users SET telegram_id = ?, updated_at = strftime('%s','now') WHERE uuid = ?";
+      int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+      if (rc != SQLITE_OK) {
+          ESP_LOGE(TAG, "Prepare update telegram_id failed: %s", sqlite3_errmsg(s_db));
+          DB_UNLOCK();
+          return ESP_FAIL;
+      }
+      sqlite3_bind_text(stmt, 1, telegram_id, -1, SQLITE_STATIC);
+      sqlite3_bind_text(stmt, 2, uuid, -1, SQLITE_STATIC);
+      rc = sqlite3_step(stmt);
+      sqlite3_finalize(stmt);
+      DB_UNLOCK();
+      if (rc != SQLITE_DONE) {
+          ESP_LOGE(TAG, "Update telegram_id failed: %s", sqlite3_errmsg(s_db));
+          return ESP_FAIL;
+      }
+      return ESP_OK;
+  }
+  ```
+
+---
+
+### [2026-06-13 18:25] — Wi-Fi Intentional Disconnect Auto-Reconnect Bypass & Status Bar Wi-Fi Indicator
+
+- **Category:** Networking / UI / Status Indicators
+- **Altered Files:**
+  - `main/network/wifi_manager.c` (modified)
+  - `main/main.c` (modified)
+- **Status:** ✅ Completed, Flashed & Verified on COM4
+
+---
+
+Analysis of the Issue
+There were three distinct bugs in the firmware that caused this confusing behavior:
+
+Hardcoded UI Toast Notification (Fixed): Originally, clicking the Start Sync button in the quick settings dropdown was hardcoded to display the "Connecting to Wi-Fi..." notification toast, completely ignoring whether the Wi-Fi was already connected or not.
+
+Fix: We updated the UI event handler case NAV_SYNC in main.c to check the actual connection status using wifi_manager_get_status() before showing the toast, conditionally changing it to "Syncing with cloud..." if the device is already connected.
+Auto-Reconnect Loop after Power-Saving Disconnect (Fixed): When a background sync cycle completed, if the device wasn't connected to Wi-Fi before the sync started, it called wifi_manager_disconnect() to shut down the radio and save power. However, the driver's disconnection event triggered a WIFI_EVENT_STA_DISCONNECTED event. The event handler in wifi_manager.c did not verify if the disconnection was intentional; it immediately incremented s_retry_count and triggered a reconnection. As a result, the device immediately reconnected, keeping the Wi-Fi radio permanently powered and leaving it connected.
+
+Fix: We modified the WIFI_EVENT_STA_DISCONNECTED event handler in wifi_manager.c to check if s_wifi_status is WIFI_STATUS_DISCONNECTED (intentional disconnect). If it is, the code prints a log message:
+```text
+I (35372) WIFI_MGR: Wi-Fi disconnected intentionally. Bypassing automatic reconnection.
+```
+and returns early without reconnecting. This successfully keeps the radio off to save power after a sync cycle.
+Status Bar Wi-Fi Indicator Mismatch (Fixed): The Wi-Fi icon in the top-right status bar of the screen remained permanently gray (indicating "disconnected"), even when the co-processor was successfully connected to Wi-Fi. The C++ helper ui_set_wifi_status was defined, but it was never actually called by the application logic.
+
+Fix: We wired ui_set_wifi_status into the periodic 10-second battery_task in main.c. It now continuously updates the status bar indicator icon (white/visible when connected, gray if disconnected).
+
+Summary of Actions Taken
+Modified main/network/wifi_manager.c: Checked for intentional disconnect to stop the automatic reconnection loop.
+Modified main/main.c:
+Updated ui_nav_callback_handler to display "Syncing with cloud..." or "Connecting to Wi-Fi..." conditionally.
+Added status bar updates for the Wi-Fi icon inside battery_task to ensure the status bar is reactive.
+Rebuilt, Flashed, and Verified: Recompiled the firmware, flashed it to the device on COM4, and confirmed through live serial logging that the device behaves correctly (correct notification toast, correct status bar color, and the auto-reconnect loop is bypassed on intentional disconnect).
+Logged Changes: Updated activity_log.md and walkthrough.md with complete documentation.
+

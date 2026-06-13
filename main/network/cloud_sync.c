@@ -75,7 +75,8 @@ esp_err_t cloud_sync_init(void) {
         nvs_close(nvs_tel);
     }
     
-    ESP_LOGI(TAG, "Cloud sync initialized");
+    ESP_LOGI(TAG, "Cloud sync initialized: endpoint='%s', token_len=%d, chat_id='%s'", 
+             s_api_endpoint, (int)strlen(s_api_token), s_chat_id);
     return ESP_OK;
 }
 
@@ -86,8 +87,7 @@ esp_err_t cloud_sync_start(void) {
     }
     
     if (strlen(s_api_token) == 0 || strlen(s_chat_id) == 0) {
-        ESP_LOGE(TAG, "Telegram credentials not configured in NVS");
-        return ESP_ERR_INVALID_ARG;
+        ESP_LOGW(TAG, "Telegram credentials not configured. Skipping Telegram notifications/uploads.");
     }
 
     if (s_sync_task_handle != NULL) {
@@ -352,6 +352,11 @@ static esp_err_t sync_attendance_logs(void) {
     }
     
     /* 2. Upload to Telegram */
+    if (strlen(s_api_token) == 0 || strlen(s_chat_id) == 0) {
+        ESP_LOGW(TAG, "Telegram credentials not configured. Skipping attendance CSV upload to Telegram.");
+        return ESP_OK;
+    }
+
     /* 2. Upload notification to Telegram */
     char url[512];
     snprintf(url, sizeof(url), "%s%s/sendDocument", TELEGRAM_API_BASE, s_api_token);
@@ -460,9 +465,31 @@ static esp_err_t sync_users(void) {
     err = http_request(url, "POST", json_str, &response, &response_len);
     free(json_str);
     
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Users synced successfully to cloud: %s", response ? response : "No response body");
-        if (response) free(response);
+    if (err == ESP_OK && response) {
+        cJSON *root = cJSON_Parse(response);
+        if (root) {
+            cJSON *users_arr = cJSON_GetObjectItem(root, "users");
+            if (users_arr && cJSON_IsArray(users_arr)) {
+                int size = cJSON_GetArraySize(users_arr);
+                ESP_LOGI(TAG, "Received %d user mappings from cloud", size);
+                for (int i = 0; i < size; i++) {
+                    cJSON *item = cJSON_GetArrayItem(users_arr, i);
+                    cJSON *uuid_json = cJSON_GetObjectItem(item, "uuid");
+                    cJSON *tel_json = cJSON_GetObjectItem(item, "telegram_id");
+                    if (uuid_json && tel_json) {
+                        const char *uuid = uuid_json->valuestring;
+                        const char *telegram_id = tel_json->valuestring;
+                        if (uuid && telegram_id && strlen(telegram_id) > 0) {
+                            db_update_user_telegram_id(uuid, telegram_id);
+                        }
+                    }
+                }
+            }
+            cJSON_Delete(root);
+        }
+        free(response);
+    } else if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Users synced successfully to cloud (no response body)");
     } else {
         ESP_LOGE(TAG, "Failed to sync users to cloud (err=%d)", err);
     }

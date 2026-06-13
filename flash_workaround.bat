@@ -9,4 +9,4 @@ set PYTHONIOENCODING=utf-8
 
 call C:\Espressif\frameworks\esp-idf-v5.4.2\export.bat esp32p4
 
-idf.py -p COM5 flash monitor
+idf.py -p COM4 flash
