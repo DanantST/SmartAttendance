@@ -960,6 +960,7 @@ extern "C" void ui_close_attendance_screen(void);
 void ui_close_reports_screen(void);
 void ui_close_settings_screen(void);
 void ui_close_enrollment_screen(void);
+void ui_close_user_manager(void);
 
 void ui_return_to_main(void) {
     static bool inside_return = false;
@@ -988,9 +989,11 @@ void ui_return_to_main(void) {
         ui_close_reports_screen();
         ui_close_settings_screen();
         ui_close_enrollment_screen();
+        ui_close_user_manager();
     }
 
     inside_return = false;
+
 }
 
 /*============================================================================

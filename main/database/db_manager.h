@@ -106,6 +106,7 @@ esp_err_t db_delete_user_by_uuid(const char* uuid);
  * @brief Update the telegram_id of a user by UUID
  */
 esp_err_t db_update_user_telegram_id(const char* uuid, const char* telegram_id);
+esp_err_t db_link_lecturer_course_by_uuid(const char* lecturer_uuid, int course_id);
 
 /**
  * @brief Delete a user by their student ID

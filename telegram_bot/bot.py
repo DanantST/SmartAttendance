@@ -1304,9 +1304,8 @@ async def main():
     bot_app.add_handler(CommandHandler("help", help_cmd))
     bot_app.add_handler(MessageHandler(filters.CONTACT, contact_handler))
 
-    # Reply Keyboard Button Mapper (general text mapper when not in conversation)
-    button_filter = filters.TEXT & filters.Regex(r"^(📅 Schedule Class|📊 Attendance Report|📚 My Courses|🛠️ Developer Auth|❓ Help|📚 Enroll in Course|👤 My Status)$")
-    bot_app.add_handler(MessageHandler(button_filter, button_mapper))
+
+
 
     # Course Enrollment Conversation (Students)
     enroll_conv = ConversationHandler(
@@ -1398,6 +1397,10 @@ async def main():
         fallbacks=[CommandHandler("cancel", cancel_cmd)],
     )
     bot_app.add_handler(unenroll_conv)
+    
+    # Reply Keyboard Button Mapper (general text mapper when not in conversation, registered last to avoid shadowing conversation entry points)
+    button_filter = filters.TEXT & filters.Regex(r"^(📅 Schedule Class|📊 Attendance Report|📚 My Courses|🛠️ Developer Auth|❓ Help|📚 Enroll in Course|👤 My Status)$")
+    bot_app.add_handler(MessageHandler(button_filter, button_mapper))
     
     # Initialize Bot App
     logger.info("Initializing Telegram Bot...")

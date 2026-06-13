@@ -874,6 +874,50 @@ esp_err_t db_link_lecturer_course(int lecturer_id, int course_id) {
     return ESP_OK;
 }
 
+esp_err_t db_link_lecturer_course_by_uuid(const char* lecturer_uuid, int course_id) {
+    if (!s_initialized || !lecturer_uuid) return ESP_ERR_INVALID_ARG;
+    DB_LOCK();
+
+    /* Resolve lecturer_id from uuid */
+    sqlite3_stmt *stmt;
+    int lecturer_id = 0;
+    int rc = sqlite3_prepare_v2(s_db, "SELECT id FROM users WHERE uuid = ?", -1, &stmt, NULL);
+    if (rc == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, lecturer_uuid, -1, SQLITE_STATIC);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            lecturer_id = sqlite3_column_int(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    if (lecturer_id == 0) {
+        ESP_LOGW(TAG, "db_link_lecturer_course_by_uuid: lecturer with uuid %s not found", lecturer_uuid);
+        DB_UNLOCK();
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    /* Insert into lecturer_courses */
+    const char *sql = "INSERT OR IGNORE INTO lecturer_courses (lecturer_id, course_id) VALUES (?, ?)";
+    rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        ESP_LOGE(TAG, "Prepare link lecturer course by UUID failed: %s", sqlite3_errmsg(s_db));
+        DB_UNLOCK();
+        return ESP_FAIL;
+    }
+    sqlite3_bind_int(stmt, 1, lecturer_id);
+    sqlite3_bind_int(stmt, 2, course_id);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    DB_UNLOCK();
+
+    if (rc != SQLITE_DONE) {
+        ESP_LOGE(TAG, "Step link lecturer course by UUID failed: %s", sqlite3_errmsg(s_db));
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "Linked lecturer_id=%d to course_id=%d", lecturer_id, course_id);
+    return ESP_OK;
+}
+
 esp_err_t db_insert_or_get_course(const char* code, const char* name, int* out_id) {
     if (!s_initialized || !code || !name || !out_id) return ESP_ERR_INVALID_ARG;
     DB_LOCK();

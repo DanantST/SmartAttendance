@@ -1196,9 +1196,16 @@ static void network_sync_task(void *pvParameters) {
                     if (init_err == ESP_OK || init_err == ESP_ERR_INVALID_STATE) {
                         if (sntp_sync_wait_for_sync(10000) == ESP_OK) {
                             sync_ok = true;
+                        } else {
+                            ESP_LOGW(TAG, "SNTP time sync timed out, proceeding with cloud sync anyway");
+                            sync_ok = true;
                         }
+                    } else {
+                        ESP_LOGW(TAG, "SNTP initialization failed, proceeding with cloud sync anyway");
+                        sync_ok = true;
                     }
                 }
+
                 
                 if (sync_ok) {
                     /* 3. Run Cloud Sync (Telegram) — clear the done bit first */

@@ -32,6 +32,7 @@ void ui_show_user_manager(void) {
 
 void ui_close_user_manager(void) {
     if (!s_user_screen) return;
+    lv_obj_del(s_user_screen);
     s_user_screen = NULL;
     s_user_list = NULL;
     ui_return_to_main();

@@ -46,6 +46,7 @@ static esp_err_t sync_attendance_logs(void);
 static esp_err_t sync_deletions(void);
 static esp_err_t sync_users(void);
 static esp_err_t sync_enrollments(void);
+static esp_err_t sync_report_requests(void);
 static char* build_sync_payload(void);
 static int parse_schedule_response(const char* response, size_t len);
 
@@ -164,6 +165,13 @@ static void cloud_sync_task(void* param) {
     ret = sync_attendance_logs();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Attendance upload failed: %d", ret);
+        overall_result = ret;
+    }
+
+    /* Step 3.5: Process attendance report requests */
+    ret = sync_report_requests();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Report requests sync failed: %d", ret);
         overall_result = ret;
     }
     
@@ -322,11 +330,18 @@ static esp_err_t sync_schedule(void) {
                     const char *title = title_json ? title_json->valuestring : "Scheduled Course";
                     int64_t start_time = start_json->valuedouble;
                     int64_t end_time = end_json->valuedouble;
+                    cJSON *lecturer_json = cJSON_GetObjectItem(item, "lecturer_uuid");
                     
                     int course_id = 0;
                     if (db_insert_or_get_course(code, title, &course_id) == ESP_OK) {
                         db_insert_schedule_from_bot(course_id, start_time, end_time);
                         ESP_LOGI(TAG, "Inserted schedule: Course ID %d, %lld to %lld", course_id, (long long)start_time, (long long)end_time);
+                        
+                        if (lecturer_json && lecturer_json->valuestring && strlen(lecturer_json->valuestring) > 0) {
+                            const char *lecturer_uuid = lecturer_json->valuestring;
+                            ESP_LOGI(TAG, "Linking course code=%s (id=%d) to lecturer_uuid=%s", code, course_id, lecturer_uuid);
+                            db_link_lecturer_course_by_uuid(lecturer_uuid, course_id);
+                        }
                     }
                 }
             }
@@ -583,6 +598,101 @@ static esp_err_t sync_enrollments(void) {
         free(response);
     } else {
         ESP_LOGE(TAG, "Failed to fetch course enrollments from cloud (err=%d)", err);
+    }
+    
+    return err;
+}
+
+static esp_err_t sync_report_requests(void) {
+    if (strlen(s_api_endpoint) == 0) {
+        ESP_LOGW(TAG, "Server endpoint URL not configured. Skipping report requests sync.");
+        return ESP_OK;
+    }
+    
+    char url[512];
+    snprintf(url, sizeof(url), "%s/api/get_report_requests", s_api_endpoint);
+    
+    ESP_LOGI(TAG, "Checking for pending attendance report requests from %s", url);
+    
+    char* response = NULL;
+    size_t response_len = 0;
+    esp_err_t err = http_request(url, "GET", NULL, &response, &response_len);
+    
+    if (err == ESP_OK && response) {
+        cJSON *root = cJSON_Parse(response);
+        if (root && cJSON_IsArray(root)) {
+            int size = cJSON_GetArraySize(root);
+            ESP_LOGI(TAG, "Parsed %d report requests from cloud", size);
+            for (int i = 0; i < size; i++) {
+                cJSON *item = cJSON_GetArrayItem(root, i);
+                cJSON *req_id_json = cJSON_GetObjectItem(item, "request_id");
+                cJSON *code_json = cJSON_GetObjectItem(item, "course_code");
+                cJSON *tel_json = cJSON_GetObjectItem(item, "lecturer_telegram_id");
+                
+                if (req_id_json && code_json && tel_json) {
+                    int request_id = req_id_json->valueint;
+                    const char *course_code = code_json->valuestring;
+                    const char *lecturer_telegram_id = tel_json->valuestring;
+                    
+                    ESP_LOGI(TAG, "Processing report request ID=%d for course %s", request_id, course_code);
+                    
+                    int course_id = 0;
+                    db_insert_or_get_course(course_code, "", &course_id);
+                    
+                    char *report_csv = NULL;
+                    if (db_get_attendance_report(&report_csv, course_id, 0) == ESP_OK && report_csv) {
+                        cJSON *upload_payload = cJSON_CreateObject();
+                        cJSON_AddNumberToObject(upload_payload, "request_id", request_id);
+                        cJSON_AddStringToObject(upload_payload, "course_code", course_code);
+                        cJSON_AddStringToObject(upload_payload, "lecturer_telegram_id", lecturer_telegram_id);
+                        cJSON_AddStringToObject(upload_payload, "csv_data", report_csv);
+                        
+                        char *upload_str = cJSON_PrintUnformatted(upload_payload);
+                        cJSON_Delete(upload_payload);
+                        free(report_csv);
+                        
+                        if (upload_str) {
+                            char upload_url[512];
+                            snprintf(upload_url, sizeof(upload_url), "%s/api/upload_report", s_api_endpoint);
+                            
+                            char *upload_resp = NULL;
+                            size_t upload_resp_len = 0;
+                            esp_err_t upload_err = http_request(upload_url, "POST", upload_str, &upload_resp, &upload_resp_len);
+                            free(upload_str);
+                            
+                            if (upload_err == ESP_OK) {
+                                ESP_LOGI(TAG, "Report request %d uploaded successfully", request_id);
+                            } else {
+                                ESP_LOGE(TAG, "Failed to upload report request %d (err=%d)", request_id, upload_err);
+                            }
+                            if (upload_resp) free(upload_resp);
+                        }
+                    } else {
+                        ESP_LOGW(TAG, "No attendance records found or failed to compile report for course %s", course_code);
+                        cJSON *upload_payload = cJSON_CreateObject();
+                        cJSON_AddNumberToObject(upload_payload, "request_id", request_id);
+                        cJSON_AddStringToObject(upload_payload, "course_code", course_code);
+                        cJSON_AddStringToObject(upload_payload, "lecturer_telegram_id", lecturer_telegram_id);
+                        cJSON_AddStringToObject(upload_payload, "csv_data", "Name,Student ID,Timestamp,Status\nNo attendance logs found for this course.\n");
+                        char *upload_str = cJSON_PrintUnformatted(upload_payload);
+                        cJSON_Delete(upload_payload);
+                        if (upload_str) {
+                            char upload_url[512];
+                            snprintf(upload_url, sizeof(upload_url), "%s/api/upload_report", s_api_endpoint);
+                            char *upload_resp = NULL;
+                            size_t upload_resp_len = 0;
+                            http_request(upload_url, "POST", upload_str, &upload_resp, &upload_resp_len);
+                            free(upload_str);
+                            if (upload_resp) free(upload_resp);
+                        }
+                    }
+                }
+            }
+        }
+        if (root) cJSON_Delete(root);
+        free(response);
+    } else {
+        ESP_LOGE(TAG, "Failed to fetch report requests from cloud (err=%d)", err);
     }
     
     return err;
