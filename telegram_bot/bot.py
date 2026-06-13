@@ -595,7 +595,9 @@ async def main():
         return
         
     # 2. Build Telegram Bot Application
-    bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
+    api_url = os.environ.get("TELEGRAM_API_URL", "https://api.telegram.org/bot")
+    logger.info(f"Using Telegram API endpoint: {api_url}")
+    bot_app = ApplicationBuilder().token(BOT_TOKEN).base_url(api_url).build()
     
     # Registration & Commands
     bot_app.add_handler(CommandHandler("start", start_cmd))

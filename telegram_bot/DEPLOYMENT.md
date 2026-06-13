@@ -27,9 +27,30 @@ This setup runs the bot in **Webhook mode** using a FastAPI web server on Huggin
 
 ---
 
-## Step 2: Inject Your Environment Secrets
+## Step 2: Set Up a Free Cloudflare Worker Proxy (Required)
+Telegram's firewall blocks requests from AWS datacenters, causing a permanent `ConnectTimeout` error on Hugging Face. To bypass this for free and without exposing your token to untrusted third-party proxies, deploy a personal Cloudflare Worker (takes 1 minute, no credit card required):
 
-1. Go to the **Settings** tab of your newly created Space.
+1. Go to [cloudflare.com](https://www.cloudflare.com/) and sign up or log in.
+2. Navigate to **Workers & Pages > Create application > Create Worker**.
+3. Name your worker (e.g. `tg-proxy`) and click **Deploy**.
+4. Click **Edit code** and replace the default code with this 5-line script:
+   ```javascript
+   export default {
+     async fetch(request, env, ctx) {
+       const url = new URL(request.url);
+       url.hostname = "api.telegram.org";
+       return fetch(url.toString(), request);
+     },
+   };
+   ```
+5. Click **Save and deploy**.
+6. Copy your Worker's public URL (e.g., `https://tg-proxy.YOUR_SUBDOMAIN.workers.dev`).
+
+---
+
+## Step 3: Inject Your Environment Secrets
+
+1. Go to the **Settings** tab of your newly created Space on Hugging Face.
 2. Scroll to the **Variables and secrets** section.
 3. Click **New secret** to add your variables:
    
@@ -37,12 +58,11 @@ This setup runs the bot in **Webhook mode** using a FastAPI web server on Huggin
    | :--- | :--- | :--- |
    | `TELEGRAM_BOT_TOKEN` | `your_bot_token_here` | Obtained from `@BotFather` |
    | `PUBLIC_URL` | `https://YOUR_USERNAME-YOUR_SPACE_NAME.hf.space` | **Your public Hugging Face URL** (replace `YOUR_USERNAME` and `YOUR_SPACE_NAME` with your actual details, using hyphens instead of slashes. E.g. `https://danantst-smart-attendance-bot.hf.space`). This activates Webhook mode. |
+   | `TELEGRAM_API_URL` | `https://tg-proxy.YOUR_SUBDOMAIN.workers.dev/bot` | **Your Cloudflare Worker URL** (make sure to append **/bot** to the end of the URL). This bypasses the AWS IP blocks. |
    
 4. Click **Save** for each secret.
 
----
-
-## Step 3: Configure GitHub Actions Auto-Sync
+## Step 4: Configure GitHub Actions Auto-Sync
 
 Every push you make to your GitHub `master` branch will automatically build and deploy your Hugging Face Space:
 
@@ -55,7 +75,7 @@ Every push you make to your GitHub `master` branch will automatically build and 
 
 ---
 
-## Step 4: Verify the Space is Running
+## Step 5: Verify the Space is Running
 
 1. Once the build completes and shows a green **Running** badge, click your Space's public URL:
    `https://YOUR_USERNAME-YOUR_SPACE_NAME.hf.space`
@@ -65,7 +85,7 @@ Every push you make to your GitHub `master` branch will automatically build and 
 
 ---
 
-## Step 5: Update Device Sync Configuration
+## Step 6: Update Device Sync Configuration
 
 To connect your physical attendance device to the cloud bot:
 1. Turn on the ESP32-P4 device.
