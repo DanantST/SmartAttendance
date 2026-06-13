@@ -64,6 +64,26 @@ def init_db():
     )
     """)
     
+    # Table for lecturer course assignments
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS lecturer_courses (
+        lecturer_telegram_id TEXT,
+        course_code TEXT,
+        PRIMARY KEY (lecturer_telegram_id, course_code)
+    )
+    """)
+    
+    # Table for attendance report requests
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS report_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        course_code TEXT NOT NULL,
+        lecturer_telegram_id TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        created_at INTEGER NOT NULL
+    )
+    """)
+    
     conn.commit()
     conn.close()
     logger.info("Database initialized successfully.")
@@ -176,19 +196,26 @@ def add_schedule(telegram_id, course_code, course_title, start_time, end_time):
         WHERE code = ?
     """, (course_title, course_code))
     
+    # 3. Link course to lecturer in lecturer_courses table
+    cursor.execute("""
+        INSERT OR IGNORE INTO lecturer_courses (lecturer_telegram_id, course_code)
+        VALUES (?, ?)
+    """, (str(telegram_id), course_code))
+    
     conn.commit()
     conn.close()
 
 def get_schedules_since(since_timestamp):
-    """Retrieves all schedules created since a specific unix timestamp."""
+    """Retrieves all schedules created since a specific unix timestamp with lecturer UUID."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT course_code, course_title, start_time, end_time 
-        FROM schedules 
-        WHERE created_at > ?
-        ORDER BY created_at ASC
+        SELECT s.course_code, s.course_title, s.start_time, s.end_time, u.uuid as lecturer_uuid
+        FROM schedules s
+        LEFT JOIN users u ON s.telegram_id = u.telegram_id
+        WHERE s.created_at > ?
+        ORDER BY s.created_at ASC
     """, (int(since_timestamp),))
     rows = cursor.fetchall()
     conn.close()
@@ -330,3 +357,81 @@ def reconcile_users(received_uuids):
     except Exception as e:
         logger.error(f"Error during user reconciliation: {e}")
         conn.close()
+
+def link_lecturer_course(telegram_id, course_code):
+    """Links a course code to a lecturer's Telegram ID."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO lecturer_courses (lecturer_telegram_id, course_code)
+        VALUES (?, ?)
+    """, (str(telegram_id), course_code))
+    conn.commit()
+    conn.close()
+
+def get_lecturer_courses(telegram_id):
+    """Retrieves all courses assigned to a lecturer."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT lc.course_code, COALESCE(c.name, 'Course ' || lc.course_code) as name
+        FROM lecturer_courses lc
+        LEFT JOIN courses c ON lc.course_code = c.code
+        WHERE lc.lecturer_telegram_id = ?
+    """, (str(telegram_id),))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def add_report_request(course_code, telegram_id):
+    """Queues a new report request for a course."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now = int(time.time())
+    cursor.execute("""
+        INSERT INTO report_requests (course_code, lecturer_telegram_id, status, created_at)
+        VALUES (?, ?, 'pending', ?)
+    """, (course_code, str(telegram_id), now))
+    conn.commit()
+    conn.close()
+
+def get_pending_report_requests():
+    """Retrieves all pending report requests."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id as request_id, course_code, lecturer_telegram_id 
+        FROM report_requests 
+        WHERE status = 'pending'
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def complete_report_request(request_id):
+    """Marks a report request as completed."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE report_requests 
+        SET status = 'completed' 
+        WHERE id = ?
+    """, (int(request_id),))
+    conn.commit()
+    conn.close()
+
+def get_admin_telegram_id():
+    """Retrieves the Telegram ID of the registered admin."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT telegram_id 
+        FROM users 
+        WHERE role = 'admin' AND telegram_id IS NOT NULL AND telegram_id != '' 
+        LIMIT 1
+    """)
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
