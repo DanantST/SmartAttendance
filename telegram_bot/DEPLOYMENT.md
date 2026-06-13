@@ -32,15 +32,20 @@ In the configuration screen, set the following options:
     | Key | Value | Description |
     | :--- | :--- | :--- |
     | `TELEGRAM_BOT_TOKEN` | `your_bot_token_here` | Your token from `@BotFather` |
-    | `START_WEB_SERVER` | `true` | Starts the web server (required for Koyeb's health checks) |
+    | `START_WEB_SERVER` | `true` | Starts the web server (required for Webhooks and Koyeb's health checks) |
     | `PORT` | `8000` | Overrides the internal container port to match Koyeb's routing |
     | `DATABASE_PATH` | `/app/data/bot_data.db` | Path to the SQLite database |
+    | `PUBLIC_URL` | `https://your-app-name.koyeb.app` | **Your Koyeb app URL** (enables Webhook mode so Telegram wakes up the bot on any new message) |
 
 ### Step 4: Deploy the Service
 1. Click **Deploy** at the bottom of the page.
 2. The service will build and transition to **Healthy**.
-3. Koyeb will provide a public URL (e.g. `https://smart-attendance-bot-yourname.koyeb.app`).
+3. Koyeb will provide a public URL (e.g. `https://smart-attendance-bot-yourname.koyeb.app`). Ensure you copy this URL and add it to your `PUBLIC_URL` environment variable in the service settings (or redeploy after launch to set it).
 4. Set this URL as the cloud server endpoint in your ESP32-P4 device settings!
+
+> [!NOTE]
+> **Koyeb Scale-to-Zero Behavior:** 
+> Since Koyeb Free Instances sleep (scale to zero) after 1 hour of inactivity, configuring the `PUBLIC_URL` is important. This enables **Telegram Webhook** mode. When a user sends a message, Telegram makes a POST request to your webhook, which immediately wakes up the Koyeb container to process the message. When the ESP32 device pings the `/api/` endpoints, it will also wake the service automatically.
 
 ---
 
