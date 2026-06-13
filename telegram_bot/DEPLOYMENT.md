@@ -1,65 +1,52 @@
-# Cloud Deployment Guide (Fly.io & Hugging Face Spaces)
+# Cloud Deployment Guide (Koyeb & Hugging Face Spaces)
 
-This guide provides step-by-step instructions for hosting the cloud Telegram bot. 
+This guide provides step-by-step instructions for hosting the cloud Telegram bot backend.
 
 You can choose between two free hosting targets:
-1. **Fly.io (Recommended):** Fully persistent, free 3GB storage volume, and avoids the IP address blocklists that Telegram imposes on AWS (Hugging Face).
-2. **Hugging Face Spaces:** 100% free (no credit card required), but has ephemeral storage and may experience TLS/connection timeouts when communicating with Telegram due to AWS IP blocks.
+1. **Koyeb (Recommended):** 100% free (no credit card required on the Hobby plan), avoids Telegram's IP blocklists, and runs the bot alongside the FastAPI web server.
+2. **Hugging Face Spaces:** Free (no credit card), but may experience `ConnectTimeout` errors because Telegram blocks AWS IP addresses.
 
 ---
 
-## Target A: Deploying on Fly.io (Recommended)
+## Target A: Deploying on Koyeb (Recommended)
 
-Fly.io runs your Docker container in a micro-VM. It provides a free tier with 3 shared-CPU VMs and 3 GB of persistent disk volume, which is perfect for securing your SQLite database.
+Koyeb runs your Docker container as a free Web Service. Because Koyeb does not run on AWS, its IP addresses are **not** blocked by Telegram, ensuring your bot can connect and long-poll without timeouts.
 
-### Step 1: Install the Fly.io CLI (flyctl)
-Open your terminal (PowerShell on Windows) and run:
-```powershell
-iwr https://fly.io/install.ps1 -useb | iex
-```
-*(Restart your terminal window after installation so the `fly` command is added to your PATH).*
+### Step 1: Sign Up on Koyeb
+1. Go to [koyeb.com](https://www.koyeb.com/) and click **Sign Up**.
+2. Create an account and select the **Hobby** plan (which is free and does **not** require a credit card).
 
-### Step 2: Log In or Sign Up
-Authenticate your account:
-```bash
-fly auth login
-```
-*(Note: Fly.io requires a credit card to verify your identity to prevent spam, but you will not be charged under their free tier).*
+### Step 2: Create a New Service
+1. On your Koyeb Dashboard, click **Create Service**.
+2. Select **GitHub** as the deployment method and authorize your GitHub account.
+3. Select your `SmartAttendance` repository from the list.
 
-### Step 3: Launch the Application
-Run the launch utility from the root of the project:
-```bash
-fly launch
-```
-During the prompt:
-1. **An existing fly.toml was found. Copy config?** Type `y` (Yes).
-2. **Would you like to set up a Postgres database / Redis?** Type `n` (No).
-3. **Would you like to deploy now?** Type `n` (No) — *we must create our storage volume and token secret first.*
+### Step 3: Configure Deployment Fields
+In the configuration screen, set the following options:
+*   **Service Type:** **Web Service** (default).
+*   **Builder:** Select **Docker** (Koyeb will automatically detect the `Dockerfile` at the root of our repository).
+*   **Ports:** 
+    *   Set the port number to **`8000`** (change from the default 80 if needed) and protocol to **HTTP**.
+*   **Environment Variables:** Click **Add Variable** to configure:
+    
+    | Key | Value | Description |
+    | :--- | :--- | :--- |
+    | `TELEGRAM_BOT_TOKEN` | `your_bot_token_here` | Your token from `@BotFather` |
+    | `START_WEB_SERVER` | `true` | Starts the web server (required for Koyeb's health checks) |
+    | `PORT` | `8000` | Overrides the internal container port to match Koyeb's routing |
+    | `DATABASE_PATH` | `/app/data/bot_data.db` | Path to the SQLite database |
 
-### Step 4: Create a Persistent Storage Volume
-To ensure your SQLite database persists across redeploys, create a 1 GB volume (replace `bos` with the region you selected during `fly launch`):
-```bash
-fly volumes create bot_db_volume --size 1 --region bos
-```
-
-### Step 5: Inject Your Bot Token
-Inject your Telegram Bot Token securely into the environment variables:
-```bash
-fly secrets set TELEGRAM_BOT_TOKEN="your_actual_bot_token_here"
-```
-
-### Step 6: Deploy to Fly.io
-Deploy your application:
-```bash
-fly deploy
-```
-Once deployed, Fly.io will give you a public URL (e.g. `https://smart-attendance-bot.fly.dev`). Set this URL in your physical ESP32-P4 device settings!
+### Step 4: Deploy the Service
+1. Click **Deploy** at the bottom of the page.
+2. The service will build and transition to **Healthy**.
+3. Koyeb will provide a public URL (e.g. `https://smart-attendance-bot-yourname.koyeb.app`).
+4. Set this URL as the cloud server endpoint in your ESP32-P4 device settings!
 
 ---
 
 ## Target B: Deploying on Hugging Face Spaces (Docker)
 
-If you do not have a credit card to verify a Fly.io account, you can use Hugging Face Spaces.
+Hugging Face Spaces is another free hosting option (no credit card required), but is prone to connection timeouts since Telegram frequently blocks AWS IP addresses.
 
 ### Step 1: Create a Space on Hugging Face
 1. Log in to [huggingface.co](https://huggingface.co/) and click **New Space**.
@@ -76,4 +63,4 @@ If you do not have a credit card to verify a Fly.io account, you can use Hugging
 ### Step 3: Configure GitHub Actions Auto-Sync
 If you set up the GitHub secret (`HF_TOKEN` containing your Hugging Face write token), every push to your GitHub `master` branch will automatically build and deploy your Space.
 
-*Note: If the Space logs show a `ConnectTimeout` to `api.telegram.org`, Telegram's DDoS firewall has temporarily blocked the AWS IP address assigned to your Hugging Face container. Restarting the Space (to assign a new IP) or switching to Fly.io will resolve this.*
+*Note: If the Space logs show a `ConnectTimeout` to `api.telegram.org`, Telegram's DDoS firewall has blocked the AWS IP address assigned to your Hugging Face container. Restarting the Space (to get a new IP) or switching to Koyeb will resolve this.*
