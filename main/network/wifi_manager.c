@@ -51,10 +51,14 @@ static int s_retry_count = 0;
 static char s_current_ssid[32] = {0};
 static char s_current_password[64] = {0};
 
+static const bool FORCE_CONNECT_TRUE = true;
+static const bool FORCE_CONNECT_FALSE = false;
+
 /* Forward declarations */
 static void event_handler(void* arg, esp_event_base_t event_base,
                           int32_t event_id, void* event_data);
 static esp_err_t wifi_init_sta(void);
+static void wifi_auto_connect_daemon(void* pvParameters);
 
 /**
  * Issue 5.1: Replaced ESP_ERROR_CHECK (which aborts on failure) with
@@ -118,6 +122,9 @@ esp_err_t wifi_manager_init(void) {
     }
     esp_wifi_set_ps(WIFI_PS_NONE);
     esp_wifi_set_max_tx_power(50);
+    
+    /* Start background Wi-Fi Auto-Connect Daemon */
+    xTaskCreate(wifi_auto_connect_daemon, "wifi_daemon", 3072, NULL, 4, NULL);
     
     ESP_LOGI(TAG, "Wi-Fi manager initialized");
     return ESP_OK;
@@ -224,6 +231,11 @@ esp_err_t wifi_manager_connect(const char* ssid, const char* password) {
 }
 
 static void connect_saved_task(void* arg) {
+    bool force_connect = true;
+    if (arg != NULL) {
+        force_connect = *(const bool*)arg;
+    }
+
     nvs_handle_t nvs;
     if (nvs_open(WIFI_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) { vTaskDelete(NULL); return; }
     
@@ -265,27 +277,72 @@ static void connect_saved_task(void* arg) {
         }
     }
     
-    /* If no scan match, try the most recently used (index 0) */
-    char key[16], p_key[16];
-    size_t len = sizeof(s_current_ssid);
-    size_t p_len = sizeof(s_current_password);
-    snprintf(key, sizeof(key), "%s0", NVS_KEY_SSID_PFX);
-    snprintf(p_key, sizeof(p_key), "%s0", NVS_KEY_PASS_PFX);
-    
-    nvs_get_str(nvs, key, s_current_ssid, &len);
-    if (nvs_get_str(nvs, p_key, s_current_password, &p_len) != ESP_OK) {
-        s_current_password[0] = '\0';
+    /* If no scan match, try the most recently used (index 0) if force_connect is true */
+    if (force_connect) {
+        char key[16], p_key[16];
+        size_t len = sizeof(s_current_ssid);
+        size_t p_len = sizeof(s_current_password);
+        snprintf(key, sizeof(key), "%s0", NVS_KEY_SSID_PFX);
+        snprintf(p_key, sizeof(p_key), "%s0", NVS_KEY_PASS_PFX);
+        
+        nvs_get_str(nvs, key, s_current_ssid, &len);
+        if (nvs_get_str(nvs, p_key, s_current_password, &p_len) != ESP_OK) {
+            s_current_password[0] = '\0';
+        }
+        
+        nvs_close(nvs);
+        wifi_init_sta();
+    } else {
+        ESP_LOGI(TAG, "No matching saved network detected in scan. Skipping background connection attempt.");
+        nvs_close(nvs);
     }
     
-    nvs_close(nvs);
-    
-    wifi_init_sta();
     vTaskDelete(NULL);
 }
 
 esp_err_t wifi_manager_connect_saved(void) {
-    xTaskCreate(connect_saved_task, "connect_saved", 4096, NULL, 5, NULL);
+    xTaskCreate(connect_saved_task, "connect_saved", 4096, (void*)&FORCE_CONNECT_TRUE, 5, NULL);
     return ESP_OK;
+}
+
+static void wifi_auto_connect_daemon(void* pvParameters) {
+    (void)pvParameters;
+    ESP_LOGI(TAG, "Wi-Fi Auto-Connect Daemon started");
+    
+    // Initial delay to allow startup/calibration to finish
+    vTaskDelay(pdMS_TO_TICKS(30000));
+    
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(300000)); // sleep for 5 minutes (300,000 ms)
+        
+        if (get_system_state() == SYSTEM_STATE_ENROLLMENT) {
+            ESP_LOGD(TAG, "Auto-Connect Daemon: System is in enrollment mode, skipping scan");
+            continue;
+        }
+        
+        wifi_status_t status = wifi_manager_get_status();
+        if (status == WIFI_STATUS_CONNECTED || status == WIFI_STATUS_CONNECTING) {
+            ESP_LOGD(TAG, "Auto-Connect Daemon: Already connected or connecting, skipping scan");
+            continue;
+        }
+        
+        // Check if there are any saved credentials
+        nvs_handle_t nvs;
+        if (nvs_open(WIFI_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+            continue;
+        }
+        int32_t count = 0;
+        nvs_get_i32(nvs, NVS_KEY_COUNT, &count);
+        nvs_close(nvs);
+        
+        if (count == 0) {
+            ESP_LOGD(TAG, "Auto-Connect Daemon: No saved Wi-Fi networks in NVS, skipping scan");
+            continue;
+        }
+        
+        ESP_LOGI(TAG, "Auto-Connect Daemon: Running periodic scan for known networks...");
+        xTaskCreate(connect_saved_task, "connect_saved", 4096, (void*)&FORCE_CONNECT_FALSE, 5, NULL);
+    }
 }
 
 esp_err_t wifi_manager_save_credentials(const char* ssid, const char* password) {
