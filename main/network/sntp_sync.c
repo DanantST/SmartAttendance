@@ -26,8 +26,8 @@ static void sntp_sync_notification_cb(struct timeval *tv) {
 esp_err_t sntp_sync_init(void) {
     ESP_LOGI(TAG, "Initializing SNTP");
     
-    /* Set timezone to UK (GMT/BST) - 0 hours from UTC, but handles DST */
-    setenv("TZ", "GMT0BST,M3.5.0/1,M10.5.0", 1);
+    /* Set timezone to WAT (West Africa Time) - GMT+1, no DST */
+    setenv("TZ", "WAT-1", 1);
     tzset();
     
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
