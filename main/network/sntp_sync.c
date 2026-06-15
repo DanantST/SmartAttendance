@@ -30,7 +30,10 @@ esp_err_t sntp_sync_init(void) {
     setenv("TZ", "WAT-1", 1);
     tzset();
     
-    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    /* Clean up any existing SNTP instance to force a fresh sync on reconnection */
+    esp_netif_sntp_deinit();
+    
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("time.google.com");
     config.sync_cb = sntp_sync_notification_cb;
     
     esp_err_t ret = esp_netif_sntp_init(&config);

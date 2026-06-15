@@ -24,6 +24,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include <time.h>
+#include <sys/time.h>
 
 static const char* TAG = "CLOUD_SYNC";
 
@@ -241,6 +242,35 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt) {
     return ESP_OK;
 }
 
+static time_t my_timegm(struct tm *tm) {
+    int year = tm->tm_year + 1900;
+    int month = tm->tm_mon; /* 0-based */
+    int day = tm->tm_mday - 1;
+    
+    static const int days_in_months[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    
+    long days = 0;
+    for (int y = 1970; y < year; y++) {
+        days += 365;
+        if ((y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)) {
+            days++;
+        }
+    }
+    
+    for (int m = 0; m < month; m++) {
+        days += days_in_months[m];
+        if (m == 1) { /* February */
+            if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)) {
+                days++;
+            }
+        }
+    }
+    
+    days += day;
+    
+    return (time_t)(days * 86400 + tm->tm_hour * 3600 + tm->tm_min * 60 + tm->tm_sec);
+}
+
 static esp_err_t http_request(const char* url, const char* method,
                                const char* post_data, char** response,
                                size_t* response_len) {
@@ -274,6 +304,22 @@ static esp_err_t http_request(const char* url, const char* method,
     esp_err_t err = esp_http_client_perform(client);
     if (err == ESP_OK) {
         int status_code = esp_http_client_get_status_code(client);
+        
+        /* Check HTTP Date header and update system time as a fallback for SNTP */
+        char *date_val = NULL;
+        if (esp_http_client_get_header(client, "Date", &date_val) == ESP_OK && date_val) {
+            struct tm tm;
+            memset(&tm, 0, sizeof(struct tm));
+            if (strptime(date_val, "%a, %d %b %Y %H:%M:%S GMT", &tm) != NULL) {
+                time_t t = my_timegm(&tm);
+                if (t > 1700000000) { /* verify valid epoch (after year 2024) */
+                    struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
+                    settimeofday(&tv, NULL);
+                    ESP_LOGI(TAG, "Synchronized system time from HTTP Date header: %s (epoch %lld)", date_val, (long long)t);
+                }
+            }
+        }
+
         if (status_code == 200 || status_code == 201) {
             if (resp_ctx.buffer && resp_ctx.len > 0) {
                 resp_ctx.buffer[resp_ctx.len] = '\0';
@@ -352,6 +398,7 @@ static esp_err_t sync_schedule(void) {
         ESP_LOGE(TAG, "Failed to fetch schedules from cloud (err=%d)", err);
     }
     
+    db_dump_schedules();
     return err;
 }
 
