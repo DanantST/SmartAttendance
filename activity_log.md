@@ -1748,3 +1748,56 @@ The user confirmed the device successfully recognizes the user with a similarity
 
 ---
 
+### [2026-06-15 15:00] — Course & Schedule Deletions, Edit Schedule Notifications, and SQLite Cascades
+
+- **Category:** Database Sync / SQLite Cascades / Telegram Bot UI / Reports
+- **Altered Files:**
+  - `telegram_bot/db.py` (modified)
+  - `telegram_bot/bot.py` (modified)
+  - `main/database/db_manager.h` (modified)
+  - `main/database/db_manager.c` (modified)
+  - `main/network/cloud_sync.c` (modified)
+- **Status:** ✅ Completed, Compiled, Flashed & Verified on COM5
+
+---
+
+#### Detailed Summary of Issues & Technical Resolutions
+
+##### 1. Wipe Protection & Lecturer Preservation
+- **The Issue:**
+  The user reconciliation process (`reconcile_users` inside `db.py`) previously deleted any user whose UUID was not in the sync payload sent by the device. Since the device only synchronizes student enrollment data, lecturers (like `Prof John Doe`) were missing from the payload and got wiped out, disassigning them from their courses.
+- **The Resolution:**
+  Modified `reconcile_users()` in `telegram_bot/db.py` to only process and reconcile users with `role = 'student'`. Lecturer and admin accounts are now safely preserved in the database.
+
+##### 2. Course & Schedule Deletions with SQLite Cascades
+- **The Issue:**
+  Deleting a course on Telegram did not propagate to the device, and there was no way to cancel schedule entries cleanly on the device without custom sync protocols.
+- **The Resolution:**
+  - **Telegram Database:** Added `course_deletions` and `schedule_deletions` tables to the cloud bot DB. Deleting a course/schedule logs the deletion with `deleted_at = now()`.
+  - **REST Endpoints:** Added `GET /api/get_course_deletions` and `GET /api/get_schedule_deletions`.
+  - **Device Database:** Enabled `PRAGMA foreign_keys = ON;` in `db_manager_init()` to enforce cascade deletions. Added `db_delete_course_by_code()` and `db_delete_schedule_by_details()` to delete records. When a course is deleted, SQLite Cascades automatically wipe related entries in `lecturer_courses`, `user_courses`, `schedule`, and `attendance` logs without removing the student user records from the `users` table.
+  - **Device Sync:** Implemented `sync_course_deletions()` and `sync_schedule_deletions()` in `cloud_sync.c`. The sync task runs these deletions first, ensuring old slots are removed before downloading new schedules.
+
+##### 3. Edit Schedule Workflow & Notifications
+- **The Issue:**
+  Editing a schedule needed to be propagated to the device cleanly, and students needed to be alerted.
+- **The Resolution:**
+  - Implemented `edit_schedule_conv` conversation handler on Telegram. Editing a schedule logs a schedule deletion for the old time slot and updates the schedule record with `created_at = now()`.
+  - During the next sync cycle, the device pulls deletions (deleting the old slot) and pulls new schedules (inserting the updated slot).
+  - Triggers `notify_students_schedule_change()` to immediately notify all students registered for the course.
+
+##### 4. Attendance Report Query Correction
+- **The Issue:**
+  The report generator on the device fetched identical global CSV files instead of filtering logs by course.
+- **The Resolution:**
+  Updated `db_get_attendance_report()` in `db_manager.c` to join with the `schedule` table and filter by `course_id` (e.g., `WHERE (?1 = 0 OR s.course_id = ?1)`) to pull correct, course-specific reports.
+
+##### 5. User Registration Prompts, Abort Keyboard, and DB Persistence
+- **The Resolution:**
+  - Automatically prompt students to register for courses immediately at the first sync after enrollment.
+  - Added a `❌ Abort Process` reply markup keyboard to all text-prompt inputs in conversation handlers.
+  - Resolved persistent database path resolution in `db.py` to prioritize the `/data` mount path if it is writable on Hugging Face Spaces.
+
+
+---
+
