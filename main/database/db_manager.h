@@ -98,6 +98,16 @@ int db_get_unsynced_log_count(void);
 esp_err_t db_delete_user(uint32_t user_id);
 
 /**
+ * @brief Delete a course by its course code
+ */
+esp_err_t db_delete_course_by_code(const char* code);
+
+/**
+ * @brief Delete a schedule by course code and time slot
+ */
+esp_err_t db_delete_schedule_by_details(const char* course_code, int64_t start_time, int64_t end_time);
+
+/**
  * @brief Delete a user by their UUID
  */
 esp_err_t db_delete_user_by_uuid(const char* uuid);
@@ -107,6 +117,18 @@ esp_err_t db_delete_user_by_uuid(const char* uuid);
  */
 esp_err_t db_update_user_telegram_id(const char* uuid, const char* telegram_id);
 esp_err_t db_link_lecturer_course_by_uuid(const char* lecturer_uuid, int course_id);
+
+typedef struct {
+    uint32_t id;
+    char course_code[32];
+    char course_name[64];
+    char lecturer_name[64];
+    uint32_t start_time;
+    uint32_t end_time;
+} db_schedule_t;
+
+esp_err_t db_get_future_schedules(db_schedule_t **schedules, int *count);
+esp_err_t db_dump_schedules(void);
 
 /**
  * @brief Delete a user by their student ID

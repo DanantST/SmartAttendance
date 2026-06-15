@@ -67,6 +67,12 @@ wifi_status_t wifi_manager_get_status(void);
 int wifi_manager_get_rssi(void);
 
 /**
+ * @brief Get the current connection retry attempt count
+ * @return current retry count
+ */
+int wifi_manager_get_retry_count(void);
+
+/**
  * @brief Save current network credentials to NVS
  * @param ssid network SSID
  * @param password network password

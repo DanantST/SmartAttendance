@@ -30,6 +30,7 @@ extern "C" {
 
 // Declaration of functions implemented in wifi_manager.c
 esp_err_t wifi_manager_connect_saved(void);
+esp_err_t wifi_manager_disconnect(void);
 
 #ifdef __cplusplus
 }
@@ -729,7 +730,8 @@ esp_err_t wifi_ap_portal_start(void) {
     ESP_LOGW(TAG, "=============================================");
 
     // 1. Temporarily stop any STA active scans or connect tasks
-    esp_wifi_disconnect();
+    wifi_manager_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(500)); // Allow other tasks to see disconnection and abort
     esp_wifi_stop();
 
     // 2. Initialize default AP netif if not already done

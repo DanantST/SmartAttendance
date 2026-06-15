@@ -68,3 +68,7 @@ CONFIG_FATFS_MAX_LFN=255
 # Increase Task Watchdog timeout to 30s: LVGL rendering of complex screens
 # can legitimately take longer than the default 5s on PSRAM-based draw buffers.
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+
+# Captive Portal HTTP Server limits for mobile browsers
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+CONFIG_HTTPD_MAX_URI_LEN=1024

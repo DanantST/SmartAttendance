@@ -94,7 +94,7 @@ extern "C" {
 #define DEVICE_LOCATION             "Lab Block A"       /* Default; overrideable in NVS */
 
 /* ==================== Network Configuration ==================== */
-#define WIFI_MAX_RETRY              5
+#define WIFI_MAX_RETRY              7
 #define WIFI_CONNECT_TIMEOUT_MS     10000
 #define CLOUD_SYNC_INTERVAL_MS      21600000         // 6 hours
 #define CLOUD_API_TIMEOUT_MS        15000

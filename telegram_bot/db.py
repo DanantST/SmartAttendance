@@ -5,7 +5,13 @@ import os
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.environ.get("DATABASE_PATH", os.path.join(os.path.dirname(__file__), "bot_data.db"))
+# Try to default to /data/bot_data.db if running in an environment (like HF Spaces) with persistent storage,
+# otherwise fall back to the local directory
+default_db_path = os.path.join(os.path.dirname(__file__), "bot_data.db")
+if os.path.exists("/data") and os.access("/data", os.W_OK):
+    default_db_path = "/data/bot_data.db"
+
+DB_PATH = os.environ.get("DATABASE_PATH", default_db_path)
 
 def init_db():
     """Initializes the database schema."""
@@ -90,6 +96,25 @@ def init_db():
         phone_number TEXT PRIMARY KEY,
         telegram_id TEXT NOT NULL,
         created_at INTEGER NOT NULL
+    )
+    """)
+    
+    # Table to track course deletions
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS course_deletions (
+        course_code TEXT PRIMARY KEY,
+        deleted_at INTEGER NOT NULL
+    )
+    """)
+
+    # Table to track schedule deletions
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS schedule_deletions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        course_code TEXT NOT NULL,
+        start_time INTEGER NOT NULL,
+        end_time INTEGER NOT NULL,
+        deleted_at INTEGER NOT NULL
     )
     """)
     
@@ -355,9 +380,9 @@ def reconcile_users(received_uuids):
         db_users = cursor.fetchall()
         for row in db_users:
             db_uuid, role = row[0], row[1]
-            # If it's a student (or user synced from device) and not in received list
+            # If it's a student and not in received list
             # and is NOT a dev user (we check if UUID starts with "dev-uuid-")
-            if db_uuid not in received_uuids and not db_uuid.startswith("dev-uuid-"):
+            if role == "student" and db_uuid not in received_uuids and not db_uuid.startswith("dev-uuid-"):
                 logger.info(f"Reconciling: Deleting user {db_uuid} from bot DB (missing in sync payload)")
                 cursor.execute("DELETE FROM user_courses WHERE user_uuid = ?", (db_uuid,))
                 cursor.execute("DELETE FROM users WHERE uuid = ?", (db_uuid,))
@@ -499,4 +524,127 @@ def get_enrolled_students(course_code):
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+def get_lecturer_schedules(telegram_id):
+    """Retrieves all schedules created by a specific lecturer."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, course_code, course_title, start_time, end_time 
+        FROM schedules 
+        WHERE telegram_id = ? 
+        ORDER BY start_time ASC
+    """, (str(telegram_id),))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def delete_schedule(schedule_id):
+    """Deletes a schedule by its ID and logs the deletion so the device can sync it."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        # Get schedule details to log deletion
+        cursor.execute("SELECT course_code, start_time, end_time FROM schedules WHERE id = ?", (schedule_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False
+            
+        course_code, start_time, end_time = row
+        
+        # Delete from schedules table
+        cursor.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
+        
+        # Log deletion
+        now = int(time.time())
+        cursor.execute("""
+            INSERT INTO schedule_deletions (course_code, start_time, end_time, deleted_at)
+            VALUES (?, ?, ?, ?)
+        """, (course_code, start_time, end_time, now))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error deleting schedule {schedule_id}: {e}")
+        conn.close()
+        return False
+
+def delete_course(course_code):
+    """Deletes a course globally, removing it from schedules, enrollments, and logging the deletion."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        # Delete from courses
+        cursor.execute("DELETE FROM courses WHERE code = ?", (course_code,))
+        # Delete from lecturer_courses
+        cursor.execute("DELETE FROM lecturer_courses WHERE course_code = ?", (course_code,))
+        # Delete from user_courses
+        cursor.execute("DELETE FROM user_courses WHERE course_code = ?", (course_code,))
+        
+        # Log deletions for schedules associated with this course before deleting them
+        cursor.execute("SELECT start_time, end_time FROM schedules WHERE course_code = ?", (course_code,))
+        schedules_to_delete = cursor.fetchall()
+        
+        now = int(time.time())
+        for s in schedules_to_delete:
+            cursor.execute("""
+                INSERT INTO schedule_deletions (course_code, start_time, end_time, deleted_at)
+                VALUES (?, ?, ?, ?)
+            """, (course_code, s[0], s[1], now))
+            
+        # Delete from schedules
+        cursor.execute("DELETE FROM schedules WHERE course_code = ?", (course_code,))
+        
+        # Log course deletion
+        cursor.execute("""
+            INSERT OR REPLACE INTO course_deletions (course_code, deleted_at)
+            VALUES (?, ?)
+        """, (course_code, now))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error deleting course {course_code}: {e}")
+        conn.close()
+        return False
+
+def update_schedule_time(schedule_id, start_time, end_time):
+    """Updates the schedule time and logs a deletion for the old time so the device syncs cleanly."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        # Fetch old details first
+        cursor.execute("SELECT course_code, start_time, end_time FROM schedules WHERE id = ?", (schedule_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False
+            
+        course_code, old_start, old_end = row
+        
+        # Log deletion for the old schedule slot
+        now = int(time.time())
+        cursor.execute("""
+            INSERT INTO schedule_deletions (course_code, start_time, end_time, deleted_at)
+            VALUES (?, ?, ?, ?)
+        """, (course_code, old_start, old_end, now))
+        
+        # Update schedule with the new time and update created_at so the device pulls it as a new schedule entry
+        cursor.execute("""
+            UPDATE schedules 
+            SET start_time = ?, end_time = ?, created_at = ?
+            WHERE id = ?
+        """, (int(start_time), int(end_time), now, schedule_id))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error updating schedule {schedule_id}: {e}")
+        conn.close()
+        return False
 

@@ -45,6 +45,8 @@ static void cloud_sync_task(void* param);
 static esp_err_t sync_schedule(void);
 static esp_err_t sync_attendance_logs(void);
 static esp_err_t sync_deletions(void);
+static esp_err_t sync_course_deletions(void);
+static esp_err_t sync_schedule_deletions(void);
 static esp_err_t sync_users(void);
 static esp_err_t sync_enrollments(void);
 static esp_err_t sync_report_requests(void);
@@ -134,8 +136,22 @@ static void cloud_sync_task(void* param) {
     s_sync_status = SYNC_STATUS_IN_PROGRESS;
     esp_err_t overall_result = ESP_OK;
     
+    /* Step 0.3: Download course deletions */
+    esp_err_t ret = sync_course_deletions();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Course deletion sync failed: %d", ret);
+        overall_result = ret;
+    }
+
+    /* Step 0.6: Download schedule deletions */
+    ret = sync_schedule_deletions();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Schedule deletion sync failed: %d", ret);
+        overall_result = ret;
+    }
+    
     /* Step 1: Download schedule updates */
-    esp_err_t ret = sync_schedule();
+    ret = sync_schedule();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Schedule sync failed: %d", ret);
         overall_result = ret;
@@ -610,6 +626,93 @@ static esp_err_t sync_deletions(void) {
         free(response);
     } else {
         ESP_LOGE(TAG, "Failed to fetch deletions from cloud (err=%d)", err);
+    }
+    
+    return err;
+}
+
+static esp_err_t sync_course_deletions(void) {
+    if (strlen(s_api_endpoint) == 0) {
+        ESP_LOGW(TAG, "Server endpoint URL not configured. Skipping course deletion sync.");
+        return ESP_OK;
+    }
+    
+    char url[512];
+    snprintf(url, sizeof(url), "%s/api/get_course_deletions?since=%ld", s_api_endpoint, (long)s_last_sync_timestamp);
+    
+    ESP_LOGI(TAG, "Fetching course deletions from %s", url);
+    
+    char* response = NULL;
+    size_t response_len = 0;
+    esp_err_t err = http_request(url, "GET", NULL, &response, &response_len);
+    
+    if (err == ESP_OK && response) {
+        cJSON *root = cJSON_Parse(response);
+        if (root && cJSON_IsArray(root)) {
+            int size = cJSON_GetArraySize(root);
+            if (size > 0) {
+                ESP_LOGI(TAG, "Parsed %d course deletions from cloud", size);
+                for (int i = 0; i < size; i++) {
+                    cJSON *item = cJSON_GetArrayItem(root, i);
+                    cJSON *code_json = cJSON_GetObjectItem(item, "course_code");
+                    if (code_json && code_json->valuestring) {
+                        const char *code = code_json->valuestring;
+                        ESP_LOGI(TAG, "Deleting course with code: %s", code);
+                        db_delete_course_by_code(code);
+                    }
+                }
+            }
+        }
+        if (root) cJSON_Delete(root);
+        free(response);
+    } else {
+        ESP_LOGE(TAG, "Failed to fetch course deletions from cloud (err=%d)", err);
+    }
+    
+    return err;
+}
+
+static esp_err_t sync_schedule_deletions(void) {
+    if (strlen(s_api_endpoint) == 0) {
+        ESP_LOGW(TAG, "Server endpoint URL not configured. Skipping schedule deletion sync.");
+        return ESP_OK;
+    }
+    
+    char url[512];
+    snprintf(url, sizeof(url), "%s/api/get_schedule_deletions?since=%ld", s_api_endpoint, (long)s_last_sync_timestamp);
+    
+    ESP_LOGI(TAG, "Fetching schedule deletions from %s", url);
+    
+    char* response = NULL;
+    size_t response_len = 0;
+    esp_err_t err = http_request(url, "GET", NULL, &response, &response_len);
+    
+    if (err == ESP_OK && response) {
+        cJSON *root = cJSON_Parse(response);
+        if (root && cJSON_IsArray(root)) {
+            int size = cJSON_GetArraySize(root);
+            if (size > 0) {
+                ESP_LOGI(TAG, "Parsed %d schedule deletions from cloud", size);
+                for (int i = 0; i < size; i++) {
+                    cJSON *item = cJSON_GetArrayItem(root, i);
+                    cJSON *code_json = cJSON_GetObjectItem(item, "course_code");
+                    cJSON *st_json = cJSON_GetObjectItem(item, "start_time");
+                    cJSON *et_json = cJSON_GetObjectItem(item, "end_time");
+                    
+                    if (code_json && code_json->valuestring && st_json && et_json) {
+                        const char *code = code_json->valuestring;
+                        int64_t start_time = (int64_t)st_json->valuedouble;
+                        int64_t end_time = (int64_t)et_json->valuedouble;
+                        ESP_LOGI(TAG, "Deleting schedule for course: %s slot: %lld - %lld", code, (long long)start_time, (long long)end_time);
+                        db_delete_schedule_by_details(code, start_time, end_time);
+                    }
+                }
+            }
+        }
+        if (root) cJSON_Delete(root);
+        free(response);
+    } else {
+        ESP_LOGE(TAG, "Failed to fetch schedule deletions from cloud (err=%d)", err);
     }
     
     return err;

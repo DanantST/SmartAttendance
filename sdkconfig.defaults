@@ -84,3 +84,7 @@ CONFIG_BSP_SD_MOUNT_POINT="/sdcard"
 # This eliminates the lv_tlsf heap corruption / WDT crash during enrollment.
 CONFIG_LV_USE_BUILTIN_MALLOC=n
 CONFIG_LV_USE_CLIB_MALLOC=y
+
+# Captive Portal HTTP Server limits for mobile browsers
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+CONFIG_HTTPD_MAX_URI_LEN=1024

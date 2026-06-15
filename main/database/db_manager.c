@@ -23,6 +23,8 @@ static SemaphoreHandle_t s_db_mutex = NULL;
 #define DB_LOCK() do { if (s_db_mutex) xSemaphoreTake(s_db_mutex, portMAX_DELAY); } while(0)
 #define DB_UNLOCK() do { if (s_db_mutex) xSemaphoreGive(s_db_mutex); } while(0)
 
+static esp_err_t db_deduplicate_schedules(void);
+
 /* SQL schema */
 static const char *CREATE_TABLES_SQL =
     "CREATE TABLE IF NOT EXISTS users ("
@@ -120,6 +122,9 @@ esp_err_t db_manager_init(void) {
         ESP_LOGI(TAG, "Database recreated and opened successfully");
     }
 
+    /* Enable foreign key constraint enforcement */
+    sqlite3_exec(s_db, "PRAGMA foreign_keys = ON;", NULL, NULL, NULL);
+
     /* Execute schema */
     char *errmsg = NULL;
     rc = sqlite3_exec(s_db, CREATE_TABLES_SQL, NULL, NULL, &errmsg);
@@ -158,6 +163,10 @@ esp_err_t db_manager_init(void) {
         }
         sqlite3_finalize(seed_stmt);
     }
+
+    /* Clean up any duplicate schedules that may have been created by previous sync cycles */
+    db_deduplicate_schedules();
+    db_dump_schedules();
 
     ESP_LOGI(TAG, "Database initialized");
     return ESP_OK;
@@ -637,6 +646,58 @@ esp_err_t db_delete_user_by_uuid(const char* uuid) {
     return ESP_OK;
 }
 
+esp_err_t db_delete_course_by_code(const char* code) {
+    if (!s_initialized) return ESP_ERR_INVALID_STATE;
+    if (!code) return ESP_ERR_INVALID_ARG;
+
+    DB_LOCK();
+    sqlite3_stmt *stmt;
+    const char *sql = "DELETE FROM courses WHERE code = ?";
+    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        ESP_LOGE(TAG, "Prepare delete course by code failed: %s", sqlite3_errmsg(s_db));
+        DB_UNLOCK();
+        return ESP_FAIL;
+    }
+    sqlite3_bind_text(stmt, 1, code, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    DB_UNLOCK();
+    if (rc != SQLITE_DONE) {
+        ESP_LOGE(TAG, "Failed to delete course by code %s: %s", code, sqlite3_errmsg(s_db));
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "Deleted course %s and cascaded dependent tables", code);
+    return ESP_OK;
+}
+
+esp_err_t db_delete_schedule_by_details(const char* course_code, int64_t start_time, int64_t end_time) {
+    if (!s_initialized) return ESP_ERR_INVALID_STATE;
+    if (!course_code) return ESP_ERR_INVALID_ARG;
+
+    DB_LOCK();
+    sqlite3_stmt *stmt;
+    const char *sql = "DELETE FROM schedule WHERE start_time = ? AND end_time = ? AND course_id IN (SELECT id FROM courses WHERE code = ?)";
+    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        ESP_LOGE(TAG, "Prepare delete schedule by details failed: %s", sqlite3_errmsg(s_db));
+        DB_UNLOCK();
+        return ESP_FAIL;
+    }
+    sqlite3_bind_int64(stmt, 1, start_time);
+    sqlite3_bind_int64(stmt, 2, end_time);
+    sqlite3_bind_text(stmt, 3, course_code, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    DB_UNLOCK();
+    if (rc != SQLITE_DONE) {
+        ESP_LOGE(TAG, "Failed to delete schedule for %s (%lld - %lld): %s", course_code, (long long)start_time, (long long)end_time, sqlite3_errmsg(s_db));
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "Deleted schedule for %s (%lld - %lld) and cascaded logs", course_code, (long long)start_time, (long long)end_time);
+    return ESP_OK;
+}
+
 esp_err_t db_update_user_telegram_id(const char* uuid, const char* telegram_id) {
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
     if (!uuid || !telegram_id) return ESP_ERR_INVALID_ARG;
@@ -725,11 +786,12 @@ esp_err_t db_factory_reset(void) {
 esp_err_t db_get_attendance_report(char **report_str, int course_id, int date_timestamp) {
     if (!s_initialized || !report_str) return ESP_ERR_INVALID_STATE;
 
-    /* Issue 6.5: For now, we return the last 100 records globally. 
-     * You can add WHERE clauses for course_id and date_timestamp later if needed. */
     const char *sql = "SELECT u.student_id, u.name, a.status, time(a.timestamp, 'unixepoch', 'localtime') "
                       "FROM attendance a "
                       "JOIN users u ON a.user_id = u.id "
+                      "JOIN schedule s ON a.schedule_id = s.id "
+                      "WHERE (?1 = 0 OR s.course_id = ?1) "
+                      "  AND (?2 = 0 OR (a.timestamp >= ?2 AND a.timestamp < ?2 + 86400)) "
                       "ORDER BY a.timestamp DESC LIMIT 100;";
 
     DB_LOCK();
@@ -740,6 +802,9 @@ esp_err_t db_get_attendance_report(char **report_str, int course_id, int date_ti
         DB_UNLOCK();
         return ESP_FAIL;
     }
+
+    sqlite3_bind_int(stmt, 1, course_id);
+    sqlite3_bind_int(stmt, 2, date_timestamp);
 
     /* Allocate buffer for the CSV string */
     size_t buf_size = 4096;
@@ -1002,17 +1067,41 @@ esp_err_t db_get_lecturer_by_phone(const char* phone, user_t* out) {
 esp_err_t db_insert_schedule_from_bot(int course_id, int64_t start_ts, int64_t end_ts) {
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
     DB_LOCK();
+    
+    // Check if schedule already exists to prevent duplication
+    sqlite3_stmt *check_stmt;
+    const char *check_sql = "SELECT 1 FROM schedule WHERE course_id = ? AND start_time = ? AND end_time = ? LIMIT 1";
+    int rc = sqlite3_prepare_v2(s_db, check_sql, -1, &check_stmt, NULL);
+    if (rc == SQLITE_OK) {
+        sqlite3_bind_int(check_stmt, 1, course_id);
+        sqlite3_bind_int64(check_stmt, 2, start_ts);
+        sqlite3_bind_int64(check_stmt, 3, end_ts);
+        int step_rc = sqlite3_step(check_stmt);
+        if (step_rc == SQLITE_ROW) {
+            sqlite3_finalize(check_stmt);
+            DB_UNLOCK();
+            ESP_LOGI(TAG, "Schedule already exists (course_id=%d, start=%lld), skipping insert", course_id, (long long)start_ts);
+            return ESP_OK;
+        } else {
+            ESP_LOGI(TAG, "Duplicate check: no duplicate found for course=%d, start=%lld, end=%lld (step_rc=%d)", 
+                     course_id, (long long)start_ts, (long long)end_ts, step_rc);
+        }
+        sqlite3_finalize(check_stmt);
+    } else {
+        ESP_LOGE(TAG, "Prepare duplicate check failed: %s", sqlite3_errmsg(s_db));
+    }
+
     sqlite3_stmt *stmt;
     const char *sql = "INSERT INTO schedule (uuid, course_id, start_time, end_time, created_at) VALUES (lower(hex(randomblob(16))), ?, ?, ?, strftime('%s','now'))";
-    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+    rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         ESP_LOGE(TAG, "Prepare insert schedule failed: %s", sqlite3_errmsg(s_db));
         DB_UNLOCK();
         return ESP_FAIL;
     }
     sqlite3_bind_int(stmt, 1, course_id);
-    sqlite3_bind_int(stmt, 2, (int)start_ts);
-    sqlite3_bind_int(stmt, 3, (int)end_ts);
+    sqlite3_bind_int64(stmt, 2, start_ts);
+    sqlite3_bind_int64(stmt, 3, end_ts);
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     DB_UNLOCK();
@@ -1154,5 +1243,173 @@ bool db_student_id_exists(const char* student_id) {
     sqlite3_finalize(stmt);
     DB_UNLOCK();
     return exists;
+}
+
+esp_err_t db_get_future_schedules(db_schedule_t **schedules, int *count) {
+    if (!s_initialized || !schedules || !count) return ESP_ERR_INVALID_ARG;
+
+    DB_LOCK();
+    time_t now = time(NULL);
+    sqlite3_stmt *stmt;
+    
+    const char *sql = "SELECT s.id, c.code, c.name, s.start_time, s.end_time, u.name "
+                      "FROM schedule s "
+                      "JOIN courses c ON s.course_id = c.id "
+                      "LEFT JOIN lecturer_courses lc ON c.id = lc.course_id "
+                      "LEFT JOIN users u ON lc.lecturer_id = u.id AND u.role = 'lecturer' "
+                      "WHERE s.end_time > ? "
+                      "GROUP BY s.id "
+                      "ORDER BY s.start_time ASC";
+                      
+    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        ESP_LOGE(TAG, "Prepare select future schedules failed: %s", sqlite3_errmsg(s_db));
+        DB_UNLOCK();
+        return ESP_FAIL;
+    }
+
+    sqlite3_bind_int(stmt, 1, (int)now);
+
+    /* Count rows first */
+    *count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) (*count)++;
+    sqlite3_reset(stmt);
+
+    if (*count == 0) {
+        sqlite3_finalize(stmt);
+        DB_UNLOCK();
+        *schedules = NULL;
+        return ESP_OK;
+    }
+
+    *schedules = (db_schedule_t *)heap_caps_malloc((*count) * sizeof(db_schedule_t), MALLOC_CAP_SPIRAM);
+    if (!*schedules) {
+        sqlite3_finalize(stmt);
+        DB_UNLOCK();
+        return ESP_ERR_NO_MEM;
+    }
+
+    int idx = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && idx < *count) {
+        db_schedule_t *s = &(*schedules)[idx];
+        memset(s, 0, sizeof(*s));
+        
+        s->id = sqlite3_column_int(stmt, 0);
+        
+        const char *code = (const char*)sqlite3_column_text(stmt, 1);
+        if (code) strncpy(s->course_code, code, sizeof(s->course_code) - 1);
+        
+        const char *name = (const char*)sqlite3_column_text(stmt, 2);
+        if (name) strncpy(s->course_name, name, sizeof(s->course_name) - 1);
+        
+        s->start_time = sqlite3_column_int(stmt, 3);
+        s->end_time = sqlite3_column_int(stmt, 4);
+        
+        const char *lecturer = (const char*)sqlite3_column_text(stmt, 5);
+        if (lecturer) {
+            strncpy(s->lecturer_name, lecturer, sizeof(s->lecturer_name) - 1);
+        } else {
+            strcpy(s->lecturer_name, "Staff");
+        }
+        
+        idx++;
+    }
+    
+    sqlite3_finalize(stmt);
+    DB_UNLOCK();
+    return ESP_OK;
+}
+
+esp_err_t db_dump_schedules(void) {
+    if (!s_initialized) return ESP_ERR_INVALID_STATE;
+    DB_LOCK();
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT id, course_id, start_time, end_time, uuid FROM schedule";
+    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        ESP_LOGE(TAG, "Prepare dump schedules failed: %s", sqlite3_errmsg(s_db));
+        DB_UNLOCK();
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "=== DEVICE SCHEDULES TABLE DUMP ===");
+    int row_count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        row_count++;
+        int id = sqlite3_column_int(stmt, 0);
+        int course_id = sqlite3_column_int(stmt, 1);
+        int start_time = sqlite3_column_int(stmt, 2);
+        int end_time = sqlite3_column_int(stmt, 3);
+        const char* uuid = (const char*)sqlite3_column_text(stmt, 4);
+        ESP_LOGI(TAG, "  [%d] ID: %d | Course ID: %d | Start: %d | End: %d | UUID: %s",
+                 row_count, id, course_id, start_time, end_time, uuid ? uuid : "NULL");
+    }
+    sqlite3_finalize(stmt);
+    DB_UNLOCK();
+    ESP_LOGI(TAG, "Total schedules in table: %d", row_count);
+    return ESP_OK;
+}
+
+static esp_err_t db_deduplicate_schedules(void) {
+    if (!s_initialized) return ESP_ERR_INVALID_STATE;
+    DB_LOCK();
+    
+    sqlite3_stmt *stmt;
+    // Order by course_id, start_time, end_time so duplicates are contiguous
+    const char *sql = "SELECT id, course_id, start_time, end_time FROM schedule ORDER BY course_id ASC, start_time ASC, end_time ASC, id ASC";
+    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        ESP_LOGE(TAG, "Prepare deduplicate select failed: %s", sqlite3_errmsg(s_db));
+        DB_UNLOCK();
+        return ESP_FAIL;
+    }
+    
+    // We will keep track of the last seen unique combination
+    int last_course_id = -1;
+    int64_t last_start = -1;
+    int64_t last_end = -1;
+    
+    // We can collect IDs to delete
+    int delete_ids[128];
+    int delete_count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        int id = sqlite3_column_int(stmt, 0);
+        int course_id = sqlite3_column_int(stmt, 1);
+        int64_t start = sqlite3_column_int64(stmt, 2);
+        int64_t end = sqlite3_column_int64(stmt, 3);
+        
+        if (course_id == last_course_id && start == last_start && end == last_end) {
+            // This is a duplicate!
+            if (delete_count < 128) {
+                delete_ids[delete_count++] = id;
+            }
+        } else {
+            // New unique schedule
+            last_course_id = course_id;
+            last_start = start;
+            last_end = end;
+        }
+    }
+    sqlite3_finalize(stmt);
+    
+    // Now execute delete queries for duplicate IDs
+    if (delete_count > 0) {
+        ESP_LOGI(TAG, "Found %d duplicate schedules to clean up", delete_count);
+        for (int i = 0; i < delete_count; i++) {
+            sqlite3_stmt *del_stmt;
+            const char *del_sql = "DELETE FROM schedule WHERE id = ?";
+            if (sqlite3_prepare_v2(s_db, del_sql, -1, &del_stmt, NULL) == SQLITE_OK) {
+                sqlite3_bind_int(del_stmt, 1, delete_ids[i]);
+                sqlite3_step(del_stmt);
+                sqlite3_finalize(del_stmt);
+                ESP_LOGI(TAG, "Deleted duplicate schedule row ID: %d", delete_ids[i]);
+            }
+        }
+    } else {
+        ESP_LOGI(TAG, "No duplicate schedules found in database");
+    }
+    
+    DB_UNLOCK();
+    return ESP_OK;
 }
 

@@ -46,8 +46,11 @@ esp_err_t feature_extractor_run(aligned_face_t *aligned, face_embedding_t *embed
     input_img.pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565LE;
     
     /* Run inference */
-    /* Pass a dummy landmark array since image is pre-aligned */
-    std::vector<int> landmarks = {34, 45, 78, 45, 56, 67, 45, 84, 67, 84};
+    /* Pass a dummy landmark array since image is pre-aligned.
+     * To make the preprocessor compute an identity transform (avoiding a second warp),
+     * the coordinates must match s_std_ldks_112 exactly in its internal order:
+     * [Left Eye, Left Mouth, Nose, Right Eye, Right Mouth]. */
+    std::vector<int> landmarks = {38, 52, 42, 92, 56, 72, 74, 52, 71, 92};
     dl::TensorBase *output_base = s_extractor->run(input_img, landmarks);
     
     if (!output_base) {

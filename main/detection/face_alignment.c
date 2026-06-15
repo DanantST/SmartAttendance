@@ -12,13 +12,16 @@
 
 static const char *TAG = "ALIGN";
 
-/* Canonical landmarks (normalized coordinates) for 112x112 output */
+/* Canonical landmarks (normalized coordinates) for 112x112 output.
+ * Set to match s_std_ldks_112 values from ESP-DL preprocessor exactly,
+ * but ordered as [Left Eye, Right Eye, Nose, Left Mouth, Right Mouth]
+ * to match face_alignment.c / face_detector.cpp ordering. */
 static const float CANONICAL_LANDMARKS[10] = {
-    0.3f * 112, 0.4f * 112,   // left eye
-    0.7f * 112, 0.4f * 112,   // right eye
-    0.5f * 112, 0.6f * 112,   // nose
-    0.4f * 112, 0.75f * 112,  // left mouth
-    0.6f * 112, 0.75f * 112   // right mouth
+    38.2946f, 51.6963f,   // left eye
+    41.5493f, 92.3655f,   // left mouth
+    56.0252f, 71.7366f,   // nose
+    73.5318f, 51.5014f,   // right eye
+    70.7299f, 92.2041f    // right mouth
 };
 
 /* Compute affine transformation from source 2D points to destination 2D points.
@@ -94,21 +97,25 @@ static bool compute_affine(float *src, float *dst, float *M) {
 esp_err_t face_alignment_align(camera_fb_t *fb, detected_face_t *face, aligned_face_t *aligned) {
     if (!fb || !face || !aligned) return ESP_ERR_INVALID_ARG;
 
-    /* Extract source landmarks from face (eyes, nose) */
+    /* Extract source landmarks from face (Left Eye [0], Right Eye [3], Nose [2]) */
     float src[6];
-    for (int i = 0; i < 3; i++) {
-        src[i*2]   = face->landmarks[i*2];
-        src[i*2+1] = face->landmarks[i*2+1];
-    }
+    src[0] = face->landmarks[0]; // Left Eye X
+    src[1] = face->landmarks[1]; // Left Eye Y
+    src[2] = face->landmarks[6]; // Right Eye X
+    src[3] = face->landmarks[7]; // Right Eye Y
+    src[4] = face->landmarks[4]; // Nose X
+    src[5] = face->landmarks[5]; // Nose Y
 
     float dst[6];
-    for (int i = 0; i < 3; i++) {
-        dst[i*2]   = CANONICAL_LANDMARKS[i*2];
-        dst[i*2+1] = CANONICAL_LANDMARKS[i*2+1];
-    }
+    dst[0] = CANONICAL_LANDMARKS[0]; // Left Eye X
+    dst[1] = CANONICAL_LANDMARKS[1]; // Left Eye Y
+    dst[2] = CANONICAL_LANDMARKS[6]; // Right Eye X
+    dst[3] = CANONICAL_LANDMARKS[7]; // Right Eye Y
+    dst[4] = CANONICAL_LANDMARKS[4]; // Nose X
+    dst[5] = CANONICAL_LANDMARKS[5]; // Nose Y
 
     float M[6];
-    bool affine_ok = compute_affine(src, dst, M);
+    bool affine_ok = compute_affine(dst, src, M);
 
     /* If landmarks are degenerate (e.g. fallback box landmarks), override M with
      * a simple scale+translate that maps the bounding box centre to the canonical
@@ -119,9 +126,11 @@ esp_err_t face_alignment_align(camera_fb_t *fb, detected_face_t *face, aligned_f
         float scale_x = (float)FACE_ALIGN_SIZE / (float)(face->w > 0 ? face->w : 1);
         float scale_y = (float)FACE_ALIGN_SIZE / (float)(face->h > 0 ? face->h : 1);
         float scale   = (scale_x < scale_y) ? scale_x : scale_y;
-        /* M maps: dst_pt = scale * (src_pt - face_centre) + (56, 56) */
-        M[0] = scale;  M[1] = 0.0f;   M[2] = -scale * face_cx + FACE_ALIGN_SIZE * 0.5f;
-        M[3] = 0.0f;   M[4] = scale;  M[5] = -scale * face_cy + FACE_ALIGN_SIZE * 0.5f;
+        if (scale < 0.01f) scale = 0.01f;
+        float inv_scale = 1.0f / scale;
+        /* M maps destination to source: src_pt = inv_scale * (dst_pt - 56) + face_centre */
+        M[0] = inv_scale;  M[1] = 0.0f;       M[2] = -inv_scale * FACE_ALIGN_SIZE * 0.5f + face_cx;
+        M[3] = 0.0f;       M[4] = inv_scale;  M[5] = -inv_scale * FACE_ALIGN_SIZE * 0.5f + face_cy;
         ESP_LOGD(TAG, "Affine fallback: bbox crop at (%.0f,%.0f) scale=%.2f", face_cx, face_cy, scale);
     }
 

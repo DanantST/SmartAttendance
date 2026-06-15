@@ -79,19 +79,33 @@ esp_err_t recognizer_identify(face_embedding_t *query, user_t **user, float *con
     *confidence = 0.0f;
 
     if (s_cache_size == 0) {
+        ESP_LOGW(TAG, "recognizer_identify: Cache is empty!");
         return ESP_OK;
     }
+
+    ESP_LOGI(TAG, "Query embedding sample: %d %d %d %d %d",
+             query->values[0], query->values[1], query->values[2], query->values[3], query->values[4]);
 
     float best_sim = -1.0f;
     int best_idx = -1;
 
     for (int i = 0; i < s_cache_size; i++) {
         float sim = cosine_similarity(query, &s_user_cache[i].embedding);
+        ESP_LOGI(TAG, "Compare with cached user %s (id=%d): sim=%.3f, embedding sample=%d %d %d %d %d",
+                 s_user_cache[i].name, (int)s_user_cache[i].id, sim,
+                 s_user_cache[i].embedding.values[0],
+                 s_user_cache[i].embedding.values[1],
+                 s_user_cache[i].embedding.values[2],
+                 s_user_cache[i].embedding.values[3],
+                 s_user_cache[i].embedding.values[4]);
         if (sim > best_sim) {
             best_sim = sim;
             best_idx = i;
         }
     }
+
+    ESP_LOGI(TAG, "Best match: idx=%d (user=%s), sim=%.3f (threshold=%.3f)",
+             best_idx, (best_idx >= 0) ? s_user_cache[best_idx].name : "None", best_sim, RECOGNITION_THRESHOLD);
 
     if (best_sim >= RECOGNITION_THRESHOLD) {
         *user = &s_user_cache[best_idx];

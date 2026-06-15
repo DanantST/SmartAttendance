@@ -255,9 +255,25 @@ static void connect_saved_task(void* arg) {
         vTaskDelete(NULL); return;
     }
     
+    if (force_connect && s_wifi_status == WIFI_STATUS_DISCONNECTED) {
+        s_wifi_status = WIFI_STATUS_CONNECTING;
+    }
+    
+    if (s_wifi_status == WIFI_STATUS_DISCONNECTED) {
+        ESP_LOGI(TAG, "connect_saved_task aborted: Wi-Fi manager is disconnected");
+        nvs_close(nvs);
+        vTaskDelete(NULL); return;
+    }
+    
     /* Scan for networks to find a match among saved ones */
     wifi_ap_record_t scan_results[20];
     int found_count = wifi_manager_scan(scan_results, 20);
+    
+    if (s_wifi_status == WIFI_STATUS_DISCONNECTED) {
+        ESP_LOGI(TAG, "connect_saved_task aborted: Wi-Fi manager was disconnected during scan");
+        nvs_close(nvs);
+        vTaskDelete(NULL); return;
+    }
     
     for (int i = 0; i < count; i++) {
         char key[16], saved_ssid[32];
@@ -279,14 +295,16 @@ static void connect_saved_task(void* arg) {
                 }
                 
                 nvs_close(nvs);
-                wifi_init_sta();
+                if (s_wifi_status != WIFI_STATUS_DISCONNECTED) {
+                    wifi_init_sta();
+                }
                 vTaskDelete(NULL); return;
             }
         }
     }
     
     /* If no scan match, try the most recently used (index 0) if force_connect is true */
-    if (force_connect) {
+    if (force_connect && s_wifi_status != WIFI_STATUS_DISCONNECTED) {
         char key[16], p_key[16];
         size_t len = sizeof(s_current_ssid);
         size_t p_len = sizeof(s_current_password);
@@ -299,9 +317,11 @@ static void connect_saved_task(void* arg) {
         }
         
         nvs_close(nvs);
-        wifi_init_sta();
+        if (s_wifi_status != WIFI_STATUS_DISCONNECTED) {
+            wifi_init_sta();
+        }
     } else {
-        ESP_LOGI(TAG, "No matching saved network detected in scan. Skipping background connection attempt.");
+        ESP_LOGI(TAG, "No matching saved network detected in scan or task aborted. Skipping connection.");
         nvs_close(nvs);
     }
     
@@ -309,6 +329,18 @@ static void connect_saved_task(void* arg) {
 }
 
 esp_err_t wifi_manager_connect_saved(void) {
+    nvs_handle_t nvs;
+    if (nvs_open(WIFI_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    int32_t count = 0;
+    nvs_get_i32(nvs, NVS_KEY_COUNT, &count);
+    nvs_close(nvs);
+    
+    if (count == 0) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
     xTaskCreate(connect_saved_task, "connect_saved", 4096, (void*)&FORCE_CONNECT_TRUE, 5, NULL);
     return ESP_OK;
 }
@@ -420,6 +452,10 @@ esp_err_t wifi_manager_disconnect(void) {
 
 wifi_status_t wifi_manager_get_status(void) {
     return s_wifi_status;
+}
+
+int wifi_manager_get_retry_count(void) {
+    return s_retry_count;
 }
 
 int wifi_manager_get_rssi(void) {

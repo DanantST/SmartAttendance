@@ -77,6 +77,16 @@ UNENROLL_STUDENT_ID, UNENROLL_CONFIRM = range(10, 12)
 # Conversation States for Report Selection
 SELECT_REPORT_COURSE = 12
 
+# Conversation States for Editing Schedule
+(
+    EDIT_SELECT_DATE,
+    EDIT_INPUT_DATE,
+    EDIT_SELECT_START_TIME,
+    EDIT_INPUT_START_TIME,
+    EDIT_SELECT_END_TIME,
+    EDIT_INPUT_END_TIME,
+) = range(20, 26)
+
 # FastAPI Application
 web_app = FastAPI()
 
@@ -135,8 +145,9 @@ async def sync_users(request: Request):
                     db.delete_pending_link(phone_number)
                     # Notify the student asynchronously
                     asyncio.create_task(notify_linked_student(pending_tel_id, name, role))
+                    if role == "student":
+                        asyncio.create_task(prompt_student_course_registration(pending_tel_id, name))
                 db.upsert_user(uuid, name, student_id, phone_number, telegram_id, role)
-        
         # Reconcile: delete users on the bot database that were deleted from the device
         db.reconcile_users(received_uuids)
         
@@ -220,6 +231,50 @@ async def get_deletions(since: int = 0):
         return JSONResponse(status_code=200, content=[{"uuid": uuid} for uuid in deletions])
     except Exception as e:
         logger.error(f"Error fetching deletions: {e}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
+@web_app.get("/api/get_course_deletions")
+async def get_course_deletions(since: int = 0):
+    try:
+        logger.info(f"Device requesting course deletions since: {since}")
+        import sqlite3
+        conn = sqlite3.connect(db.DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT course_code 
+            FROM course_deletions 
+            WHERE deleted_at > ?
+            ORDER BY deleted_at ASC
+        """, (int(since),))
+        rows = cursor.fetchall()
+        conn.close()
+        deletions = [{"course_code": r[0]} for r in rows]
+        return JSONResponse(status_code=200, content=deletions)
+    except Exception as e:
+        logger.error(f"Error fetching course deletions: {e}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
+@web_app.get("/api/get_schedule_deletions")
+async def get_schedule_deletions(since: int = 0):
+    try:
+        logger.info(f"Device requesting schedule deletions since: {since}")
+        import sqlite3
+        conn = sqlite3.connect(db.DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT course_code, start_time, end_time 
+            FROM schedule_deletions 
+            WHERE deleted_at > ?
+            ORDER BY deleted_at ASC
+        """, (int(since),))
+        rows = cursor.fetchall()
+        conn.close()
+        deletions = [{"course_code": r[0], "start_time": r[1], "end_time": r[2]} for r in rows]
+        return JSONResponse(status_code=200, content=deletions)
+    except Exception as e:
+        logger.error(f"Error fetching schedule deletions: {e}")
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 
@@ -404,9 +459,9 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if role in ["lecturer", "admin"]:
             reply_keyboard = ReplyKeyboardMarkup(
                 [
-                    ["📅 Schedule Class", "📊 Attendance Report"],
-                    ["📚 My Courses", "🛠️ Developer Auth"],
-                    ["❓ Help"]
+                    ["📅 Schedule Class", "📅 My Schedules"],
+                    ["📊 Attendance Report", "📚 My Courses"],
+                    ["🛠️ Developer Auth", "❓ Help"]
                 ],
                 resize_keyboard=True
             )
@@ -449,9 +504,9 @@ async def notify_linked_student(telegram_id, name, role):
         try:
             if role in ["lecturer", "admin"]:
                 keyboard = [
-                    ["📅 Schedule Class", "📊 Attendance Report"],
-                    ["📚 My Courses", "🛠️ Developer Auth"],
-                    ["❓ Help"]
+                    ["📅 Schedule Class", "📅 My Schedules"],
+                    ["📊 Attendance Report", "📚 My Courses"],
+                    ["🛠️ Developer Auth", "❓ Help"]
                 ]
             else:
                 keyboard = [
@@ -523,9 +578,9 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if role in ["lecturer", "admin"]:
             reply_keyboard = ReplyKeyboardMarkup(
                 [
-                    ["📅 Schedule Class", "📊 Attendance Report"],
-                    ["📚 My Courses", "🛠️ Developer Auth"],
-                    ["❓ Help"]
+                    ["📅 Schedule Class", "📅 My Schedules"],
+                    ["📊 Attendance Report", "📚 My Courses"],
+                    ["🛠️ Developer Auth", "❓ Help"]
                 ],
                 resize_keyboard=True
             )
@@ -545,6 +600,12 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Your Telegram account has been linked to the attendance device.",
             reply_markup=reply_keyboard,
         )
+        if role == "student":
+            await update.message.reply_text(
+                "📚 Please enroll in your courses immediately to receive attendance notifications. "
+                "Tap the **📚 Enroll in Course** button below to begin!",
+                reply_markup=reply_keyboard
+            )
     else:
         # Save mapping to pending links
         db.add_pending_link(phone_number, user_id)
@@ -580,9 +641,9 @@ async def auth_me_dev_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     reply_keyboard = ReplyKeyboardMarkup(
         [
-            ["📅 Schedule Class", "📊 Attendance Report"],
-            ["📚 My Courses", "🛠️ Developer Auth"],
-            ["❓ Help"]
+            ["📅 Schedule Class", "📅 My Schedules"],
+            ["📊 Attendance Report", "📚 My Courses"],
+            ["🛠️ Developer Auth", "❓ Help"]
         ],
         resize_keyboard=True
     )
@@ -626,19 +687,565 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def my_courses_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lists courses assigned to the lecturer."""
+    """Lists courses assigned to the lecturer with options to delete."""
     user_id = str(update.effective_user.id)
     user = db.get_user_by_telegram_id(user_id)
     if not user or user.get("role") not in ["lecturer", "admin"]:
-        await update.message.reply_text("❌ Unauthorized. Only registered Lecturers or Admins can view courses.")
+        msg = update.message if update.message else update.callback_query.message
+        await msg.reply_text("❌ Unauthorized. Only registered Lecturers or Admins can view courses.")
         return
     
     courses = db.get_lecturer_courses(user_id)
-    if courses:
-        course_list = "\n".join(f"  • **{c['course_code']}** — {c['name']}" for c in courses)
-        await update.message.reply_text(f"📚 **Your Assigned Courses:**\n\n{course_list}", parse_mode="Markdown")
+    if not courses:
+        msg = update.message if update.message else update.callback_query.message
+        await msg.reply_text("📚 You have no courses assigned yet. Tap **📅 Schedule Class** and add a course to assign it to yourself.")
+        return
+    
+    # Show courses as inline buttons
+    keyboard = []
+    for c in courses:
+        keyboard.append([InlineKeyboardButton(f"📚 {c['course_code']} - {c['name']}", callback_data=f"mng_c:view:{c['course_code']}")])
+    keyboard.append([InlineKeyboardButton("❌ Close Menu", callback_data="mng_c:cancel")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    msg_text = "📚 **Your Assigned Courses:**\n\nTap a course below to manage or delete it:"
+    if update.callback_query:
+        await update.callback_query.edit_message_text(msg_text, reply_markup=reply_markup, parse_mode="Markdown")
     else:
-        await update.message.reply_text("📚 You have no courses assigned yet. Tap **📅 Schedule Class** and add a course to assign it to yourself.")
+        await update.message.reply_text(msg_text, reply_markup=reply_markup, parse_mode="Markdown")
+
+async def mng_courses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback query handler for course management."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    
+    parts = data.split(":")
+    action = parts[1]
+    
+    if action == "cancel":
+        await query.edit_message_text("Course management menu closed.")
+        return
+        
+    if action == "list":
+        await my_courses_cmd(update, context)
+        return
+        
+    course_code = parts[2]
+    
+    if action == "view":
+        keyboard = [
+            [InlineKeyboardButton("🗑️ Delete Course", callback_data=f"mng_c:delete:{course_code}")],
+            [InlineKeyboardButton("◀️ Back to Courses", callback_data="mng_c:list")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"📚 **Manage Course: {course_code}**\n\n"
+            f"What would you like to do?",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        
+    elif action == "delete":
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Yes, Delete", callback_data=f"mng_c:confirm_delete:{course_code}"),
+                InlineKeyboardButton("❌ No, Keep", callback_data=f"mng_c:view:{course_code}")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"⚠️ **Are you sure you want to delete the course {course_code}?** ⚠️\n\n"
+            f"This will delete the course and all associated schedules/enrollments on both Telegram and the device. "
+            f"Note: student user accounts will NOT be deleted.",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        
+    elif action == "confirm_delete":
+        if db.delete_course(course_code):
+            await query.edit_message_text(
+                f"✅ **Course {course_code} successfully deleted!**\n\n"
+                f"The physical device will reflect this change during its next sync cycle."
+            )
+        else:
+            await query.edit_message_text("❌ Failed to delete course. It may have already been deleted.")
+
+async def my_schedules_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lists schedules created by the lecturer with options to cancel or edit."""
+    user_id = str(update.effective_user.id)
+    user = db.get_user_by_telegram_id(user_id)
+    if not user or user.get("role") not in ["lecturer", "admin"]:
+        msg = update.message if update.message else update.callback_query.message
+        await msg.reply_text("❌ Unauthorized. Only registered Lecturers or Admins can view schedules.")
+        return
+    
+    schedules = db.get_lecturer_schedules(user_id)
+    if not schedules:
+        msg = update.message if update.message else update.callback_query.message
+        await msg.reply_text("📅 You have no scheduled classes yet. Tap **📅 Schedule Class** to create one.")
+        return
+    
+    text = "📅 **Your Scheduled Classes:**\n\n"
+    keyboard = []
+    
+    for idx, s in enumerate(schedules, 1):
+        start_dt = datetime.datetime.fromtimestamp(s["start_time"])
+        end_dt = datetime.datetime.fromtimestamp(s["end_time"])
+        date_str = start_dt.strftime("%d/%m/%Y")
+        start_time_str = start_dt.strftime("%H:%M")
+        end_time_str = end_dt.strftime("%H:%M")
+        
+        text += (
+            f"**{idx}. {s['course_code']} - {s['course_title']}**\n"
+            f"   📅 Date: {date_str}\n"
+            f"   ⏰ Time: {start_time_str} - {end_time_str}\n\n"
+        )
+        
+        keyboard.append([
+            InlineKeyboardButton(f"✏️ Edit {idx}", callback_data=f"mng_s:edit:{s['id']}"),
+            InlineKeyboardButton(f"❌ Cancel {idx}", callback_data=f"mng_s:delete:{s['id']}")
+        ])
+        
+    keyboard.append([InlineKeyboardButton("❌ Close Menu", callback_data="mng_s:cancel")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+async def mng_schedules_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback query handler for schedule management (cancellations)."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    
+    parts = data.split(":")
+    action = parts[1]
+    
+    if action == "cancel":
+        await query.edit_message_text("Schedule menu closed.")
+        return
+        
+    if action == "list":
+        await my_schedules_cmd(update, context)
+        return
+        
+    schedule_id = int(parts[2])
+    
+    # Fetch schedule info for prompts
+    import sqlite3
+    conn = sqlite3.connect(db.DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT course_code, course_title, start_time, end_time FROM schedules WHERE id = ?", (schedule_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        await query.edit_message_text("❌ Schedule not found.")
+        return
+        
+    course_code, course_title, start_time, end_time = row
+    start_dt = datetime.datetime.fromtimestamp(start_time)
+    end_dt = datetime.datetime.fromtimestamp(end_time)
+    date_str = start_dt.strftime("%d/%m/%Y")
+    time_str = f"{start_dt.strftime('%H:%M')} - {end_dt.strftime('%H:%M')}"
+    
+    if action == "delete":
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Yes, Cancel", callback_data=f"mng_s:confirm_delete:{schedule_id}"),
+                InlineKeyboardButton("❌ No, Keep", callback_data="mng_s:list")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"⚠️ **Are you sure you want to cancel the following class?** ⚠️\n\n"
+            f"**Course:** {course_code} - {course_title}\n"
+            f"**Date:** {date_str}\n"
+            f"**Time:** {time_str}\n\n"
+            f"This will remove the schedule from both Telegram and the device.",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        
+    elif action == "confirm_delete":
+        if db.delete_schedule(schedule_id):
+            await query.edit_message_text(
+                f"✅ **Class schedule for {course_code} cancelled!**\n\n"
+                f"The physical device will reflect this change during its next sync cycle."
+            )
+        else:
+            await query.edit_message_text("❌ Failed to cancel schedule. It may have already been deleted.")
+
+async def edit_schedule_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point for editing a schedule. Fetches old details and starts date selection."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    
+    schedule_id = int(data.split(":")[2])
+    
+    import sqlite3
+    conn = sqlite3.connect(db.DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT course_code, course_title, start_time, end_time FROM schedules WHERE id = ?", (schedule_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        await query.edit_message_text("❌ Schedule not found.")
+        return ConversationHandler.END
+        
+    course_code, course_title, start_time, end_time = row
+    
+    context.user_data["edit_schedule_id"] = schedule_id
+    context.user_data["course_code"] = course_code
+    context.user_data["course_title"] = course_title
+    context.user_data["edit_old_start"] = start_time
+    context.user_data["edit_old_end"] = end_time
+    
+    now = datetime.datetime.now()
+    reply_markup = build_calendar_keyboard(now.year, now.month)
+    
+    await query.edit_message_text(
+        f"Editing schedule for **{course_code} - {course_title}**\n"
+        f"Current: **{datetime.datetime.fromtimestamp(start_time).strftime('%d/%m/%Y %H:%M')}**\n\n"
+        "Please select the NEW **Date** from the calendar:",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+    return EDIT_SELECT_DATE
+
+async def edit_schedule_select_date_nav(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    
+    parts = data.split(":")
+    year = int(parts[1])
+    month = int(parts[2])
+    
+    reply_markup = build_calendar_keyboard(year, month)
+    course_code = context.user_data.get("course_code", "Course")
+    await query.edit_message_text(
+        f"Editing schedule for **{course_code}**\n\n"
+        "Please select the NEW **Date** from the calendar:",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+    return EDIT_SELECT_DATE
+
+async def edit_schedule_select_date_val(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    
+    val = data.split(":")[1]
+    year = int(val[0:4])
+    month = int(val[4:6])
+    day = int(val[6:8])
+    
+    date_str = f"{day:02d}/{month:02d}/{year}"
+    context.user_data["date"] = date_str
+    
+    reply_markup = build_time_selector_keyboard(9, 0, is_end_time=False)
+    await query.edit_message_text(
+        f"Selected Course: **{context.user_data.get('course_code')}**\n"
+        f"Selected NEW Date: **{date_str}**\n\n"
+        "Please select/adjust the NEW **Start Time**:",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+    return EDIT_SELECT_START_TIME
+
+async def edit_schedule_select_date_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(
+        "Please enter the NEW **Date** (Format: DD/MM/YYYY):",
+        reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
+    )
+    await query.message.delete()
+    return EDIT_INPUT_DATE
+
+async def edit_schedule_input_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    date_str = update.message.text.strip()
+    try:
+        datetime.datetime.strptime(date_str, "%d/%m/%Y")
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Invalid date format. Please write it exactly as DD/MM/YYYY (e.g., 18/06/2026):",
+            reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
+        )
+        return EDIT_INPUT_DATE
+
+    context.user_data["date"] = date_str
+    reply_markup = build_time_selector_keyboard(9, 0, is_end_time=False)
+    await update.message.reply_text(
+        f"Selected Date: **{date_str}**\n\n"
+        "Please select/adjust the NEW **Start Time**:",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+    return EDIT_SELECT_START_TIME
+
+async def edit_schedule_time_adj(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    
+    parts = data.split(":")
+    field = parts[1]
+    delta = int(parts[2])
+    is_end_time = bool(int(parts[3]))
+    
+    current_label_btn = query.message.reply_markup.inline_keyboard[0][0].text
+    time_part = current_label_btn.split(": ")[1]
+    hour, minute = map(int, time_part.split(":"))
+    
+    if field == "H":
+        hour = (hour + delta) % 24
+    elif field == "M":
+        minute = (minute + delta) % 60
+        
+    reply_markup = build_time_selector_keyboard(hour, minute, is_end_time)
+    label = "End Time" if is_end_time else "Start Time"
+    course = context.user_data.get("course_code")
+    date = context.user_data.get("date")
+    
+    await query.edit_message_text(
+        f"Editing schedule for **{course}**\n"
+        f"Selected Date: **{date}**\n\n"
+        f"Please select/adjust the NEW **{label}**:",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+    return EDIT_SELECT_END_TIME if is_end_time else EDIT_SELECT_START_TIME
+
+async def edit_schedule_time_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    state = context.user_data.get("time_state", "start")
+    if state == "end":
+        await query.message.reply_text(
+            "Please enter the NEW **End Time** (Format: HH:MM, 24-hour clock, e.g. 11:00):",
+            reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
+        )
+        await query.message.delete()
+        return EDIT_INPUT_END_TIME
+    else:
+        await query.message.reply_text(
+            "Please enter the NEW **Start Time** (Format: HH:MM, 24-hour clock, e.g. 09:00):",
+            reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
+        )
+        await query.message.delete()
+        return EDIT_INPUT_START_TIME
+
+async def edit_schedule_input_start_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    time_str = update.message.text.strip()
+    try:
+        datetime.datetime.strptime(time_str, "%H:%M")
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Invalid time format. Please write it exactly as HH:MM (e.g., 09:30 or 14:00):",
+            reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
+        )
+        return EDIT_INPUT_START_TIME
+
+    context.user_data["start_time"] = time_str
+    context.user_data["time_state"] = "end"
+    
+    h, m = map(int, time_str.split(":"))
+    end_h = (h + 2) % 24
+    reply_markup = build_time_selector_keyboard(end_h, m, is_end_time=True)
+    await update.message.reply_text(
+        f"Start Time set to: **{time_str}**\n\n"
+        "Please select/adjust the NEW **End Time**:",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+    return EDIT_SELECT_END_TIME
+
+async def edit_schedule_time_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    
+    parts = data.split(":")
+    hour = int(parts[1])
+    minute = int(parts[2])
+    is_end_time = bool(int(parts[3]))
+    
+    time_str = f"{hour:02d}:{minute:02d}"
+    
+    if not is_end_time:
+        context.user_data["start_time"] = time_str
+        context.user_data["time_state"] = "end"
+        
+        end_h = (hour + 2) % 24
+        reply_markup = build_time_selector_keyboard(end_h, minute, is_end_time=True)
+        await query.edit_message_text(
+            f"Selected Course: **{context.user_data.get('course_code')}**\n"
+            f"Selected Date: **{context.user_data.get('date')}**\n"
+            f"Start Time set to: **{time_str}**\n\n"
+            "Please select/adjust the NEW **End Time**:",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        return EDIT_SELECT_END_TIME
+    else:
+        context.user_data["end_time"] = time_str
+        return await complete_schedule_edit(query.message, context, is_callback=True)
+
+async def edit_schedule_input_end_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    time_str = update.message.text.strip()
+    try:
+        datetime.datetime.strptime(time_str, "%H:%M")
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Invalid time format. Please write it exactly as HH:MM (e.g., 11:00 or 16:30):",
+            reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
+        )
+        return EDIT_INPUT_END_TIME
+
+    context.user_data["end_time"] = time_str
+    return await complete_schedule_edit(update.message, context, is_callback=False)
+
+async def complete_schedule_edit(message, context, is_callback):
+    date_str = context.user_data["date"]
+    start_time_str = context.user_data["start_time"]
+    end_time_str = context.user_data["end_time"]
+    
+    try:
+        start_dt = datetime.datetime.strptime(f"{date_str} {start_time_str}", "%d/%m/%Y %H:%M")
+        end_dt = datetime.datetime.strptime(f"{date_str} {end_time_str}", "%d/%m/%Y %H:%M")
+        
+        start_epoch = int(start_dt.timestamp())
+        end_epoch = int(end_dt.timestamp())
+        
+        if end_epoch <= start_epoch:
+            err_msg = "❌ End time must be strictly after the start time. Please select/input the End Time again:"
+            if is_callback:
+                h, m = map(int, end_time_str.split(":"))
+                reply_markup = build_time_selector_keyboard(h, m, is_end_time=True)
+                await message.edit_text(err_msg, reply_markup=reply_markup)
+                return EDIT_SELECT_END_TIME
+            else:
+                await message.reply_text(err_msg)
+                return EDIT_INPUT_END_TIME
+
+        schedule_id = context.user_data["edit_schedule_id"]
+        course_code = context.user_data["course_code"]
+        course_title = context.user_data["course_title"]
+        old_start = context.user_data["edit_old_start"]
+        old_end = context.user_data["edit_old_end"]
+        
+        user_id = str(context._user_id)
+        user = db.get_user_by_telegram_id(user_id)
+        lecturer_name = user.get("name") if user else "Lecturer"
+        
+        db.update_schedule_time(schedule_id, start_epoch, end_epoch)
+        
+        old_start_dt = datetime.datetime.fromtimestamp(old_start)
+        old_end_dt = datetime.datetime.fromtimestamp(old_end)
+        asyncio.create_task(notify_students_schedule_change(
+            course_code, course_title, old_start_dt, old_end_dt, start_dt, end_dt, lecturer_name
+        ))
+        
+        success_text = (
+            "✅ **Lecture Schedule Updated Successfully!**\n\n"
+            f"**Course:** {course_code} - {course_title}\n"
+            f"**Old Time:** {old_start_dt.strftime('%d/%m/%Y %H:%M')} - {old_end_dt.strftime('%H:%M')}\n"
+            f"**New Time:** {date_str} {start_time_str} - {end_time_str}\n\n"
+            "All registered students have been immediately notified. The physical device will reflect this change on the next sync."
+        )
+        
+        reply_keyboard = ReplyKeyboardMarkup(
+            [
+                ["📅 Schedule Class", "📅 My Schedules"],
+                ["📊 Attendance Report", "📚 My Courses"],
+                ["🛠️ Developer Auth", "❓ Help"]
+            ],
+            resize_keyboard=True
+        )
+        
+        if is_callback:
+            await message.edit_text(f"Updating schedule for {course_code}...")
+            await message.reply_text(success_text, reply_markup=reply_keyboard, parse_mode="Markdown")
+        else:
+            await message.reply_text(success_text, reply_markup=reply_keyboard, parse_mode="Markdown")
+            
+        return ConversationHandler.END
+
+    except Exception as e:
+        logger.error(f"Error parsing date/times for schedule edit: {e}")
+        err_msg = "❌ An internal error occurred. Please try again."
+        if is_callback:
+            await message.edit_text(err_msg)
+        else:
+            await message.reply_text(err_msg)
+        return ConversationHandler.END
+
+async def prompt_student_course_registration(telegram_id, name):
+    global bot_app
+    if bot_app:
+        try:
+            keyboard = [
+                ["📚 Enroll in Course"],
+                ["👤 My Status", "❓ Help"]
+            ]
+            reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            await bot_app.bot.send_message(
+                chat_id=telegram_id,
+                text=(
+                    f"👋 **Hello {name}!**\n\n"
+                    "You have been successfully registered on the Smart Attendance system.\n"
+                    "Please register/enroll in your available courses immediately so you can receive attendance notifications!\n\n"
+                    "Tap the **📚 Enroll in Course** button below to choose your courses."
+                ),
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+            logger.info(f"Sent course registration prompt to student: {name} ({telegram_id})")
+        except Exception as e:
+            logger.error(f"Failed to send course registration prompt to {telegram_id}: {e}")
+
+async def notify_students_schedule_change(course_code, course_title, old_start_dt, old_end_dt, new_start_dt, new_end_dt, lecturer_name):
+    global bot_app
+    if bot_app:
+        students = db.get_enrolled_students(course_code)
+        logger.info(f"Notifying {len(students)} enrolled students about changed class for {course_code}")
+        
+        old_date_str = old_start_dt.strftime("%d/%m/%Y")
+        old_time_str = f"{old_start_dt.strftime('%H:%M')} - {old_end_dt.strftime('%H:%M')}"
+        
+        new_date_str = new_start_dt.strftime("%d/%m/%Y")
+        new_time_str = f"{new_start_dt.strftime('%H:%M')} - {new_end_dt.strftime('%H:%M')}"
+        
+        message_text = (
+            f"⚠️ **Schedule Change Notification!** ⚠️\n\n"
+            f"The scheduled class for **{course_code} - {course_title}** has been updated by **{lecturer_name}**.\n\n"
+            f"**Old Time:**\n"
+            f"📅 Date: {old_date_str}\n"
+            f"⏰ Time: {old_time_str}\n\n"
+            f"**New Time:**\n"
+            f"📅 Date: {new_date_str}\n"
+            f"⏰ Time: {new_time_str}\n\n"
+            f"Please update your calendars accordingly!"
+        )
+        
+        for student in students:
+            try:
+                await bot_app.bot.send_message(
+                    chat_id=student["telegram_id"],
+                    text=message_text,
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify student {student['telegram_id']} about schedule change: {e}")
 
 async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -655,9 +1262,9 @@ async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if role in ["lecturer", "admin"]:
             reply_keyboard = ReplyKeyboardMarkup(
                 [
-                    ["📅 Schedule Class", "📊 Attendance Report"],
-                    ["📚 My Courses", "🛠️ Developer Auth"],
-                    ["❓ Help"]
+                    ["📅 Schedule Class", "📅 My Schedules"],
+                    ["📊 Attendance Report", "📚 My Courses"],
+                    ["🛠️ Developer Auth", "❓ Help"]
                 ],
                 resize_keyboard=True
             )
@@ -721,9 +1328,11 @@ async def schedule_select_course(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
         
     if data == "c:new":
-        await query.edit_message_text(
-            "Please enter the **Course Code** (e.g., CSC301) for the new course:"
+        await query.message.reply_text(
+            "Please enter the **Course Code** (e.g., CSC301) for the new course:",
+            reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
         )
+        await query.message.delete()
         return INPUT_COURSE_CODE
         
     course_code = data.split(":")[1]
@@ -752,13 +1361,17 @@ async def schedule_select_course(update: Update, context: ContextTypes.DEFAULT_T
 async def schedule_input_course_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     course_code = update.message.text.strip().upper()
     if not course_code:
-        await update.message.reply_text("Please enter a valid course code:")
+        await update.message.reply_text(
+            "Please enter a valid course code:",
+            reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
+        )
         return INPUT_COURSE_CODE
         
     context.user_data["course_code"] = course_code
     await update.message.reply_text(
         f"Course Code set to: {course_code}\n\n"
-        "Now, please enter the **Course Title** (e.g., Database Systems):"
+        "Now, please enter the **Course Title** (e.g., Database Systems):",
+        reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
     )
     return INPUT_COURSE_TITLE
 
@@ -831,9 +1444,11 @@ async def schedule_select_date_val(update: Update, context: ContextTypes.DEFAULT
 async def schedule_select_date_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text(
-        "Please enter the **Date** of the lecture (Format: DD/MM/YYYY):"
+    await query.message.reply_text(
+        "Please enter the **Date** of the lecture (Format: DD/MM/YYYY):",
+        reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
     )
+    await query.message.delete()
     return INPUT_DATE
 
 async def schedule_input_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -842,7 +1457,8 @@ async def schedule_input_date(update: Update, context: ContextTypes.DEFAULT_TYPE
         datetime.datetime.strptime(date_str, "%d/%m/%Y")
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid date format. Please write it exactly as DD/MM/YYYY (e.g., 18/06/2026):"
+            "❌ Invalid date format. Please write it exactly as DD/MM/YYYY (e.g., 18/06/2026):",
+            reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
         )
         return INPUT_DATE
 
@@ -895,14 +1511,18 @@ async def schedule_time_custom(update: Update, context: ContextTypes.DEFAULT_TYP
     
     state = context.user_data.get("time_state", "start")
     if state == "end":
-        await query.edit_message_text(
-            "Please enter the **End Time** (Format: HH:MM, 24-hour clock, e.g. 11:00):"
+        await query.message.reply_text(
+            "Please enter the **End Time** (Format: HH:MM, 24-hour clock, e.g. 11:00):",
+            reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
         )
+        await query.message.delete()
         return INPUT_END_TIME
     else:
-        await query.edit_message_text(
-            "Please enter the **Start Time** (Format: HH:MM, 24-hour clock, e.g. 09:00):"
+        await query.message.reply_text(
+            "Please enter the **Start Time** (Format: HH:MM, 24-hour clock, e.g. 09:00):",
+            reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
         )
+        await query.message.delete()
         return INPUT_START_TIME
 
 async def schedule_input_start_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -911,7 +1531,8 @@ async def schedule_input_start_time(update: Update, context: ContextTypes.DEFAUL
         datetime.datetime.strptime(time_str, "%H:%M")
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid time format. Please write it exactly as HH:MM (e.g., 09:30 or 14:00):"
+            "❌ Invalid time format. Please write it exactly as HH:MM (e.g., 09:30 or 14:00):",
+            reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
         )
         return INPUT_START_TIME
 
@@ -1019,9 +1640,9 @@ async def complete_schedule_creation(message, context, is_callback):
         # Display the lecturer keyboard again
         reply_keyboard = ReplyKeyboardMarkup(
             [
-                ["📅 Schedule Class", "📊 Attendance Report"],
-                ["📚 My Courses", "🛠️ Developer Auth"],
-                ["❓ Help"]
+                ["📅 Schedule Class", "📅 My Schedules"],
+                ["📊 Attendance Report", "📚 My Courses"],
+                ["🛠️ Developer Auth", "❓ Help"]
             ],
             resize_keyboard=True
         )
@@ -1057,9 +1678,9 @@ async def schedule_cancel_callback(update: Update, context: ContextTypes.DEFAULT
         if role in ["lecturer", "admin"]:
             reply_keyboard = ReplyKeyboardMarkup(
                 [
-                    ["📅 Schedule Class", "📊 Attendance Report"],
-                    ["📚 My Courses", "🛠️ Developer Auth"],
-                    ["❓ Help"]
+                    ["📅 Schedule Class", "📅 My Schedules"],
+                    ["📊 Attendance Report", "📚 My Courses"],
+                    ["🛠️ Developer Auth", "❓ Help"]
                 ],
                 resize_keyboard=True
             )
@@ -1230,9 +1851,9 @@ async def report_select_course(update: Update, context: ContextTypes.DEFAULT_TYP
         
     reply_keyboard = ReplyKeyboardMarkup(
         [
-            ["📅 Schedule Class", "📊 Attendance Report"],
-            ["📚 My Courses", "🛠️ Developer Auth"],
-            ["❓ Help"]
+            ["📅 Schedule Class", "📅 My Schedules"],
+            ["📊 Attendance Report", "📚 My Courses"],
+            ["🛠️ Developer Auth", "❓ Help"]
         ],
         resize_keyboard=True
     )
@@ -1258,7 +1879,8 @@ async def unenroll_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "Let's unenroll a student from the system.\n"
-        "Please enter the **Student ID** (Matric ID) of the student:"
+        "Please enter the **Student ID** (Matric ID) of the student:",
+        reply_markup=ReplyKeyboardMarkup([["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
     )
     return UNENROLL_STUDENT_ID
 
@@ -1290,7 +1912,8 @@ async def unenroll_student_id(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"**Student ID:** {student['student_id']}\n"
         f"**Phone:** {student['phone_number'] or 'N/A'}\n\n"
         f"This will delete all their data, course enrollments, and attendance logs.\n"
-        f"Type **YES** to confirm or **NO** to cancel:"
+        f"Type **YES** to confirm or **NO** to cancel:",
+        reply_markup=ReplyKeyboardMarkup([["YES"], ["NO"], ["❌ Abort Process"]], resize_keyboard=True, one_time_keyboard=True)
     )
     return UNENROLL_CONFIRM
 
@@ -1305,9 +1928,9 @@ async def unenroll_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reply_keyboard = ReplyKeyboardMarkup(
         [
-            ["📅 Schedule Class", "📊 Attendance Report"],
-            ["📚 My Courses", "🛠️ Developer Auth"],
-            ["❓ Help"]
+            ["📅 Schedule Class", "📅 My Schedules"],
+            ["📊 Attendance Report", "📚 My Courses"],
+            ["🛠️ Developer Auth", "❓ Help"]
         ],
         resize_keyboard=True
     )
@@ -1336,6 +1959,8 @@ async def button_mapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "📅 Schedule Class":
         return await schedule_start(update, context)
+    elif text == "📅 My Schedules":
+        return await my_schedules_cmd(update, context)
     elif text == "📊 Attendance Report":
         return await report_start(update, context)
     elif text == "📚 My Courses":
@@ -1371,11 +1996,11 @@ async def main():
     bot_app.add_handler(CommandHandler("status", status_cmd))
     bot_app.add_handler(CommandHandler("report", report_start))
     bot_app.add_handler(CommandHandler("courses", my_courses_cmd))
+    bot_app.add_handler(CommandHandler("schedules", my_schedules_cmd))
     bot_app.add_handler(CommandHandler("help", help_cmd))
     bot_app.add_handler(MessageHandler(filters.CONTACT, contact_handler))
-
-
-
+    bot_app.add_handler(CallbackQueryHandler(mng_courses_callback, pattern=r"^mng_c:"))
+    bot_app.add_handler(CallbackQueryHandler(mng_schedules_callback, pattern=r"^mng_s:(delete|confirm_delete|list|cancel)"))
 
     # Course Enrollment Conversation (Students)
     enroll_conv = ConversationHandler(
@@ -1389,7 +2014,10 @@ async def main():
                 CallbackQueryHandler(schedule_cancel_callback, pattern=r"^e:cancel")
             ],
         },
-        fallbacks=[CommandHandler("cancel", cancel_cmd)],
+        fallbacks=[
+            CommandHandler("cancel", cancel_cmd),
+            MessageHandler(filters.Regex(r"^❌ Abort Process$"), cancel_cmd)
+        ],
     )
     bot_app.add_handler(enroll_conv)
 
@@ -1405,7 +2033,10 @@ async def main():
                 CallbackQueryHandler(schedule_cancel_callback, pattern=r"^rep:cancel")
             ]
         },
-        fallbacks=[CommandHandler("cancel", cancel_cmd)],
+        fallbacks=[
+            CommandHandler("cancel", cancel_cmd),
+            MessageHandler(filters.Regex(r"^❌ Abort Process$"), cancel_cmd)
+        ],
     )
     bot_app.add_handler(report_conv)
 
@@ -1453,9 +2084,53 @@ async def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, schedule_input_end_time)
             ],
         },
-        fallbacks=[CommandHandler("cancel", cancel_cmd)],
+        fallbacks=[
+            CommandHandler("cancel", cancel_cmd),
+            MessageHandler(filters.Regex(r"^❌ Abort Process$"), cancel_cmd)
+        ],
     )
     bot_app.add_handler(schedule_conv)
+    
+    # Edit Schedule Conversation Handler (Lecturers)
+    edit_schedule_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(edit_schedule_start, pattern=r"^mng_s:edit:\d+")
+        ],
+        states={
+            EDIT_SELECT_DATE: [
+                CallbackQueryHandler(edit_schedule_select_date_nav, pattern=r"^cal_nav:"),
+                CallbackQueryHandler(edit_schedule_select_date_val, pattern=r"^d:\d+"),
+                CallbackQueryHandler(edit_schedule_select_date_custom, pattern=r"^d:custom"),
+                CallbackQueryHandler(schedule_cancel_callback, pattern=r"^c:cancel")
+            ],
+            EDIT_INPUT_DATE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, edit_schedule_input_date)
+            ],
+            EDIT_SELECT_START_TIME: [
+                CallbackQueryHandler(edit_schedule_time_adj, pattern=r"^t_adj:"),
+                CallbackQueryHandler(edit_schedule_time_custom, pattern=r"^t:custom"),
+                CallbackQueryHandler(edit_schedule_time_confirm, pattern=r"^t_conf:"),
+                CallbackQueryHandler(schedule_cancel_callback, pattern=r"^c:cancel")
+            ],
+            EDIT_INPUT_START_TIME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, edit_schedule_input_start_time)
+            ],
+            EDIT_SELECT_END_TIME: [
+                CallbackQueryHandler(edit_schedule_time_adj, pattern=r"^t_adj:"),
+                CallbackQueryHandler(edit_schedule_time_custom, pattern=r"^t:custom"),
+                CallbackQueryHandler(edit_schedule_time_confirm, pattern=r"^t_conf:"),
+                CallbackQueryHandler(schedule_cancel_callback, pattern=r"^c:cancel")
+            ],
+            EDIT_INPUT_END_TIME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, edit_schedule_input_end_time)
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_cmd),
+            MessageHandler(filters.Regex(r"^❌ Abort Process$"), cancel_cmd)
+        ],
+    )
+    bot_app.add_handler(edit_schedule_conv)
     
     # Unenrollment Conversation Handler (Lecturers/Admins)
     unenroll_conv = ConversationHandler(
@@ -1464,12 +2139,15 @@ async def main():
             UNENROLL_STUDENT_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, unenroll_student_id)],
             UNENROLL_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, unenroll_confirm)],
         },
-        fallbacks=[CommandHandler("cancel", cancel_cmd)],
+        fallbacks=[
+            CommandHandler("cancel", cancel_cmd),
+            MessageHandler(filters.Regex(r"^❌ Abort Process$"), cancel_cmd)
+        ],
     )
     bot_app.add_handler(unenroll_conv)
     
     # Reply Keyboard Button Mapper (general text mapper when not in conversation, registered last to avoid shadowing conversation entry points)
-    button_filter = filters.TEXT & filters.Regex(r"^(📅 Schedule Class|📊 Attendance Report|📚 My Courses|🛠️ Developer Auth|❓ Help|📚 Enroll in Course|👤 My Status)$")
+    button_filter = filters.TEXT & filters.Regex(r"^(📅 Schedule Class|📅 My Schedules|📊 Attendance Report|📚 My Courses|🛠️ Developer Auth|❓ Help|📚 Enroll in Course|👤 My Status)$")
     bot_app.add_handler(MessageHandler(button_filter, button_mapper))
     
     # Initialize Bot App

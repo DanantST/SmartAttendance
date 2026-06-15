@@ -36,6 +36,7 @@ LV_FONT_DECLARE(lv_font_montserrat_48);
 #include "ui_settings.h"
 #include "ui_reports.h"
 #include "ui_user_manager.h"
+#include "ui_schedules.h"
 #include "wifi_manager.h"
 
 static void update_time_task(lv_timer_t *timer);
@@ -52,6 +53,12 @@ static void keyboard_close_cb(lv_event_t *e) {
 static lv_display_t* s_display = NULL;
 static lv_indev_t* s_touch_indev = NULL;
 static lv_obj_t* s_main_screen = NULL;
+
+/* Boot screen LVGL objects */
+static lv_obj_t* s_boot_screen = NULL;
+static lv_obj_t* s_boot_arc = NULL;
+static lv_obj_t* s_boot_label = NULL;
+static lv_obj_t* s_boot_title = NULL;
 
 /* Thread safety */
 /* Mutex removed, using lcd_driver.c's s_lvgl_mux via ui_lock/ui_unlock instead */
@@ -179,13 +186,85 @@ esp_err_t ui_init(void) {
     create_main_content();
     create_status_bar();
     create_navigation_bar();
-    lv_scr_load(s_main_screen);
+    /* Create and show boot screen */
+    ui_show_boot_screen();
 
     /* Start time update task */
     lv_timer_create(update_time_task, 1000, NULL);
 
     ESP_LOGI(TAG, "UI initialized successfully");
     return ESP_OK;
+}
+
+void ui_show_boot_screen(void) {
+    if (!ui_acquire()) return;
+
+    s_boot_screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(s_boot_screen, lv_color_hex(0x0A0A0C), 0);
+    lv_obj_set_style_bg_opa(s_boot_screen, LV_OPA_COVER, 0);
+
+    /* Boot Title */
+    s_boot_title = lv_label_create(s_boot_screen);
+    lv_label_set_text(s_boot_title, "Smart Attendance");
+    lv_obj_set_style_text_color(s_boot_title, lv_color_white(), 0);
+    lv_obj_set_style_text_font(s_boot_title, &lv_font_montserrat_32, 0);
+    lv_obj_align(s_boot_title, LV_ALIGN_CENTER, 0, -80);
+
+    /* Progressive Circular Bar (using lv_arc) */
+    s_boot_arc = lv_arc_create(s_boot_screen);
+    lv_obj_set_size(s_boot_arc, 120, 120);
+    lv_arc_set_rotation(s_boot_arc, 270);
+    lv_arc_set_bg_angles(s_boot_arc, 0, 360);
+    lv_arc_set_value(s_boot_arc, 0);
+    lv_obj_remove_style(s_boot_arc, NULL, LV_PART_KNOB); // Remove knob
+    lv_obj_remove_flag(s_boot_arc, LV_OBJ_FLAG_CLICKABLE); // Make it non-clickable
+
+    /* Circular bar style */
+    lv_obj_set_style_arc_color(s_boot_arc, lv_color_hex(0x00C8FF), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(s_boot_arc, 8, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_boot_arc, lv_color_hex(0x1F2A38), LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_boot_arc, 8, LV_PART_MAIN);
+    lv_obj_align(s_boot_arc, LV_ALIGN_CENTER, 0, 10);
+
+    /* Status Label */
+    s_boot_label = lv_label_create(s_boot_screen);
+    lv_label_set_text(s_boot_label, "Initializing...");
+    lv_obj_set_style_text_color(s_boot_label, lv_color_hex(0x8892A0), 0);
+    lv_obj_set_style_text_font(s_boot_label, &lv_font_montserrat_14, 0);
+    lv_obj_align(s_boot_label, LV_ALIGN_CENTER, 0, 90);
+
+    /* Load boot screen */
+    lv_screen_load(s_boot_screen);
+
+    ui_release();
+}
+
+void ui_update_boot_status(const char* status, int progress) {
+    if (!s_boot_screen) return;
+    if (!ui_acquire()) return;
+    if (s_boot_label && status) {
+        lv_label_set_text(s_boot_label, status);
+        lv_obj_align(s_boot_label, LV_ALIGN_CENTER, 0, 90);
+    }
+    if (s_boot_arc) {
+        lv_arc_set_value(s_boot_arc, progress);
+    }
+    ui_release();
+}
+
+void ui_hide_boot_screen(void) {
+    if (!s_boot_screen) return;
+    if (!ui_acquire()) return;
+
+    /* Load the main screen with fade animation, auto-deleting s_boot_screen */
+    lv_screen_load_anim(s_main_screen, LV_SCR_LOAD_ANIM_FADE_ON, 500, 0, true);
+
+    s_boot_screen = NULL;
+    s_boot_arc = NULL;
+    s_boot_label = NULL;
+    s_boot_title = NULL;
+
+    ui_release();
 }
 
 lv_display_t* ui_get_display(void) {
@@ -473,6 +552,10 @@ static void launch_app_by_id(int app_id) {
         });
     } else if (app_id == 5) {
         ui_show_file_manager_screen();
+    } else if (app_id == 6 && s_nav_callback) {
+        ui_show_pin_prompt(false, [](bool success) {
+            if (success) ui_show_schedules_screen();
+        });
     }
 }
 
@@ -517,11 +600,11 @@ static void create_main_content(void) {
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
-    const char* app_names[] = {"Scanner", "Enroll", "Users", "Reports", "Settings", "Files"};
-    const char* app_icons[] = {LV_SYMBOL_VIDEO, LV_SYMBOL_PLUS, LV_SYMBOL_LIST, LV_SYMBOL_FILE, LV_SYMBOL_SETTINGS, LV_SYMBOL_DIRECTORY};
-    const uint32_t app_colors[] = {0x3A6EA5, 0x4CAF50, 0x00A8FF, 0xFF9800, 0x9E9E9E, 0x673AB7};
+    const char* app_names[] = {"Scanner", "Enroll", "Users", "Reports", "Settings", "Files", "Schedules"};
+    const char* app_icons[] = {LV_SYMBOL_VIDEO, LV_SYMBOL_PLUS, LV_SYMBOL_LIST, LV_SYMBOL_FILE, LV_SYMBOL_SETTINGS, LV_SYMBOL_DIRECTORY, LV_SYMBOL_BELL};
+    const uint32_t app_colors[] = {0x3A6EA5, 0x4CAF50, 0x00A8FF, 0xFF9800, 0x9E9E9E, 0x673AB7, 0x009688};
 
-    for(int i = 0; i < 6; i++) {
+    for(int i = 0; i < 7; i++) {
         lv_obj_t* icon_btn = lv_btn_create(grid);
         lv_obj_set_size(icon_btn, 80, 80);
         lv_obj_set_style_bg_color(icon_btn, lv_color_hex(app_colors[i]), 0);
@@ -1318,9 +1401,9 @@ void ui_show_recent_apps(void) {
     lv_obj_set_flex_flow(flex_box, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(flex_box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
-    const char* app_names[] = {"Scanner", "Enroll", "Users", "Reports", "Settings", "Files"};
-    const char* app_icons[] = {LV_SYMBOL_VIDEO, LV_SYMBOL_PLUS, LV_SYMBOL_LIST, LV_SYMBOL_FILE, LV_SYMBOL_SETTINGS, LV_SYMBOL_DIRECTORY};
-    const uint32_t app_colors[] = {0x3A6EA5, 0x4CAF50, 0x00A8FF, 0xFF9800, 0x9E9E9E, 0x673AB7};
+    const char* app_names[] = {"Scanner", "Enroll", "Users", "Reports", "Settings", "Files", "Schedules"};
+    const char* app_icons[] = {LV_SYMBOL_VIDEO, LV_SYMBOL_PLUS, LV_SYMBOL_LIST, LV_SYMBOL_FILE, LV_SYMBOL_SETTINGS, LV_SYMBOL_DIRECTORY, LV_SYMBOL_BELL};
+    const uint32_t app_colors[] = {0x3A6EA5, 0x4CAF50, 0x00A8FF, 0xFF9800, 0x9E9E9E, 0x673AB7, 0x009688};
     
     for (int i = 0; i < 5; i++) {
         int app_id = s_recent_apps[i];

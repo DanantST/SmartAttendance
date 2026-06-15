@@ -28,6 +28,7 @@ idf_component_register(SRCS
     ui/ui_enrollment.cpp
     ui/ui_settings.cpp
     ui/ui_reports.cpp
+    ui/ui_schedules.cpp
     ui/ui_setup_wizard.cpp
     ui/ui_admin_setup.cpp
     ui/ui_user_manager.cpp

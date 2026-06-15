@@ -55,6 +55,23 @@ typedef enum {
 esp_err_t ui_init(void);
 
 /**
+ * @brief Show boot screen with circular progress bar
+ */
+void ui_show_boot_screen(void);
+
+/**
+ * @brief Update progress and status message on boot screen
+ * @param status Status text (e.g. "Mounting Storage...")
+ * @param progress Progress percentage (0 to 100)
+ */
+void ui_update_boot_status(const char* status, int progress);
+
+/**
+ * @brief Hide boot screen and transition to main screen
+ */
+void ui_hide_boot_screen(void);
+
+/**
  * @brief Get LVGL display handle
  * @return display handle
  */
@@ -357,6 +374,20 @@ void ui_show_reports_screen(void);
  * @brief Close reports screen
  */
 void ui_close_reports_screen(void);
+
+/*====================
+   Schedules Screen
+ *====================*/
+
+/**
+ * @brief Show schedules screen
+ */
+void ui_show_schedules_screen(void);
+
+/**
+ * @brief Close schedules screen
+ */
+void ui_close_schedules_screen(void);
 
 /**
  * @brief Populate course list in reports screen

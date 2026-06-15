@@ -64,23 +64,23 @@ esp_err_t face_detector_run(camera_fb_t *fb, detection_result_t *result) {
                 result->faces[result->face_count].landmarks[j*2+1] = d.keypoint[j*2+1];
             }
         } else {
-            /* Fallback: approximate landmarks from bounding box */
+            /* Fallback: approximate landmarks from bounding box in ESP-DL order */
             int cx = d.box[0] + d.box[2]/2;
             int cy = d.box[1] + d.box[3]/2;
             (void)cy;
             int eye_y = d.box[1] + d.box[3]*0.3;
             int nose_y = d.box[1] + d.box[3]*0.6;
             int mouth_y = d.box[1] + d.box[3]*0.8;
-            result->faces[result->face_count].landmarks[0] = cx - d.box[2]*0.2;
-            result->faces[result->face_count].landmarks[1] = eye_y;
-            result->faces[result->face_count].landmarks[2] = cx + d.box[2]*0.2;
-            result->faces[result->face_count].landmarks[3] = eye_y;
-            result->faces[result->face_count].landmarks[4] = cx;
-            result->faces[result->face_count].landmarks[5] = nose_y;
-            result->faces[result->face_count].landmarks[6] = cx - d.box[2]*0.1;
-            result->faces[result->face_count].landmarks[7] = mouth_y;
-            result->faces[result->face_count].landmarks[8] = cx + d.box[2]*0.1;
-            result->faces[result->face_count].landmarks[9] = mouth_y;
+            result->faces[result->face_count].landmarks[0] = cx - d.box[2]*0.2;  // Left Eye X
+            result->faces[result->face_count].landmarks[1] = eye_y;             // Left Eye Y
+            result->faces[result->face_count].landmarks[2] = cx - d.box[2]*0.15; // Left Mouth Corner X
+            result->faces[result->face_count].landmarks[3] = mouth_y;            // Left Mouth Corner Y
+            result->faces[result->face_count].landmarks[4] = cx;                 // Nose X
+            result->faces[result->face_count].landmarks[5] = nose_y;            // Nose Y
+            result->faces[result->face_count].landmarks[6] = cx + d.box[2]*0.2;  // Right Eye X
+            result->faces[result->face_count].landmarks[7] = eye_y;             // Right Eye Y
+            result->faces[result->face_count].landmarks[8] = cx + d.box[2]*0.15; // Right Mouth Corner X
+            result->faces[result->face_count].landmarks[9] = mouth_y;            // Right Mouth Corner Y
         }
         
         result->face_count++;
@@ -139,8 +139,15 @@ float face_detector_compute_brightness(camera_fb_t *fb, detected_face_t *face) {
 }
 
 float face_detector_compute_yaw(detected_face_t *face) {
-    /* Estimate yaw from eye positions */
-    float dx = face->landmarks[2] - face->landmarks[0];
-    float dy = face->landmarks[3] - face->landmarks[1];
-    return atan2f(dy, dx) * 180.0f / 3.14159f;
+    /* Estimate yaw from eye and nose positions in ESP-DL order */
+    float left_eye_x = face->landmarks[0];
+    float right_eye_x = face->landmarks[6];
+    float nose_x = face->landmarks[4];
+    
+    float mid_x = (left_eye_x + right_eye_x) / 2.0f;
+    float eye_dist = fabsf(right_eye_x - left_eye_x);
+    if (eye_dist < 1.0f) eye_dist = 1.0f;
+    
+    float deviation = (nose_x - mid_x) / eye_dist;
+    return deviation * 90.0f;
 }
