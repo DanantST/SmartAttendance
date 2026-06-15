@@ -6,12 +6,11 @@ import os
 logger = logging.getLogger(__name__)
 
 # Try to default to /data/bot_data.db if running in an environment (like HF Spaces) with persistent storage,
-# otherwise fall back to the local directory
-default_db_path = os.path.join(os.path.dirname(__file__), "bot_data.db")
+# otherwise fall back to DATABASE_PATH or local directory
 if os.path.exists("/data") and os.access("/data", os.W_OK):
-    default_db_path = "/data/bot_data.db"
-
-DB_PATH = os.environ.get("DATABASE_PATH", default_db_path)
+    DB_PATH = "/data/bot_data.db"
+else:
+    DB_PATH = os.environ.get("DATABASE_PATH", os.path.join(os.path.dirname(__file__), "bot_data.db"))
 
 def init_db():
     """Initializes the database schema."""
