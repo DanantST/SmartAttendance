@@ -83,6 +83,15 @@ def init_db():
         created_at INTEGER NOT NULL
     )
     """)
+
+    # Table for pending user pairings (phone_number -> telegram_id)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS pending_links (
+        phone_number TEXT PRIMARY KEY,
+        telegram_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    )
+    """)
     
     conn.commit()
     conn.close()
@@ -435,3 +444,59 @@ def get_admin_telegram_id():
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None
+
+def add_pending_link(phone_number, telegram_id):
+    """Saves a pending link mapping."""
+    phone = normalize_phone(phone_number)
+    if not phone or len(phone) < 9:
+        return
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now = int(time.time())
+    cursor.execute("""
+        INSERT OR REPLACE INTO pending_links (phone_number, telegram_id, created_at)
+        VALUES (?, ?, ?)
+    """, (phone[-9:], str(telegram_id), now))
+    conn.commit()
+    conn.close()
+
+def get_pending_link(phone_number):
+    """Retrieves a pending link telegram_id by phone number using suffix matching."""
+    phone = normalize_phone(phone_number)
+    if not phone or len(phone) < 9:
+        return None
+    suffix = phone[-9:]
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT telegram_id FROM pending_links WHERE phone_number = ?", (suffix,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+def delete_pending_link(phone_number):
+    """Deletes a pending link."""
+    phone = normalize_phone(phone_number)
+    if not phone or len(phone) < 9:
+        return
+    suffix = phone[-9:]
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM pending_links WHERE phone_number = ?", (suffix,))
+    conn.commit()
+    conn.close()
+
+def get_enrolled_students(course_code):
+    """Gets all students enrolled in a course who have linked Telegram IDs."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT u.telegram_id, u.name 
+        FROM user_courses uc 
+        JOIN users u ON uc.user_uuid = u.uuid 
+        WHERE uc.course_code = ? AND u.telegram_id IS NOT NULL AND u.telegram_id != ''
+    """, (course_code,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+

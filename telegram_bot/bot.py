@@ -10,6 +10,11 @@ orig_getaddrinfo = socket.getaddrinfo
 def getaddrinfo_ipv4(host, port, family=0, type=0, proto=0, flags=0):
     return orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
 socket.getaddrinfo = getaddrinfo_ipv4
+# Set process timezone to Africa/Lagos to match the ESP32 device's WAT timezone
+if hasattr(time, "tzset"):
+    os.environ['TZ'] = 'Africa/Lagos'
+    time.tzset()
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -123,6 +128,13 @@ async def sync_users(request: Request):
             
             if uuid:
                 received_uuids.add(uuid)
+                # Check for pending Telegram link
+                pending_tel_id = db.get_pending_link(phone_number)
+                if pending_tel_id:
+                    telegram_id = pending_tel_id
+                    db.delete_pending_link(phone_number)
+                    # Notify the student asynchronously
+                    asyncio.create_task(notify_linked_student(pending_tel_id, name, role))
                 db.upsert_user(uuid, name, student_id, phone_number, telegram_id, role)
         
         # Reconcile: delete users on the bot database that were deleted from the device
@@ -431,6 +443,58 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=contact_keyboard,
         )
 
+async def notify_linked_student(telegram_id, name, role):
+    global bot_app
+    if bot_app:
+        try:
+            if role in ["lecturer", "admin"]:
+                keyboard = [
+                    ["📅 Schedule Class", "📊 Attendance Report"],
+                    ["📚 My Courses", "🛠️ Developer Auth"],
+                    ["❓ Help"]
+                ]
+            else:
+                keyboard = [
+                    ["📚 Enroll in Course"],
+                    ["👤 My Status", "❓ Help"]
+                ]
+            reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            await bot_app.bot.send_message(
+                chat_id=telegram_id,
+                text=(
+                    f"🎉 **Registration Complete!**\n\n"
+                    f"Your account (**{name}**) has been successfully linked to the Smart Attendance bot as a **{role.capitalize()}**.\n\n"
+                    "You will now receive automatic notifications for class schedules and attendance records."
+                ),
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+            logger.info(f"Sent automatic link notification to: {name} ({telegram_id})")
+        except Exception as e:
+            logger.error(f"Failed to send link notification to {telegram_id}: {e}")
+
+async def notify_students_new_schedule(course_code, course_title, date_str, start_time_str, end_time_str, lecturer_name):
+    global bot_app
+    if bot_app:
+        students = db.get_enrolled_students(course_code)
+        logger.info(f"Notifying {len(students)} enrolled students about scheduled class for {course_code}")
+        for student in students:
+            try:
+                await bot_app.bot.send_message(
+                    chat_id=student["telegram_id"],
+                    text=(
+                        f"📅 **New Class Scheduled!**\n\n"
+                        f"**Course:** {course_code} - {course_title}\n"
+                        f"**Date:** {date_str}\n"
+                        f"**Time:** {start_time_str} - {end_time_str}\n"
+                        f"**Lecturer:** {lecturer_name}\n\n"
+                        "Please be punctual!"
+                    ),
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify student {student['telegram_id']} about class schedule: {e}")
+
 async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Handles contact sharing, matches the phone number, and updates the Telegram ID.
@@ -482,9 +546,12 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_keyboard,
         )
     else:
+        # Save mapping to pending links
+        db.add_pending_link(phone_number, user_id)
         await update.message.reply_text(
-            f"Sorry, your phone number ({phone_number}) is not registered on the attendance device.\n"
-            "Please register on the captive Web AP portal first, then try /start again.",
+            f"ℹ️ Phone number **{phone_number}** is not yet registered on the attendance device.\n\n"
+            "We have saved your Telegram contact details. Once you complete your enrollment on the physical device "
+            "captive portal, your Telegram account will be automatically linked, and you will receive a confirmation message.",
             reply_markup=ReplyKeyboardRemove(),
         )
 
@@ -937,6 +1004,9 @@ async def complete_schedule_creation(message, context, is_callback):
         course_title = context.user_data["course_title"]
         
         db.add_schedule(user_id, course_code, course_title, start_epoch, end_epoch)
+        
+        # Notify enrolled students asynchronously
+        asyncio.create_task(notify_students_new_schedule(course_code, course_title, date_str, start_time_str, end_time_str, lecturer_name))
         
         success_text = (
             "✅ **Lecture Scheduled Successfully!**\n\n"
