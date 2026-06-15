@@ -1562,3 +1562,189 @@ Added status bar updates for the Wi-Fi icon inside battery_task to ensure the st
 Rebuilt, Flashed, and Verified: Recompiled the firmware, flashed it to the device on COM4, and confirmed through live serial logging that the device behaves correctly (correct notification toast, correct status bar color, and the auto-reconnect loop is bypassed on intentional disconnect).
 Logged Changes: Updated activity_log.md and walkthrough.md with complete documentation.
 
+---
+
+### [2026-06-14 09:35] — Schedules App Duplication Fix & Programmatic Deduplication
+
+- **Category:** Database / Sync / UI
+- **Altered Files:**
+  - `main/database/db_manager.h` (modified)
+  - `main/database/db_manager.c` (modified)
+  - `main/network/cloud_sync.c` (modified)
+- **Status:** ✅ Completed, Flashed & Verified on COM5
+
+---
+
+#### Analysis of the Issue
+The CrowPanel ESP32-P4 screen was showing the same scheduled lecture 9 times. This was caused by two compounding factors:
+
+1. **Parser Stack Overflow in SQLite on boot-up cleanup:**
+   - Originally, database initialization executed `sqlite3_exec(s_db, "DELETE FROM schedule WHERE id NOT IN (SELECT MIN(id) FROM schedule GROUP BY course_id, start_time, end_time);", NULL, NULL, NULL);` on boot.
+   - However, on the memory-constrained ESP32 architecture, the nested `NOT IN` subquery triggered a `parser stack overflow (rc=1)` error, which silently failed. Consequently, the boot-time deduplication query never executed.
+2. **Duplicate Rows returned by Cloud Server payload:**
+   - The device makes a sync GET request to `{s_api_endpoint}/api/get_schedules?since=0`. Because multiple lecturers were registered in the database with the same `telegram_id` (e.g. `dev-uuid-7433107629` and `87d7a577-2c54-b453-1878-317417b403ca`), the server's join query returned duplicate schedule objects in the array.
+   - During sync, the check `SELECT 1 FROM schedule WHERE course_id = ? AND start_time = ? AND end_time = ?` was originally casting 64-bit timestamps to signed 32-bit `(int)` and using `sqlite3_bind_int` bindings. Under certain conditions, type mismatches/overflows could prevent the duplicate check from correctly matching existing rows, leading to repeat inserts.
+
+#### Fixes Applied
+
+1. **Programmatic Deduplication (`db_deduplicate_schedules()`):**
+   - Implemented a programmatic startup deduplication routine inside `main/database/db_manager.c`. The database now queries all schedules using a flat `SELECT id, course_id, start_time, end_time FROM schedule ORDER BY ...` and programmatically collects and deletes any duplicate IDs, avoiding any nested subqueries. This bypasses the parser stack limit.
+2. **Type-Safe 64-Bit Bindings (`sqlite3_bind_int64`):**
+   - Modified `db_insert_schedule_from_bot()` to use `sqlite3_bind_int64()` directly for Unix timestamps instead of casting to `(int)`. This guarantees accurate type affinity matching in the SQLite engine.
+3. **Firmware Logging & Verification:**
+   - Added `db_dump_schedules()` to print database contents on startup and after sync cycles, allowing developer visibility of stored schedule rows via the serial logs.
+   - Successfully verified that the database cleanup deletes existing duplicate rows at boot, and that the schedules screen now renders exactly a single unique entry.
+
+
+---
+
+### [2026-06-14 12:28] — Face Recognition Landmark Alignment, Yaw Correction, and Boot Wi-Fi Gating
+
+- **Category:** Face Recognition / Networking / UI / System Stability
+- **Altered Files:**
+  - `main/detection/face_alignment.c` (modified)
+  - `main/detection/face_detector.cpp` (modified)
+  - `main/network/wifi_manager.c` (modified)
+  - `main/network/wifi_manager.h` (modified)
+  - `main/config.h` (modified)
+  - `main/main.c` (modified)
+- **Status:** ✅ Completed, Flashed & Verified on COM5
+
+---
+
+#### Detailed Summary of Issues & Technical Resolutions
+
+##### 1. Landmark Alignment & Warp Source Mapping
+- **The Issue:**
+  The face recognition engine consistently returned similarity scores of `0.0%` ("Unknown") for newly enrolled faces. The ESP-DL face detector returns 5 facial keypoints in the order: `[Left Eye, Left Mouth, Nose, Right Eye, Right Mouth]`. The previous warp code mapped landmarks using mismatched indexes: it grabbed Left Eye, Right Eye, and Nose, but mapped them to destination canonical landmark target coordinates that did not match the detector's keypoint structure. This resulted in highly distorted cropped images (double-warped crops) that led to all-zero embedding vectors.
+- **The Resolution:**
+  Updated `CANONICAL_LANDMARKS` to map exactly to the standard `s_std_ldks_112` preprocessor coordinates:
+  - Left Eye: `(38.2946f, 51.6963f)` (index 0,1)
+  - Left Mouth: `(41.5493f, 92.3655f)` (index 2,3)
+  - Nose: `(56.0252f, 71.7366f)` (index 4,5)
+  - Right Eye: `(73.5318f, 51.5014f)` (index 6,7)
+  - Right Mouth: `(70.7299f, 92.2041f)` (index 8,9)
+  
+  Corrected the point extraction mapping in `face_alignment_align()`:
+  - Source: Left Eye = `face->landmarks[0,1]`, Right Eye = `face->landmarks[6,7]`, Nose = `face->landmarks[4,5]`.
+  - Destination: Left Eye = `CANONICAL_LANDMARKS[0,1]`, Right Eye = `CANONICAL_LANDMARKS[6,7]`, Nose = `CANONICAL_LANDMARKS[4,5]`.
+  
+  This ensures the computed affine transformation maps landmarks properly, yielding a clean 112x112 aligned face crop.
+
+##### 2. Face Yaw Deviation Correction & Quality Score Underflow
+- **The Issue:**
+  The yaw angle calculation inside `face_detector_compute_yaw` previously used mismatched landmark indices, evaluating a vertical eye-mouth line tilt instead of the horizontal eye-line rotation. This triggered extreme yaw values (e.g. ~90 degrees). Under the luma/sharpness/yaw weighted quality score formula, this yaw value subtracted significant weight, leading to negative frame quality scores. Since the enrollment pipeline aggregates embeddings weighted by quality score, negative quality scores subtracted rather than added vectors, causing the cumulative `total_weight` to evaluate to zero or negative, resulting in a zeroed-out master vector stored in the database.
+- **The Resolution:**
+  - Re-implemented the yaw formula in `face_detector.cpp`: `deviation = (nose_x - mid_x) / eye_dist; return deviation * 90.0f;`. This correctly tracks lateral yaw rotation (left-to-right head rotation).
+  - Fixed fallback landmark approximation indices mapping in `face_detector.cpp` to correctly assign eye, nose, and mouth positions when keypoints are missing.
+  - Added a strict clip in `main.c` during enrollment: `if (q_score < 0.01f) q_score = 0.01f;`. This guarantees frame quality is always positive, ensuring a positive `total_weight` and preventing zeroed-out master vectors.
+
+##### 3. Wi-Fi Auto-Connection Gating at Boot
+- **The Issue:**
+  The device did not automatically connect to previously saved Wi-Fi networks at boot or did so unpredictably, transitioning to the homescreen before connection was active. The user constraint required the boot screen to block transition to the launcher until Wi-Fi connects or fails after exactly 7 retry attempts.
+- **The Resolution:**
+  - Modified `wifi_manager.c` to prevent early disconnect aborts and allow transitioning states.
+  - Increased retry count `WIFI_MAX_RETRY` to 7 (in `config.h`).
+  - Exposed `wifi_manager_get_retry_count()` to query connection attempt progress.
+  - Integrated a blocking connection check loop in `app_main` (`main.c`) during the boot status phase. The loop queries NVS for saved credentials. If any exist, it waits for Wi-Fi status to become `WIFI_STATUS_CONNECTED` or `WIFI_STATUS_CONNECTION_FAILED`, updating the boot status text with the current attempt (`Attempt 1/7`, etc.) and setting progress increments mapping to 85%-99%. The boot screen fades out and transitions to the home launcher only after connection succeeds or fails 7 times.
+
+---
+
+#### Verification & Logs
+
+##### Wi-Fi Blocking Connection Log
+```text
+I (12642) WIFI_MGR: Wi-Fi manager initialized
+I (12662) MAIN: Found saved Wi-Fi networks, waiting for auto-connect...
+I (12792) WIFI_MGR: Connecting to SSID: Shalom Technologies
+I (17242) WIFI_MGR: Wi-Fi disconnected, retry count: 1
+I (19672) WIFI_MGR: Wi-Fi disconnected, retry count: 2
+I (22302) RPC_WRAP: ESP Event: Station mode: Connected
+I (23332) esp_netif_handlers: sta ip: 10.179.64.247, mask: 255.255.255.0, gw: 10.179.64.124
+I (23332) WIFI_MGR: Got IP: 10.179.64.247
+I (23332) WIFI_MGR: Wi-Fi connected. Starting SNTP synchronization...
+I (24782) SNTP: The current date/time is: Sat Jun 13 19:52:20 2026
+```
+
+##### Master Embedding Generation Log
+```text
+I (98238) MAIN: Master vector generated: target_norm=66.738, avg_norm=66.738, scale=1.000, total_weight=9.058
+I (98238) MAIN: Master embedding sample: 4 -7 9 7 -6
+I (98458) ENROLL_QUEUE: Enrollment OK (DB id=8) for user Babarinde Emmanuel
+```
+
+##### Face Recognition Matching Log
+```text
+I (110738) RECOG: Compare with cached user Babarinde Emmanuel (id=8): sim=0.882, embedding sample=4 -7 9 7 -6
+I (110748) RECOG: Best match: idx=1 (user=Babarinde Emmanuel), sim=0.882 (threshold=0.650)
+I (113508) RECOG: Compare with cached user Babarinde Emmanuel (id=8): sim=0.932, embedding sample=4 -7 9 7 -6
+I (113518) RECOG: Best match: idx=1 (user=Babarinde Emmanuel), sim=0.932 (threshold=0.650)
+```
+The user confirmed the device successfully recognizes the user with a similarity confidence score ranging from 70% to 96%.
+
+---
+
+### [2026-06-14 12:52] — Face Recognition Affine Warp Direction Mismatch Correction
+
+- **Category:** Bug Fix — Face Alignment / Accuracy
+- **Altered Files:**
+  - `main/detection/face_alignment.c` (modified)
+- **Status:** ✅ Completed, Flashed & Verified on COM5
+
+---
+
+#### Detailed Summary of Issue & Technical Resolution
+
+##### 1. Affine Warp Direction Mismatch
+- **The Issue:**
+  The face recognition model was generating high similarity scores (up to 95.7%) for unenrolled faces against registered profiles. 
+  The root cause was identified inside [face_alignment.c](file:///c:/Users/user/Documents/projects/SmartAttendance/main/detection/face_alignment.c). The `compute_affine` function was solving for the transformation mapping source points (320x240 camera frame coordinates) to destination points (112x112 aligned coordinates). However, the subsequent bilinear warp loop iterates over destination pixels and maps them backwards to find the corresponding source pixel:
+  `src_x = M[0] * x + M[1] * y + M[2];`
+  This mapping in the wrong direction resulted in a scrambled/smeared texture instead of an aligned facial crop. The feature extractor parsed this identical garbled smudge for all faces, producing highly similar embeddings and triggering false matches for unenrolled profiles.
+- **The Resolution:**
+  Swapped the arguments to `compute_affine(dst, src, M)` to solve for the transformation mapping destination canonical points back to source camera coordinates. Corrected the fallback bounding-box mapping parameters accordingly:
+  `src_pt = inv_scale * (dst_pt - 56) + face_centre`
+  This successfully maps destination pixels backwards to their source locations, restoring the correct 112x112 facial alignment template.
+- **Verification Logs:**
+  The user enrolled two different users. Scans verified that:
+  1. The system correctly distinguishes between the two users (similarity confidence values up to 82%).
+  2. Unenrolled faces now generate low similarity confidence values (falling to a safe range of 0.16–0.28) and are correctly rejected.
+
+---
+
+### [2026-06-15 12:50] — Timezone Offset Alignment (WAT) and Telegram Notification Flows
+
+- **Category:** Timezone / Telegram Integration / Database Sync
+- **Altered Files:**
+  - `main/network/sntp_sync.c` (modified)
+  - `Dockerfile` (modified)
+  - `telegram_bot/bot.py` (modified)
+  - `telegram_bot/db.py` (modified)
+- **Status:** ✅ Completed, Flashed & Verified
+
+---
+
+#### 1. Timezone Offset Root Cause & Resolution
+- **The Issue:**
+  The device's scheduled hours were displaying 1 hour behind the cloud bot. The cloud bot runs on a Hugging Face Space (Linux container) defaulting to UTC, which interpreted schedule times as UTC when parsing. The device was configured to UK time `GMT0BST,...` (BST/GMT), leading to a timezone mismatch. Furthermore, because Nigeria is in West Africa Time (WAT, GMT+1) all year round without Daylight Saving Time, UK timezone transitions would cause further drift.
+- **The Resolution:**
+  - **Device Configuration:** Changed the device's timezone in `sntp_sync.c` to `WAT-1`. Under POSIX standards, East of the Prime Meridian uses a negative sign, so `WAT-1` represents GMT+1 all year round with no DST rules.
+  - **Cloud OS Configuration:** Updated `Dockerfile` to install `tzdata` and configure `ENV TZ=Africa/Lagos` at the OS level.
+  - **Python Process Configuration:** Configured the bot startup process in `bot.py` to set `os.environ['TZ'] = 'Africa/Lagos'` and run `time.tzset()`. This forces timezone-naive parsing (via `datetime.datetime.strptime()`) to interpret input hours as WAT local time, aligning the epoch timestamps sent to the device.
+
+#### 2. Student Enrollment Link confirmation on Telegram
+- **The Issue:**
+  Students starting the bot prior to enrolling on the device could not be registered on Telegram. They received no confirmation once they completed their enrollment on the physical device captive portal.
+- **The Resolution:**
+  - Created a `pending_links` table in the SQLite database to store temporary mappings of `phone_number -> telegram_id` when unregistered students share their contact card with the bot.
+  - Modified `/api/sync_users` in `bot.py` to check for cached phone number suffixes during device synchronization. Upon matching, it resolves the link by saving the `telegram_id` to the student's profile, purging the temporary link, and launching an asynchronous notification task `notify_linked_student()` to confirm registration on Telegram.
+
+#### 3. Automatic Class Schedule Notifications
+- **The Issue:**
+  Students did not receive any notification when a new class was scheduled for their enrolled courses.
+- **The Resolution:**
+  - Implemented `db.get_enrolled_students(course_code)` to query all students associated with a course who have a registered `telegram_id`.
+  - Modified the scheduling confirmation routine (`complete_schedule_creation`) in `bot.py` to spawn `notify_students_new_schedule()`. This task queries course enrollments and alerts students with the course code, title, date, time, and lecturer name.
+
+---
+
