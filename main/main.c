@@ -165,7 +165,6 @@ static void detection_recognition_task(void *pvParameters);
 static void db_task(void *pvParameters);
 static void network_sync_task(void *pvParameters);
 static void battery_task(void *pvParameters);
-static void network_ble_init_task(void *pvParameters);
 static void system_state_machine(void);
 static esp_err_t process_recognition_result(user_t *user, float confidence);
 void start_enrollment_task(void *pvParam);
@@ -319,6 +318,17 @@ void app_main(void) {
         return;
     }
 
+    /* Initialize UI system early to show the booting screen */
+    ret = ui_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "UI init failed");
+        return;
+    }
+    ui_register_nav_callback(ui_nav_callback_handler);
+    ESP_LOGI(TAG, "UI initialized (boot screen active)");
+
+    ui_update_boot_status("Preparing system...", 5);
+
     /* Create state mutex (Issue 3.8) */
     g_state_mutex = xSemaphoreCreateMutex();
     if (!g_state_mutex) {
@@ -351,6 +361,7 @@ void app_main(void) {
     /* Initialize subsystems in order */
     
     /* 1. Camera (must be first for detection) */
+    ui_update_boot_status("Initializing camera...", 15);
     ret = camera_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Camera init failed: %d", ret);
@@ -359,6 +370,7 @@ void app_main(void) {
     ESP_LOGI(TAG, "Camera initialized");
 
     /* 2. Face detector */
+    ui_update_boot_status("Starting face detector...", 30);
     ret = face_detector_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Face detector init failed");
@@ -367,6 +379,7 @@ void app_main(void) {
     ESP_LOGI(TAG, "Face detector initialized");
 
     /* 3. Face recognizer (loads embedding model) */
+    ui_update_boot_status("Loading AI model...", 50);
     ret = recognizer_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Recognizer init failed");
@@ -375,6 +388,7 @@ void app_main(void) {
     ESP_LOGI(TAG, "Face recognizer initialized");
 
     /* 4. Database manager (SQLite on SD card) */
+    ui_update_boot_status("Mounting SD card...", 75);
     ret = db_manager_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Database init failed, attempting to use internal storage");
@@ -399,16 +413,8 @@ void app_main(void) {
     }
     #endif
 
-    /* 6. UI (LVGL) - must be after display init */
-    ret = ui_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "UI init failed");
-        return;
-    }
-    ui_register_nav_callback(ui_nav_callback_handler);
-    ESP_LOGI(TAG, "UI initialized");
-
     /* 7. Battery monitor — always init, no external deps */
+    ui_update_boot_status("Starting battery monitor...", 80);
     #if ENABLE_BATTERY_MONITOR
     ret = battery_monitor_init();
     if (ret != ESP_OK) {
@@ -416,24 +422,81 @@ void app_main(void) {
     }
     #endif
 
-    /* 8. BLE + WiFi + Cloud Sync — deferred to background task.
-     *
-     * IMPORTANT: Do NOT call esp_hosted_connect_to_slave() here in app_main.
-     * The ESP-Hosted component auto-initialises the SDIO transport at boot.
-     * Calling connect_to_slave() again just re-triggers SDIO reconfiguration,
-     * which can race with the already-running transport task.
-     *
-     * More importantly: if the C6 slave chip is unavailable (e.g. missing
-     * firmware), the SDIO driver used to call esp_restart() causing an
-     * infinite boot-loop that prevented the UI from ever appearing.
-     * CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=n in sdkconfig.defaults
-     * disables that restart, but we also move all hosted-dependent init into
-     * a background task so that a slow/absent C6 cannot delay app_main.
-     */
-    xTaskCreate(network_ble_init_task, "net_ble_init",
-                TASK_NETWORK_STACK_SIZE, NULL,
-                2,   /* lowest priority — runs only when core tasks are idle */
-                NULL);
+    /* 8. BLE + WiFi + Cloud Sync */
+    ui_update_boot_status("Initializing Network...", 85);
+    
+    esp_err_t r = ble_registration_init();
+    if (r != ESP_OK) {
+        ESP_LOGE(TAG, "NET: Enrollment queue init failed (%d)", r);
+    } else {
+        ESP_LOGI(TAG, "NET: Enrollment queue ready");
+    }
+    
+    #if ENABLE_CLOUD_SYNC
+    r = cloud_sync_init();
+    if (r != ESP_OK) {
+        ESP_LOGW(TAG, "NET_BLE: Cloud sync init failed (%d)", r);
+    }
+
+    r = wifi_manager_init();
+    if (r != ESP_OK) {
+        ESP_LOGW(TAG, "NET_BLE: Wi-Fi init failed (%d)", r);
+        ui_update_boot_status("Wi-Fi Init Failed", 100);
+        vTaskDelay(pdMS_TO_TICKS(800));
+    } else {
+        ESP_LOGI(TAG, "NET_BLE: Wi-Fi ready; starting network sync task");
+        xTaskCreate(network_sync_task, "network_sync", TASK_NETWORK_STACK_SIZE,
+                    NULL, TASK_NETWORK_PRIORITY, NULL);
+
+        // Check if we have saved Wi-Fi networks in NVS
+        nvs_handle_t nvs_w;
+        int32_t wifi_count = 0;
+        if (nvs_open("wifi_creds", NVS_READONLY, &nvs_w) == ESP_OK) {
+            nvs_get_i32(nvs_w, "count", &wifi_count);
+            nvs_close(nvs_w);
+        }
+
+        if (wifi_count > 0) {
+            ESP_LOGI(TAG, "Found saved Wi-Fi networks, waiting for auto-connect...");
+            int last_retry = -1;
+            uint32_t start_time = xTaskGetTickCount();
+            // Wait for connection or failed attempts (timeout after 90 seconds just in case)
+            while ((xTaskGetTickCount() - start_time) < pdMS_TO_TICKS(90000)) {
+                wifi_status_t status = wifi_manager_get_status();
+                if (status == WIFI_STATUS_CONNECTED) {
+                    ui_update_boot_status("Connected", 100);
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    break;
+                }
+                if (status == WIFI_STATUS_CONNECTION_FAILED) {
+                    ui_update_boot_status("Wi-Fi Unavailable", 100);
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    break;
+                }
+
+                int retry = wifi_manager_get_retry_count();
+                if (retry != last_retry) {
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "Connecting Wi-Fi (Attempt %d/7)...", retry + 1);
+                    // Map 7 retries to progress from 85% to 99%
+                    int progress = 85 + (int)(retry * 2.0f);
+                    if (progress > 99) progress = 99;
+                    ui_update_boot_status(msg, progress);
+                    last_retry = retry;
+                }
+                vTaskDelay(pdMS_TO_TICKS(200));
+            }
+        } else {
+            ui_update_boot_status("Ready", 100);
+            vTaskDelay(pdMS_TO_TICKS(300));
+        }
+    }
+    #else
+    ui_update_boot_status("Ready", 100);
+    vTaskDelay(pdMS_TO_TICKS(300));
+    #endif
+
+    ui_hide_boot_screen();
 
     /* Create FreeRTOS tasks */
     xTaskCreate(camera_task, "camera", TASK_CAMERA_STACK_SIZE, NULL,
@@ -748,7 +811,6 @@ static esp_err_t process_enrollment_frames_for_user(user_t* new_user) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
-        ESP_LOGI(TAG, "Captured frame %d successfully, width=%d height=%d", i, fb->width, fb->height);
         
         /* ✅ Update camera preview (heavy operation, mutex held briefly for invalidation only) */
         ui_update_enrollment_camera_frame(fb->buf, fb->width, fb->height);
@@ -784,10 +846,19 @@ static esp_err_t process_enrollment_frames_for_user(user_t* new_user) {
         float brightness = face_detector_compute_brightness(fb, face);
         float yaw = face_detector_compute_yaw(face);
         
-        quality_scores[i] = (sharpness / 100.0f) * 0.5f;
-        quality_scores[i] += (1.0f - (fabs(yaw) / ENROLL_YAW_MAX_DEG)) * 0.3f;
-        quality_scores[i] += (brightness >= ENROLL_BRIGHTNESS_MIN && 
-                              brightness <= ENROLL_BRIGHTNESS_MAX) ? 0.2f : 0.0f;
+        float q_score = (sharpness / 100.0f) * 0.5f;
+        q_score += (1.0f - (fabs(yaw) / ENROLL_YAW_MAX_DEG)) * 0.3f;
+        q_score += (brightness >= ENROLL_BRIGHTNESS_MIN && 
+                    brightness <= ENROLL_BRIGHTNESS_MAX) ? 0.2f : 0.0f;
+        
+        /* Clip quality score to positive minimum to avoid negative total weights */
+        if (q_score < 0.01f) {
+            q_score = 0.01f;
+        }
+        quality_scores[i] = q_score;
+        
+        ESP_LOGI(TAG, "Captured frame %d successfully, width=%d height=%d, sharpness=%.2f, brightness=%.2f, yaw=%.2f -> score=%.2f", 
+                 i, fb->width, fb->height, sharpness, brightness, yaw, quality_scores[i]);
         
         /* ✅ Align face - yield after heavy operation */
         if (face_alignment_align(fb, face, &aligned_frames[i]) != ESP_OK) {
@@ -827,7 +898,9 @@ static esp_err_t process_enrollment_frames_for_user(user_t* new_user) {
     for (int j = 0; j < ENROLL_FRAMES_KEEP; j++) {
         int idx = selected_indices[j];
         if (idx == -1) continue;
+        ESP_LOGI(TAG, "Extracting features from selected frame index %d (quality=%.2f)...", idx, quality_scores[idx]);
         if (feature_extractor_run(&aligned_frames[idx], &embeddings[idx]) != ESP_OK) {
+            ESP_LOGW(TAG, "Feature extraction failed for frame index %d", idx);
             selected_indices[j] = -1;
             continue;
         }
@@ -895,11 +968,13 @@ static esp_err_t process_enrollment_frames_for_user(user_t* new_user) {
             if (rounded > 127)  rounded = 127;
             final_embedding.values[m] = (int8_t)rounded;
         }
-        ESP_LOGI(TAG, "Master vector generated: target_norm=%.3f, avg_norm=%.3f, scale=%.3f", target_norm, avg_norm, scale);
+        ESP_LOGI(TAG, "Master vector generated: target_norm=%.3f, avg_norm=%.3f, scale=%.3f, total_weight=%.3f", target_norm, avg_norm, scale, total_weight);
         ESP_LOGI(TAG, "Master embedding sample: %d %d %d %d %d", 
                  final_embedding.values[0], final_embedding.values[1], 
                  final_embedding.values[2], final_embedding.values[3], 
                  final_embedding.values[4]);
+    } else {
+        ESP_LOGE(TAG, "Master vector generation skipped because total_weight=%.3f (kept=%d)", total_weight, kept);
     }
     
     /* Check if user is already enrolled */
@@ -1088,51 +1163,7 @@ static void db_task(void *pvParameters) {
 }
 
 
-/**
- * @brief Deferred network initialisation task.
- *
- * Runs at the lowest priority after app_main completes. Waits for the
- * ESP-Hosted SDIO transport to settle, then initialises the enrollment queue,
- * Wi-Fi manager, and cloud sync. Any failure is logged but does NOT affect
- * core attendance functions.
- */
-static void network_ble_init_task(void *pvParameters) {
-    /* Give the SDIO transport task time to attempt its first connection.
-     * The hosted tasks start during component init (before app_main);
-     * 5 s is more than enough for a connected C6 to complete handshake. */
-    ESP_LOGI(TAG, "NET_BLE: waiting 5s for SDIO transport to settle...");
-    vTaskDelay(pdMS_TO_TICKS(5000));
 
-    esp_err_t r;
-
-    /* --- Enrollment queue --- */
-    r = ble_registration_init();
-    if (r != ESP_OK) {
-        ESP_LOGE(TAG, "NET: Enrollment queue init failed (%d)", r);
-    } else {
-        ESP_LOGI(TAG, "NET: Enrollment queue ready");
-    }
-
-    /* --- Cloud Sync / Wi-Fi --- */
-    #if ENABLE_CLOUD_SYNC
-    r = cloud_sync_init();
-    if (r != ESP_OK) {
-        ESP_LOGW(TAG, "NET_BLE: Cloud sync init failed (%d)", r);
-    }
-
-    r = wifi_manager_init();
-    if (r != ESP_OK) {
-        ESP_LOGW(TAG, "NET_BLE: Wi-Fi init failed (%d) - cloud sync disabled", r);
-    } else {
-        ESP_LOGI(TAG, "NET_BLE: Wi-Fi ready; starting network sync task");
-        xTaskCreate(network_sync_task, "network_sync", TASK_NETWORK_STACK_SIZE,
-                    NULL, TASK_NETWORK_PRIORITY, NULL);
-    }
-    #endif
-
-    ESP_LOGI(TAG, "NET_BLE: init task done");
-    vTaskDelete(NULL);
-}
 
 /**
  * @brief Network sync task - periodic and manual cloud synchronization
@@ -1213,9 +1244,9 @@ static void network_sync_task(void *pvParameters) {
                     cloud_sync_start();
 
                     /* [Fix M2] Wait on event bit set by cloud_sync_task instead of
-                     * a hardcoded vTaskDelay(10000). Use a 30s ceiling as a safety timeout. */
+                     * a hardcoded vTaskDelay(10000). Use a 120s ceiling as a safety timeout. */
                     xEventGroupWaitBits(g_system_event_group, SYSTEM_EVENT_CLOUD_SYNC_DONE,
-                                        pdTRUE, pdFALSE, pdMS_TO_TICKS(30000));
+                                        pdTRUE, pdFALSE, pdMS_TO_TICKS(120000));
                 }
                 
                 /* 4. Disconnect Wi-Fi to save power ONLY if we connected it in this task */

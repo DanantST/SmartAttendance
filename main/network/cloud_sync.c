@@ -206,6 +206,7 @@ typedef struct {
     char *buffer;
     size_t len;
     size_t capacity;
+    char date_header[64];
 } http_response_ctx_t;
 
 static esp_err_t http_event_handler(esp_http_client_event_t *evt) {
@@ -213,6 +214,12 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt) {
     if (!ctx) return ESP_OK;
 
     switch (evt->event_id) {
+        case HTTP_EVENT_ON_HEADER:
+            if (evt->header_key && evt->header_value && strcasecmp(evt->header_key, "Date") == 0) {
+                strncpy(ctx->date_header, evt->header_value, sizeof(ctx->date_header) - 1);
+                ctx->date_header[sizeof(ctx->date_header) - 1] = '\0';
+            }
+            break;
         case HTTP_EVENT_ON_DATA:
             if (ctx->buffer == NULL) {
                 ctx->capacity = 1024;
@@ -274,7 +281,7 @@ static time_t my_timegm(struct tm *tm) {
 static esp_err_t http_request(const char* url, const char* method,
                                const char* post_data, char** response,
                                size_t* response_len) {
-    http_response_ctx_t resp_ctx = { .buffer = NULL, .len = 0, .capacity = 0 };
+    http_response_ctx_t resp_ctx = { .buffer = NULL, .len = 0, .capacity = 0, .date_header = {0} };
 
     esp_http_client_config_t config = {
         .url = url,
@@ -306,8 +313,8 @@ static esp_err_t http_request(const char* url, const char* method,
         int status_code = esp_http_client_get_status_code(client);
         
         /* Check HTTP Date header and update system time as a fallback for SNTP */
-        char *date_val = NULL;
-        if (esp_http_client_get_header(client, "Date", &date_val) == ESP_OK && date_val) {
+        if (resp_ctx.date_header[0] != '\0') {
+            const char *date_val = resp_ctx.date_header;
             struct tm tm;
             memset(&tm, 0, sizeof(struct tm));
             if (strptime(date_val, "%a, %d %b %Y %H:%M:%S GMT", &tm) != NULL) {

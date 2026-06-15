@@ -7,11 +7,14 @@
 #include "esp_log.h"
 #include "esp_sntp.h"
 #include "esp_netif_sntp.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <time.h>
 #include <sys/time.h>
 #include <inttypes.h>
 
 static const char *TAG = "SNTP";
+static SemaphoreHandle_t s_sntp_mutex = NULL;
 
 static void sntp_sync_notification_cb(struct timeval *tv) {
     ESP_LOGI(TAG, "Notification of a time synchronization event");
@@ -24,6 +27,15 @@ static void sntp_sync_notification_cb(struct timeval *tv) {
 }
 
 esp_err_t sntp_sync_init(void) {
+    if (s_sntp_mutex == NULL) {
+        s_sntp_mutex = xSemaphoreCreateMutex();
+    }
+    
+    if (s_sntp_mutex && xSemaphoreTake(s_sntp_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        ESP_LOGW(TAG, "SNTP init busy, skipping concurrent call");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     ESP_LOGI(TAG, "Initializing SNTP");
     
     /* Set timezone to WAT (West Africa Time) - GMT+1, no DST */
@@ -39,9 +51,11 @@ esp_err_t sntp_sync_init(void) {
     esp_err_t ret = esp_netif_sntp_init(&config);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize SNTP: %d", ret);
+        if (s_sntp_mutex) xSemaphoreGive(s_sntp_mutex);
         return ret;
     }
     
+    if (s_sntp_mutex) xSemaphoreGive(s_sntp_mutex);
     return ESP_OK;
 }
 
