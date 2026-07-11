@@ -127,8 +127,36 @@ typedef struct {
     uint32_t end_time;
 } db_schedule_t;
 
+/**
+ * @brief A course record (code + name) for upload to cloud during bidirectional sync.
+ */
+typedef struct {
+    char code[32];
+    char name[64];
+} db_course_t;
+
+/**
+ * @brief A flat lecturer→course link record for upload to cloud during bidirectional sync.
+ */
+typedef struct {
+    char lecturer_uuid[37];
+    char course_code[32];
+} db_lecturer_assignment_t;
+
 esp_err_t db_get_future_schedules(db_schedule_t **schedules, int *count);
 esp_err_t db_dump_schedules(void);
+
+/**
+ * @brief Get all courses (code AND name) for bidirectional cloud sync.
+ *        Caller must free() the returned array.
+ */
+esp_err_t db_get_all_courses_full(db_course_t **courses, int *count);
+
+/**
+ * @brief Get all lecturer→course assignments for bidirectional cloud sync.
+ *        Returns flat pairs of {lecturer_uuid, course_code}. Caller must free() the array.
+ */
+esp_err_t db_get_all_lecturer_assignments(db_lecturer_assignment_t **assignments, int *count);
 
 /**
  * @brief Delete a user by their student ID
@@ -185,7 +213,8 @@ esp_err_t db_link_user_course(const char* user_uuid, const char* course_code);
 esp_err_t db_get_user_courses(uint32_t user_id, char*** codes_out, int* count_out);
 
 /**
- * @brief Get all course names from the database
+ * @brief Get all course names from the database (legacy — names only).
+ *        Use db_get_all_courses_full() when code+name are both needed.
  */
 esp_err_t db_get_all_courses(char*** names, int* count);
 

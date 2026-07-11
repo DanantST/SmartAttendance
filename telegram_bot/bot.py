@@ -370,6 +370,84 @@ async def get_schedule_deletions(since: int = 0):
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 
+@web_app.post("/api/sync_schedules")
+async def sync_schedules_bidirectional(request: Request):
+    """
+    Bidirectional schedule/course/lecturer sync endpoint.
+
+    The device POSTs its local database state (schedules, courses, lecturer assignments).
+    The cloud:
+      1. Upserts all device data it doesn't already have.
+      2. Returns any schedules, courses, and lecturer assignments that the device is missing.
+    This achieves full bidirectional reconciliation in a single round-trip.
+    """
+    try:
+        body = await request.json()
+
+        device_schedules = body.get("schedules", [])
+        device_courses   = body.get("courses",   [])
+        device_lecturers = body.get("lecturers", [])
+
+        logger.info(
+            f"Bidirectional sync: received {len(device_schedules)} schedules, "
+            f"{len(device_courses)} courses, {len(device_lecturers)} lecturer assignments from device"
+        )
+
+        # --- Step 1: Upsert device data into cloud DB ---
+
+        # Courses first (schedules and lecturer links depend on them)
+        for course in device_courses:
+            code = course.get("code", "").strip()
+            name = course.get("name", code)
+            if code:
+                db.upsert_course_from_device(code, name)
+
+        # Lecturer→course links (user must already exist from sync_users for uuid lookup to work)
+        for assignment in device_lecturers:
+            lecturer_uuid = assignment.get("lecturer_uuid", "").strip()
+            course_code   = assignment.get("course_code",   "").strip()
+            if lecturer_uuid and course_code:
+                db.upsert_lecturer_course_from_device(lecturer_uuid, course_code)
+
+        # Schedules last
+        for sched in device_schedules:
+            course_code  = sched.get("course_code",  "").strip()
+            course_title = sched.get("course_title", course_code)
+            start_time   = sched.get("start_time",   0)
+            end_time     = sched.get("end_time",     0)
+            event_type   = sched.get("event_type",   "lecture")
+            if course_code and start_time and end_time:
+                db.upsert_schedule_from_device(course_code, course_title, start_time, end_time, event_type)
+
+        # --- Step 2: Compute what the device is missing ---
+
+        known_sched_keys     = {(s.get("course_code"), s.get("start_time"), s.get("end_time"))
+                                for s in device_schedules}
+        known_course_codes   = {c.get("code") for c in device_courses}
+        known_lecturer_pairs = {(a.get("lecturer_uuid"), a.get("course_code"))
+                                for a in device_lecturers}
+
+        new_schedules  = db.get_cloud_schedules_not_known_by_device(known_sched_keys)
+        new_courses    = db.get_cloud_courses_not_known_by_device(known_course_codes)
+        new_lecturers  = db.get_cloud_lecturer_assignments_not_known_by_device(known_lecturer_pairs)
+
+        logger.info(
+            f"Returning to device: {len(new_schedules)} new schedules, "
+            f"{len(new_courses)} new courses, {len(new_lecturers)} new lecturer assignments"
+        )
+
+        return JSONResponse(status_code=200, content={
+            "status":        "ok",
+            "new_schedules": new_schedules,
+            "new_courses":   new_courses,
+            "new_lecturers": new_lecturers,
+        })
+
+    except Exception as e:
+        logger.error(f"Error in sync_schedules_bidirectional: {e}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
 @web_app.get("/api/get_report_requests")
 async def get_report_requests():
     """

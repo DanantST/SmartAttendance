@@ -653,3 +653,136 @@ def update_schedule_time(schedule_id, start_time, end_time):
         conn.close()
         return False
 
+
+# ==================== Bidirectional Sync Helpers ====================
+
+def upsert_course_from_device(code, name):
+    """Upserts a course received from the device into the cloud courses table."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT OR IGNORE INTO courses (code, name)
+            VALUES (?, ?)
+        """, (code, name))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Error upserting course from device ({code}): {e}")
+    finally:
+        conn.close()
+
+
+def upsert_schedule_from_device(course_code, course_title, start_time, end_time, event_type='lecture'):
+    """
+    Upserts a schedule received from the device into the cloud schedules table.
+    Uses 'device' as a placeholder telegram_id for schedules not created via Telegram.
+    Deduplicates on (course_code, start_time, end_time).
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now = int(time.time())
+    try:
+        # Ensure the course exists first
+        cursor.execute("""
+            INSERT OR IGNORE INTO courses (code, name)
+            VALUES (?, ?)
+        """, (course_code, course_title))
+        # Insert only if this exact slot doesn't already exist
+        cursor.execute("""
+            INSERT INTO schedules (telegram_id, course_code, course_title, start_time, end_time, event_type, created_at)
+            SELECT 'device', ?, ?, ?, ?, ?, ?
+            WHERE NOT EXISTS (
+                SELECT 1 FROM schedules
+                WHERE course_code = ? AND start_time = ? AND end_time = ?
+            )
+        """, (course_code, course_title, int(start_time), int(end_time), event_type, now,
+              course_code, int(start_time), int(end_time)))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Error upserting schedule from device ({course_code}): {e}")
+    finally:
+        conn.close()
+
+
+def upsert_lecturer_course_from_device(lecturer_uuid, course_code):
+    """
+    Links a lecturer to a course in the bot DB based on the device's lecturer_courses data.
+    Looks up the lecturer by their UUID to find their Telegram ID, then inserts the link.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT telegram_id FROM users WHERE uuid = ?", (lecturer_uuid,))
+        row = cursor.fetchone()
+        if row and row[0]:
+            telegram_id = row[0]
+            cursor.execute("""
+                INSERT OR IGNORE INTO lecturer_courses (lecturer_telegram_id, course_code)
+                VALUES (?, ?)
+            """, (telegram_id, course_code))
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Error upserting lecturer course from device (uuid={lecturer_uuid}): {e}")
+    finally:
+        conn.close()
+
+
+def get_cloud_schedules_not_known_by_device(known_keys):
+    """
+    Returns schedules the cloud has that the device doesn't.
+    known_keys: set of (course_code, start_time, end_time) tuples sent by the device.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT s.course_code, s.course_title, s.start_time, s.end_time,
+               COALESCE(s.event_type, 'lecture') AS event_type,
+               u.uuid AS lecturer_uuid
+        FROM schedules s
+        LEFT JOIN users u ON s.telegram_id = u.telegram_id
+        ORDER BY s.start_time ASC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        key = (r['course_code'], r['start_time'], r['end_time'])
+        if key not in known_keys:
+            result.append(dict(r))
+    return result
+
+
+def get_cloud_courses_not_known_by_device(known_codes):
+    """Returns courses the cloud has that the device doesn't (compared by course code)."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT code, name FROM courses")
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"code": r["code"], "name": r["name"]} for r in rows if r["code"] not in known_codes]
+
+
+def get_cloud_lecturer_assignments_not_known_by_device(known_pairs):
+    """
+    Returns lecturer→course assignments the cloud has that the device doesn't.
+    known_pairs: set of (lecturer_uuid, course_code) tuples sent by the device.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT u.uuid AS lecturer_uuid, lc.course_code
+        FROM lecturer_courses lc
+        JOIN users u ON lc.lecturer_telegram_id = u.telegram_id
+        WHERE u.uuid IS NOT NULL AND u.uuid != ''
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        pair = (r['lecturer_uuid'], r['course_code'])
+        if pair not in known_pairs:
+            result.append({"lecturer_uuid": r["lecturer_uuid"], "course_code": r["course_code"]})
+    return result

@@ -907,6 +907,107 @@ esp_err_t db_get_all_courses(char*** names, int* count) {
     return ESP_OK;
 }
 
+esp_err_t db_get_all_courses_full(db_course_t **courses, int *count) {
+    if (!s_initialized || !courses || !count) return ESP_ERR_INVALID_ARG;
+    DB_LOCK();
+
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT code, name FROM courses";
+    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        ESP_LOGE(TAG, "Prepare select all courses full failed: %s", sqlite3_errmsg(s_db));
+        DB_UNLOCK();
+        return ESP_FAIL;
+    }
+
+    /* Count rows first */
+    *count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) (*count)++;
+    sqlite3_reset(stmt);
+
+    if (*count == 0) {
+        sqlite3_finalize(stmt);
+        DB_UNLOCK();
+        *courses = NULL;
+        return ESP_OK;
+    }
+
+    *courses = (db_course_t *)malloc((*count) * sizeof(db_course_t));
+    if (!*courses) {
+        sqlite3_finalize(stmt);
+        DB_UNLOCK();
+        return ESP_ERR_NO_MEM;
+    }
+
+    int idx = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && idx < *count) {
+        db_course_t *c = &(*courses)[idx];
+        memset(c, 0, sizeof(*c));
+        const char *code = (const char *)sqlite3_column_text(stmt, 0);
+        const char *name = (const char *)sqlite3_column_text(stmt, 1);
+        if (code) strncpy(c->code, code, sizeof(c->code) - 1);
+        if (name) strncpy(c->name, name, sizeof(c->name) - 1);
+        idx++;
+    }
+
+    sqlite3_finalize(stmt);
+    DB_UNLOCK();
+    return ESP_OK;
+}
+
+esp_err_t db_get_all_lecturer_assignments(db_lecturer_assignment_t **assignments, int *count) {
+    if (!s_initialized || !assignments || !count) return ESP_ERR_INVALID_ARG;
+    DB_LOCK();
+
+    sqlite3_stmt *stmt;
+    /* Join lecturer_courses → users (uuid) → courses (code) */
+    const char *sql =
+        "SELECT u.uuid, c.code "
+        "FROM lecturer_courses lc "
+        "JOIN users u ON lc.lecturer_id = u.id "
+        "JOIN courses c ON lc.course_id = c.id";
+    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        ESP_LOGE(TAG, "Prepare select lecturer assignments failed: %s", sqlite3_errmsg(s_db));
+        DB_UNLOCK();
+        return ESP_FAIL;
+    }
+
+    /* Count rows first */
+    *count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) (*count)++;
+    sqlite3_reset(stmt);
+
+    if (*count == 0) {
+        sqlite3_finalize(stmt);
+        DB_UNLOCK();
+        *assignments = NULL;
+        return ESP_OK;
+    }
+
+    *assignments = (db_lecturer_assignment_t *)malloc((*count) * sizeof(db_lecturer_assignment_t));
+    if (!*assignments) {
+        sqlite3_finalize(stmt);
+        DB_UNLOCK();
+        return ESP_ERR_NO_MEM;
+    }
+
+    int idx = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && idx < *count) {
+        db_lecturer_assignment_t *a = &(*assignments)[idx];
+        memset(a, 0, sizeof(*a));
+        const char *uuid = (const char *)sqlite3_column_text(stmt, 0);
+        const char *code = (const char *)sqlite3_column_text(stmt, 1);
+        if (uuid) strncpy(a->lecturer_uuid, uuid, sizeof(a->lecturer_uuid) - 1);
+        if (code) strncpy(a->course_code,   code, sizeof(a->course_code)   - 1);
+        idx++;
+    }
+
+    sqlite3_finalize(stmt);
+    DB_UNLOCK();
+    return ESP_OK;
+}
+
 /* --- Lecturer & Course Extensions implementation --- */
 
 esp_err_t db_insert_lecturer(user_t *lecturer) {

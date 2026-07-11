@@ -135,7 +135,7 @@ time_t cloud_sync_get_last_timestamp(void) {
 static void cloud_sync_task(void* param) {
     s_sync_status = SYNC_STATUS_IN_PROGRESS;
     esp_err_t overall_result = ESP_OK;
-    
+
     /* Step 0.3: Download course deletions */
     esp_err_t ret = sync_course_deletions();
     if (ret != ESP_OK) {
@@ -149,35 +149,36 @@ static void cloud_sync_task(void* param) {
         ESP_LOGE(TAG, "Schedule deletion sync failed: %d", ret);
         overall_result = ret;
     }
-    
-    /* Step 1: Download schedule updates */
-    ret = sync_schedule();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Schedule sync failed: %d", ret);
-        overall_result = ret;
-    }
-    
-    /* Step 1.5: Download user deletions */
+
+    /* Step 0.9: Download user deletions (before user sync) */
     ret = sync_deletions();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Deletion sync failed: %d", ret);
         overall_result = ret;
     }
-    
-    /* Step 2: Download user updates */
+
+    /* Step 1: Upload users + receive Telegram ID mappings.
+     * Must run BEFORE sync_schedule so lecturer UUIDs are known on both sides. */
     ret = sync_users();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "User sync failed: %d", ret);
         overall_result = ret;
     }
-    
+
+    /* Step 2: Bidirectional schedule / course / lecturer sync */
+    ret = sync_schedule();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Schedule sync failed: %d", ret);
+        overall_result = ret;
+    }
+
     /* Step 2.5: Download course enrollment updates */
     ret = sync_enrollments();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Enrollment sync failed: %d", ret);
         overall_result = ret;
     }
-    
+
     /* Step 3: Upload attendance logs */
     ret = sync_attendance_logs();
     if (ret != ESP_OK) {
@@ -372,57 +373,170 @@ static esp_err_t sync_schedule(void) {
         ESP_LOGW(TAG, "Server endpoint URL not configured. Skipping schedule sync.");
         return ESP_OK;
     }
-    
+
+    /* ---- Step A: Collect device-local data ---- */
+
+    /* A1: Future schedules */
+    db_schedule_t *schedules = NULL;
+    int schedule_count = 0;
+    db_get_future_schedules(&schedules, &schedule_count);
+
+    /* A2: All courses (code + name) */
+    db_course_t *courses = NULL;
+    int course_count = 0;
+    db_get_all_courses_full(&courses, &course_count);
+
+    /* A3: All lecturer→course links */
+    db_lecturer_assignment_t *assignments = NULL;
+    int assignment_count = 0;
+    db_get_all_lecturer_assignments(&assignments, &assignment_count);
+
+    ESP_LOGI(TAG, "Bidirectional sync upload: %d schedules, %d courses, %d lecturer links",
+             schedule_count, course_count, assignment_count);
+
+    /* ---- Step B: Build JSON upload payload ---- */
+    cJSON *root = cJSON_CreateObject();
+
+    /* Schedules array */
+    cJSON *sched_arr = cJSON_CreateArray();
+    for (int i = 0; i < schedule_count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "course_code",  schedules[i].course_code);
+        cJSON_AddStringToObject(item, "course_title", schedules[i].course_name);
+        cJSON_AddNumberToObject(item, "start_time",   (double)schedules[i].start_time);
+        cJSON_AddNumberToObject(item, "end_time",     (double)schedules[i].end_time);
+        cJSON_AddStringToObject(item, "event_type",   "lecture"); /* device DB has no event_type col yet */
+        cJSON_AddItemToArray(sched_arr, item);
+    }
+    cJSON_AddItemToObject(root, "schedules", sched_arr);
+
+    /* Courses array */
+    cJSON *courses_arr = cJSON_CreateArray();
+    for (int i = 0; i < course_count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "code", courses[i].code);
+        cJSON_AddStringToObject(item, "name", courses[i].name);
+        cJSON_AddItemToArray(courses_arr, item);
+    }
+    cJSON_AddItemToObject(root, "courses", courses_arr);
+
+    /* Lecturers array (flat {lecturer_uuid, course_code} pairs) */
+    cJSON *lecturers_arr = cJSON_CreateArray();
+    for (int i = 0; i < assignment_count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "lecturer_uuid", assignments[i].lecturer_uuid);
+        cJSON_AddStringToObject(item, "course_code",   assignments[i].course_code);
+        cJSON_AddItemToArray(lecturers_arr, item);
+    }
+    cJSON_AddItemToObject(root, "lecturers", lecturers_arr);
+
+    char *json_str = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (schedules)   free(schedules);
+    if (courses)     free(courses);
+    if (assignments) free(assignments);
+
+    if (!json_str) {
+        ESP_LOGE(TAG, "Failed to serialise bidirectional sync payload");
+        return ESP_ERR_NO_MEM;
+    }
+
+    /* ---- Step C: POST to /api/sync_schedules ---- */
     char url[512];
-    snprintf(url, sizeof(url), "%s/api/get_schedules?since=%ld", s_api_endpoint, (long)s_last_sync_timestamp);
-    
-    ESP_LOGI(TAG, "Fetching schedule updates from %s", url);
-    
-    char* response = NULL;
+    snprintf(url, sizeof(url), "%s/api/sync_schedules", s_api_endpoint);
+    ESP_LOGI(TAG, "POSTing bidirectional schedule sync to %s", url);
+
+    char *response = NULL;
     size_t response_len = 0;
-    esp_err_t err = http_request(url, "GET", NULL, &response, &response_len);
-    
-    if (err == ESP_OK && response) {
-        cJSON *root = cJSON_Parse(response);
-        if (root && cJSON_IsArray(root)) {
-            int size = cJSON_GetArraySize(root);
-            ESP_LOGI(TAG, "Parsed %d new schedules from cloud", size);
-            for (int i = 0; i < size; i++) {
-                cJSON *item = cJSON_GetArrayItem(root, i);
-                cJSON *code_json = cJSON_GetObjectItem(item, "course_code");
-                cJSON *title_json = cJSON_GetObjectItem(item, "course_title");
-                cJSON *start_json = cJSON_GetObjectItem(item, "start_time");
-                cJSON *end_json = cJSON_GetObjectItem(item, "end_time");
-                
-                if (code_json && start_json && end_json) {
-                    const char *code = code_json->valuestring;
-                    const char *title = title_json ? title_json->valuestring : "Scheduled Course";
-                    int64_t start_time = start_json->valuedouble;
-                    int64_t end_time = end_json->valuedouble;
-                    cJSON *lecturer_json = cJSON_GetObjectItem(item, "lecturer_uuid");
-                    
-                    int course_id = 0;
-                    if (db_insert_or_get_course(code, title, &course_id) == ESP_OK) {
-                        db_insert_schedule_from_bot(course_id, start_time, end_time);
-                        ESP_LOGI(TAG, "Inserted schedule: Course ID %d, %lld to %lld", course_id, (long long)start_time, (long long)end_time);
-                        
-                        if (lecturer_json && lecturer_json->valuestring && strlen(lecturer_json->valuestring) > 0) {
-                            const char *lecturer_uuid = lecturer_json->valuestring;
-                            ESP_LOGI(TAG, "Linking course code=%s (id=%d) to lecturer_uuid=%s", code, course_id, lecturer_uuid);
-                            db_link_lecturer_course_by_uuid(lecturer_uuid, course_id);
-                        }
-                    }
+    esp_err_t err = http_request(url, "POST", json_str, &response, &response_len);
+    free(json_str);
+
+    if (err != ESP_OK || !response) {
+        ESP_LOGE(TAG, "Bidirectional schedule sync POST failed (err=%d)", err);
+        if (response) free(response);
+        return err;
+    }
+
+    /* ---- Step D: Parse response — upsert cloud-only data into device DB ---- */
+    cJSON *resp = cJSON_Parse(response);
+    free(response);
+
+    if (!resp) {
+        ESP_LOGE(TAG, "Failed to parse /api/sync_schedules response");
+        return ESP_FAIL;
+    }
+
+    /* D1: New courses from cloud */
+    cJSON *new_courses = cJSON_GetObjectItem(resp, "new_courses");
+    if (new_courses && cJSON_IsArray(new_courses)) {
+        int n = cJSON_GetArraySize(new_courses);
+        ESP_LOGI(TAG, "Received %d new courses from cloud", n);
+        for (int i = 0; i < n; i++) {
+            cJSON *item   = cJSON_GetArrayItem(new_courses, i);
+            cJSON *code_j = cJSON_GetObjectItem(item, "code");
+            cJSON *name_j = cJSON_GetObjectItem(item, "name");
+            if (code_j && code_j->valuestring) {
+                int course_id = 0;
+                const char *name = (name_j && name_j->valuestring) ? name_j->valuestring
+                                                                    : code_j->valuestring;
+                db_insert_or_get_course(code_j->valuestring, name, &course_id);
+                ESP_LOGI(TAG, "Upserted course from cloud: %s (id=%d)", code_j->valuestring, course_id);
+            }
+        }
+    }
+
+    /* D2: New lecturer→course assignments from cloud */
+    cJSON *new_lecturers = cJSON_GetObjectItem(resp, "new_lecturers");
+    if (new_lecturers && cJSON_IsArray(new_lecturers)) {
+        int n = cJSON_GetArraySize(new_lecturers);
+        ESP_LOGI(TAG, "Received %d new lecturer assignments from cloud", n);
+        for (int i = 0; i < n; i++) {
+            cJSON *item   = cJSON_GetArrayItem(new_lecturers, i);
+            cJSON *uuid_j = cJSON_GetObjectItem(item, "lecturer_uuid");
+            cJSON *code_j = cJSON_GetObjectItem(item, "course_code");
+            if (uuid_j && code_j && uuid_j->valuestring && code_j->valuestring) {
+                int course_id = 0;
+                if (db_insert_or_get_course(code_j->valuestring, code_j->valuestring, &course_id) == ESP_OK) {
+                    db_link_lecturer_course_by_uuid(uuid_j->valuestring, course_id);
+                    ESP_LOGI(TAG, "Linked lecturer %s to course %s", uuid_j->valuestring, code_j->valuestring);
                 }
             }
         }
-        if (root) cJSON_Delete(root);
-        free(response);
-    } else {
-        ESP_LOGE(TAG, "Failed to fetch schedules from cloud (err=%d)", err);
     }
-    
+
+    /* D3: New schedules from cloud */
+    cJSON *new_schedules = cJSON_GetObjectItem(resp, "new_schedules");
+    if (new_schedules && cJSON_IsArray(new_schedules)) {
+        int n = cJSON_GetArraySize(new_schedules);
+        ESP_LOGI(TAG, "Received %d new schedules from cloud", n);
+        for (int i = 0; i < n; i++) {
+            cJSON *item       = cJSON_GetArrayItem(new_schedules, i);
+            cJSON *code_j     = cJSON_GetObjectItem(item, "course_code");
+            cJSON *title_j    = cJSON_GetObjectItem(item, "course_title");
+            cJSON *start_j    = cJSON_GetObjectItem(item, "start_time");
+            cJSON *end_j      = cJSON_GetObjectItem(item, "end_time");
+            cJSON *lecturer_j = cJSON_GetObjectItem(item, "lecturer_uuid");
+
+            if (code_j && start_j && end_j && code_j->valuestring) {
+                int course_id = 0;
+                const char *title = (title_j && title_j->valuestring)
+                                    ? title_j->valuestring : code_j->valuestring;
+                if (db_insert_or_get_course(code_j->valuestring, title, &course_id) == ESP_OK) {
+                    db_insert_schedule_from_bot(course_id,
+                                               (int64_t)start_j->valuedouble,
+                                               (int64_t)end_j->valuedouble);
+                    if (lecturer_j && lecturer_j->valuestring && strlen(lecturer_j->valuestring) > 0) {
+                        db_link_lecturer_course_by_uuid(lecturer_j->valuestring, course_id);
+                    }
+                    ESP_LOGI(TAG, "Inserted schedule from cloud: %s", code_j->valuestring);
+                }
+            }
+        }
+    }
+
+    cJSON_Delete(resp);
     db_dump_schedules();
-    return err;
+    return ESP_OK;
 }
 
 static esp_err_t sync_attendance_logs(void) {
