@@ -275,8 +275,23 @@ async def dump_db():
         users = [dict(r) for r in cursor.fetchall()]
         cursor.execute("SELECT * FROM schedules")
         schedules = [dict(r) for r in cursor.fetchall()]
+        cursor.execute("SELECT * FROM courses")
+        courses = [dict(r) for r in cursor.fetchall()]
+        cursor.execute("SELECT * FROM lecturer_courses")
+        lecturer_courses = [dict(r) for r in cursor.fetchall()]
+        cursor.execute("SELECT * FROM user_courses")
+        user_courses = [dict(r) for r in cursor.fetchall()]
+        cursor.execute("SELECT * FROM pending_links")
+        pending_links = [dict(r) for r in cursor.fetchall()]
         conn.close()
-        return {"users": users, "schedules": schedules}
+        return {
+            "users": users,
+            "schedules": schedules,
+            "courses": courses,
+            "lecturer_courses": lecturer_courses,
+            "user_courses": user_courses,
+            "pending_links": pending_links
+        }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
