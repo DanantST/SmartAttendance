@@ -75,28 +75,31 @@ void ui_show_admin_setup_wizard(void) {
     
     s_admin_setup_screen = lv_obj_create(NULL);
     ui_add_double_tap_to_screen(s_admin_setup_screen);
-    lv_obj_set_style_bg_color(s_admin_setup_screen, lv_color_hex(0x121212), 0);
+    lv_obj_set_style_bg_color(s_admin_setup_screen, ui_theme_get_bg_color(), 0);
     lv_scr_load(s_admin_setup_screen);
     
     /* Title bar */
     lv_obj_t* title_bar = lv_obj_create(s_admin_setup_screen);
-    lv_obj_set_size(title_bar, DISPLAY_WIDTH, 50);
+    lv_obj_set_size(title_bar, DISPLAY_WIDTH, 40);
     lv_obj_set_pos(title_bar, 0, 40);
-    lv_obj_set_style_bg_color(title_bar, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_set_style_bg_color(title_bar, ui_theme_get_header_color(), 0);
     lv_obj_set_style_radius(title_bar, 0, 0);
+    lv_obj_set_style_pad_all(title_bar, 0, 0);
+    lv_obj_set_style_border_width(title_bar, 0, 0);
+    lv_obj_remove_flag(title_bar, LV_OBJ_FLAG_SCROLLABLE);
     
     lv_obj_t* title_label = lv_label_create(title_bar);
     lv_label_set_text(title_label, "Admin Face Enrollment Wizard");
-    lv_obj_set_pos(title_label, 20, 12);
-    lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
+    lv_obj_align(title_label, LV_ALIGN_LEFT_MID, 20, 0);
+    lv_obj_set_style_text_color(title_label, ui_theme_get_text_color(), 0);
     lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
     
     /* Close button */
     lv_obj_t* close_btn = lv_btn_create(title_bar);
-    lv_obj_set_size(close_btn, 40, 40);
-    lv_obj_set_pos(close_btn, DISPLAY_WIDTH - 50, 5);
+    lv_obj_set_size(close_btn, 32, 32);
+    lv_obj_align(close_btn, LV_ALIGN_RIGHT_MID, -10, 0);
     lv_obj_set_style_bg_color(close_btn, lv_color_hex(0xFF4444), 0);
-    lv_obj_set_style_radius(close_btn, 20, 0);
+    lv_obj_set_style_radius(close_btn, 16, 0);
     
     lv_obj_t* close_label = lv_label_create(close_btn);
     lv_label_set_text(close_label, LV_SYMBOL_CLOSE);
@@ -111,7 +114,7 @@ void ui_show_admin_setup_wizard(void) {
     lv_obj_t* desc = lv_label_create(card);
     lv_label_set_text(desc, "Complete this form to set up the device Administrator.\nAfter tapping 'Start Face Capture', you will be redirected to the face scanner.");
     lv_obj_set_pos(desc, 20, 20);
-    lv_obj_set_style_text_color(desc, lv_color_hex(0xCCCCCC), 0);
+    lv_obj_set_style_text_color(desc, ui_theme_get_text_muted_color(), 0);
     
     /* Name Field */
     lv_obj_t* name_label = lv_label_create(card);

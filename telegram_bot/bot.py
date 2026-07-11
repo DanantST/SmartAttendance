@@ -99,6 +99,79 @@ bot_app = None
 async def root_health():
     return {"status": "ok", "message": "Smart Attendance Bot is running"}
 
+
+@web_app.get("/api/diagnostics")
+async def diagnostics():
+    import urllib.request
+    import json
+    import ssl
+    
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    public_url = os.environ.get("PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL", "")
+    api_url = os.environ.get("TELEGRAM_API_URL", "https://api.telegram.org/bot")
+    
+    token_status = "SET" if token else "NOT_SET"
+    masked_token = f"{token[:6]}...{token[-4:]}" if token and len(token) > 10 else "N/A"
+    
+    # Check DNS / Connectivity to api_url or api.telegram.org
+    ping_status = "unknown"
+    ping_error = None
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        req = urllib.request.Request(
+            api_url,
+            headers={'User-Agent': 'Mozilla/5.0'}
+        )
+        with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
+            ping_status = f"HTTP {response.getcode()}"
+    except Exception as e:
+        ping_status = "FAILED"
+        ping_error = str(e)
+        
+    # Check getMe status
+    get_me_status = "unknown"
+    get_me_error = None
+    get_me_result = None
+    if token:
+        try:
+            test_url = f"{api_url}{token}/getMe"
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            req = urllib.request.Request(
+                test_url,
+                headers={'User-Agent': 'Mozilla/5.0'}
+            )
+            with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
+                get_me_status = f"HTTP {response.getcode()}"
+                get_me_result = json.loads(response.read().decode('utf-8'))
+        except Exception as e:
+            get_me_status = "FAILED"
+            get_me_error = str(e)
+            
+    return {
+        "status": "ok",
+        "telegram_bot_token_status": token_status,
+        "telegram_bot_token_masked": masked_token,
+        "public_url": public_url,
+        "telegram_api_url": api_url,
+        "ping_telegram_api": {
+            "status": ping_status,
+            "error": ping_error
+        },
+        "get_me_test": {
+            "status": get_me_status,
+            "error": get_me_error,
+            "result": get_me_result
+        }
+    }
+
+
 @web_app.post("/telegram_webhook")
 async def telegram_webhook(request: Request):
     """
@@ -2160,13 +2233,21 @@ async def main():
     if public_url:
         logger.info(f"Setting Telegram webhook to: {public_url}/telegram_webhook")
         public_url = public_url.rstrip("/")
-        await bot_app.bot.set_webhook(url=f"{public_url}/telegram_webhook")
+        try:
+            await bot_app.bot.set_webhook(url=f"{public_url}/telegram_webhook")
+            logger.info("Telegram webhook set successfully.")
+        except Exception as e:
+            logger.error(f"Failed to set Telegram webhook: {e}")
+            logger.info("Continuing startup despite webhook error...")
     else:
         logger.info("No public URL detected, starting bot in polling mode...")
         # Clear webhook first so polling works
-        await bot_app.bot.delete_webhook()
-        await bot_app.updater.start_polling()
-        logger.info("Telegram Bot polling started.")
+        try:
+            await bot_app.bot.delete_webhook()
+            await bot_app.updater.start_polling()
+            logger.info("Telegram Bot polling started.")
+        except Exception as e:
+            logger.error(f"Failed to start polling mode: {e}")
     
     # Check if we should start the web server (default is True)
     start_web_server = os.environ.get("START_WEB_SERVER", "true").lower() == "true"

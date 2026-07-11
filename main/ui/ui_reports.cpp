@@ -5,6 +5,7 @@
 
 #include "ui_reports.h"
 #include "ui_main.h"
+#include "ui_theme.h"
 #include "database/db_manager.h"
 #include "esp_log.h"
 #include <string.h>
@@ -41,42 +42,48 @@ void ui_show_reports_screen(void) {
 
 void ui_close_reports_screen(void) {
     if (!s_reports_screen) return;
+    if (lv_scr_act() == s_reports_screen) {
+        ui_return_to_main();
+        return;
+    }
     lv_obj_del(s_reports_screen);
     s_reports_screen  = NULL;
     s_course_dropdown = NULL;
     s_report_textarea = NULL;
     s_generate_btn    = NULL;
     s_export_btn      = NULL;
-    s_day_dd   = NULL;
-    s_month_dd = NULL;
-    s_year_dd  = NULL;
-    ui_return_to_main();
+    s_day_dd          = NULL;
+    s_month_dd        = NULL;
+    s_year_dd         = NULL;
 }
 
 static void create_reports_screen(void) {
     s_reports_screen = lv_obj_create(NULL);
     ui_add_double_tap_to_screen(s_reports_screen);
-    lv_obj_set_style_bg_color(s_reports_screen, lv_color_hex(0x121212), 0);
+    lv_obj_set_style_bg_color(s_reports_screen, ui_theme_get_bg_color(), 0);
     lv_scr_load(s_reports_screen);
 
     /* Title bar */
     lv_obj_t* title_bar = lv_obj_create(s_reports_screen);
-    lv_obj_set_size(title_bar, DISPLAY_WIDTH, 50);
+    lv_obj_set_size(title_bar, DISPLAY_WIDTH, 40);
     lv_obj_set_pos(title_bar, 0, 40);
-    lv_obj_set_style_bg_color(title_bar, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_set_style_bg_color(title_bar, ui_theme_get_header_color(), 0);
     lv_obj_set_style_radius(title_bar, 0, 0);
+    lv_obj_set_style_pad_all(title_bar, 0, 0);
+    lv_obj_set_style_border_width(title_bar, 0, 0);
+    lv_obj_remove_flag(title_bar, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t* title_label = lv_label_create(title_bar);
     lv_label_set_text(title_label, "Attendance Reports");
-    lv_obj_set_pos(title_label, 20, 12);
-    lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
+    lv_obj_align(title_label, LV_ALIGN_LEFT_MID, 20, 0);
+    lv_obj_set_style_text_color(title_label, ui_theme_get_text_color(), 0);
 
     /* Close button */
     lv_obj_t* close_btn = lv_btn_create(title_bar);
-    lv_obj_set_size(close_btn, 40, 40);
-    lv_obj_set_pos(close_btn, DISPLAY_WIDTH - 50, 5);
+    lv_obj_set_size(close_btn, 32, 32);
+    lv_obj_align(close_btn, LV_ALIGN_RIGHT_MID, -10, 0);
     lv_obj_set_style_bg_color(close_btn, lv_color_hex(0xFF4444), 0);
-    lv_obj_set_style_radius(close_btn, 20, 0);
+    lv_obj_set_style_radius(close_btn, 16, 0);
 
     lv_obj_t* close_label = lv_label_create(close_btn);
     lv_label_set_text(close_label, LV_SYMBOL_CLOSE);
@@ -88,7 +95,7 @@ static void create_reports_screen(void) {
     lv_obj_t* content = lv_obj_create(s_reports_screen);
     lv_obj_set_size(content, DISPLAY_WIDTH, 450);
     lv_obj_set_pos(content, 0, 90);
-    lv_obj_set_style_bg_color(content, lv_color_hex(0x121212), 0);
+    lv_obj_set_style_bg_color(content, ui_theme_get_bg_color(), 0);
     lv_obj_set_style_border_width(content, 0, 0);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -114,7 +121,7 @@ static void create_reports_screen(void) {
     lv_obj_t* date_title = lv_label_create(date_card);
     lv_label_set_text(date_title, "Date");
     lv_obj_set_pos(date_title, 15, 12);
-    lv_obj_set_style_text_color(date_title, lv_color_white(), 0);
+    lv_obj_set_style_text_color(date_title, ui_theme_get_text_color(), 0);
 
     /* Day dropdown — 1..31 */
     s_day_dd = lv_dropdown_create(date_card);
@@ -172,8 +179,8 @@ static void create_reports_screen(void) {
     lv_obj_set_size(s_report_textarea, DISPLAY_WIDTH - 40, 200);
     lv_textarea_set_placeholder_text(s_report_textarea, "Report will appear here...");
     lv_textarea_set_text(s_report_textarea, "");
-    lv_obj_set_style_bg_color(s_report_textarea, lv_color_hex(0x2A2A2A), 0);
-    lv_obj_set_style_text_color(s_report_textarea, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(s_report_textarea, ui_theme_get_surface_color(), 0);
+    lv_obj_set_style_text_color(s_report_textarea, ui_theme_get_text_color(), 0);
 
     /* Fetch and populate courses from database */
     char** course_names = NULL;

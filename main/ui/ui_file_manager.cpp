@@ -81,7 +81,7 @@ static void dir_click_handler(lv_event_t* e) {
             lv_obj_clean(s_file_list);
             lv_obj_t* loading = lv_label_create(s_file_list);
             lv_label_set_text(loading, "Loading files...");
-            lv_obj_set_style_text_color(loading, lv_color_hex(0xBBBBBB), 0);
+            lv_obj_set_style_text_color(loading, ui_theme_get_text_color(), 0);
         }
         ui_unlock();
     }
@@ -196,7 +196,7 @@ static void delete_click_handler(lv_event_t* e) {
         lv_obj_clean(s_file_list);
         lv_obj_t* loading = lv_label_create(s_file_list);
         lv_label_set_text(loading, "Refreshing...");
-        lv_obj_set_style_text_color(loading, lv_color_hex(0xBBBBBB), 0);
+        lv_obj_set_style_text_color(loading, ui_theme_get_text_color(), 0);
     }
 
     // Trigger loader task again to refresh list
@@ -217,7 +217,7 @@ static void render_current_page(void) {
     if (s_entry_count == 0) {
         lv_obj_t* lbl = lv_label_create(s_file_list);
         lv_label_set_text(lbl, "No files or folders found.");
-        lv_obj_set_style_text_color(lbl, lv_color_hex(0x888888), 0);
+        lv_obj_set_style_text_color(lbl, ui_theme_get_text_muted_color(), 0);
     } else {
         int start = s_page * PAGE_SIZE;
         int end   = start + PAGE_SIZE;
@@ -299,7 +299,7 @@ static lv_obj_t* add_list_item(lv_obj_t* parent, const char* icon, const char* t
     lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
     // Minimal styling to avoid complex render buffers
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0x2A2A2A), 0);
+    lv_obj_set_style_bg_color(btn, ui_theme_get_surface_color(), 0);
     lv_obj_set_style_border_width(btn, 0, 0);
     lv_obj_set_style_radius(btn, 4, 0);
     lv_obj_set_style_pad_all(btn, 8, 0);
@@ -314,7 +314,7 @@ static lv_obj_t* add_list_item(lv_obj_t* parent, const char* icon, const char* t
 
     lv_obj_t* text_label = lv_label_create(btn);
     lv_label_set_text(text_label, text);
-    lv_obj_set_style_text_color(text_label, lv_color_white(), 0);
+    lv_obj_set_style_text_color(text_label, ui_theme_get_text_color(), 0);
     lv_obj_set_style_text_font(text_label, &lv_font_montserrat_14, 0);
 
     return btn;
@@ -390,27 +390,29 @@ extern "C" void ui_show_file_manager_screen(void) {
 
     s_file_manager_screen = lv_obj_create(NULL);
     ui_add_double_tap_to_screen(s_file_manager_screen);
-    lv_obj_set_style_bg_color(s_file_manager_screen, lv_color_hex(0x121212), 0);
+    lv_obj_set_style_bg_color(s_file_manager_screen, ui_theme_get_bg_color(), 0);
 
     /* Title bar */
     lv_obj_t* title_bar = lv_obj_create(s_file_manager_screen);
-    lv_obj_set_size(title_bar, lv_pct(100), 50);
+    lv_obj_set_size(title_bar, 1024, 40);
     lv_obj_set_pos(title_bar, 0, 40);
-    lv_obj_set_style_bg_color(title_bar, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_set_style_bg_color(title_bar, ui_theme_get_header_color(), 0);
     lv_obj_set_style_border_width(title_bar, 0, 0);
     lv_obj_set_style_radius(title_bar, 0, 0);
+    lv_obj_set_style_pad_all(title_bar, 0, 0);
+    lv_obj_remove_flag(title_bar, LV_OBJ_FLAG_SCROLLABLE);
 
     s_title_label = lv_label_create(title_bar);
     lv_label_set_text_fmt(s_title_label, "File Manager: %s", s_current_dir);
-    lv_obj_set_pos(s_title_label, 20, 12);
-    lv_obj_set_style_text_color(s_title_label, lv_color_white(), 0);
+    lv_obj_align(s_title_label, LV_ALIGN_LEFT_MID, 20, 0);
+    lv_obj_set_style_text_color(s_title_label, ui_theme_get_text_color(), 0);
     lv_obj_set_style_text_font(s_title_label, &lv_font_montserrat_14, 0);
 
     /* Page info label (below title bar) */
     s_page_label = lv_label_create(s_file_manager_screen);
     lv_label_set_text(s_page_label, "Loading...");
     lv_obj_set_pos(s_page_label, 20, 96);
-    lv_obj_set_style_text_color(s_page_label, lv_color_hex(0x888888), 0);
+    lv_obj_set_style_text_color(s_page_label, ui_theme_get_text_muted_color(), 0);
     lv_obj_set_style_text_font(s_page_label, &lv_font_montserrat_12, 0);
 
     /* File list widget: Use plain lv_obj with flex to avoid unstable lv_list */
@@ -418,7 +420,7 @@ extern "C" void ui_show_file_manager_screen(void) {
     lv_obj_set_size(s_file_list, 1024 - 40, 600 - 180);
     lv_obj_set_pos(s_file_list, 20, 115);
     lv_obj_set_flex_flow(s_file_list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_bg_color(s_file_list, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_set_style_bg_color(s_file_list, ui_theme_get_surface_color(), 0);
     lv_obj_set_style_border_width(s_file_list, 0, 0);
     lv_obj_set_style_pad_all(s_file_list, 10, 0);
     lv_obj_set_style_pad_row(s_file_list, 6, 0);
@@ -426,7 +428,7 @@ extern "C" void ui_show_file_manager_screen(void) {
 
     lv_obj_t* loading_lbl = lv_label_create(s_file_list);
     lv_label_set_text(loading_lbl, "Loading files from SD card...");
-    lv_obj_set_style_text_color(loading_lbl, lv_color_hex(0xBBBBBB), 0);
+    lv_obj_set_style_text_color(loading_lbl, ui_theme_get_text_color(), 0);
     lv_obj_set_style_text_font(loading_lbl, &lv_font_montserrat_14, 0);
 
     /* Launch background load at safe stack size */
@@ -438,6 +440,10 @@ extern "C" void ui_show_file_manager_screen(void) {
 /* ---- Public: Close File Manager ---- */
 extern "C" void ui_close_file_manager_screen(void) {
     if (!s_file_manager_screen) return;
+    if (lv_scr_act() == s_file_manager_screen) {
+        ui_return_to_main();
+        return;
+    }
 
     /* Free entry cache */
     if (s_entries) { free(s_entries); s_entries = NULL; }
@@ -448,6 +454,4 @@ extern "C" void ui_close_file_manager_screen(void) {
     s_page_label  = NULL;
     lv_obj_del(s_file_manager_screen);
     s_file_manager_screen = NULL;
-
-    ui_return_to_main();
 }

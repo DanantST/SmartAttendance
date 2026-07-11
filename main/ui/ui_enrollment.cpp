@@ -132,7 +132,7 @@ void ui_close_enrollment_screen(void) {
 static void create_enrollment_screen(void) {
     s_enroll_screen = lv_obj_create(NULL);
     ui_add_double_tap_to_screen(s_enroll_screen);
-    lv_obj_set_style_bg_color(s_enroll_screen, lv_color_hex(0x121212), 0);
+    lv_obj_set_style_bg_color(s_enroll_screen, ui_theme_get_bg_color(), 0);
     lv_scr_load(s_enroll_screen);
 
     /* Close Button */
@@ -150,7 +150,7 @@ static void create_enrollment_screen(void) {
     /* Title */
     lv_obj_t* title = lv_label_create(s_enroll_screen);
     lv_label_set_text(title, "WEB AP Remote Enrollment");
-    lv_obj_set_style_text_color(title, lv_color_white(), 0);
+    lv_obj_set_style_text_color(title, ui_theme_get_text_color(), 0);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_set_pos(title, 20, 50);
 
@@ -158,12 +158,12 @@ static void create_enrollment_screen(void) {
     s_list_panel = lv_obj_create(s_enroll_screen);
     lv_obj_set_size(s_list_panel, 260, 440);
     lv_obj_set_pos(s_list_panel, 20, 90);
-    lv_obj_set_style_bg_color(s_list_panel, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_set_style_bg_color(s_list_panel, ui_theme_get_surface_color(), 0);
     lv_obj_set_style_border_width(s_list_panel, 0, 0);
     
     lv_obj_t* list_title = lv_label_create(s_list_panel);
     lv_label_set_text(list_title, "Pending Students");
-    lv_obj_set_style_text_color(list_title, lv_color_hex(0xAAAAAA), 0);
+    lv_obj_set_style_text_color(list_title, ui_theme_get_text_muted_color(), 0);
     lv_obj_align(list_title, LV_ALIGN_TOP_MID, 0, 0);
 
     s_student_list = lv_obj_create(s_list_panel);
@@ -178,7 +178,7 @@ static void create_enrollment_screen(void) {
     s_right_panel = lv_obj_create(s_enroll_screen);
     lv_obj_set_size(s_right_panel, 700, 440);
     lv_obj_set_pos(s_right_panel, 300, 90);
-    lv_obj_set_style_bg_color(s_right_panel, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_set_style_bg_color(s_right_panel, ui_theme_get_surface_color(), 0);
     lv_obj_set_style_border_width(s_right_panel, 0, 0);
 
     /* Rectangular Camera Container */
@@ -207,20 +207,20 @@ static void create_enrollment_screen(void) {
     s_progress_bar = lv_bar_create(s_right_panel);
     lv_obj_set_size(s_progress_bar, 400, 15);
     lv_obj_align(s_progress_bar, LV_ALIGN_TOP_MID, 0, 10);
-    lv_obj_set_style_bg_color(s_progress_bar, lv_color_hex(0x333333), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_progress_bar, ui_theme_get_bg_color(), LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_progress_bar, lv_color_hex(0x4CAF50), LV_PART_INDICATOR);
     lv_bar_set_range(s_progress_bar, 0, 20);
     lv_obj_add_flag(s_progress_bar, LV_OBJ_FLAG_HIDDEN);
 
     s_progress_label = lv_label_create(s_right_panel);
     lv_label_set_text(s_progress_label, "");
-    lv_obj_set_style_text_color(s_progress_label, lv_color_white(), 0);
+    lv_obj_set_style_text_color(s_progress_label, ui_theme_get_text_color(), 0);
     lv_obj_align_to(s_progress_label, s_progress_bar, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
 
     /* Guidance Label (below oval) */
     s_guidance_label = lv_label_create(s_right_panel);
     lv_label_set_text(s_guidance_label, "Tap a student to begin enrollment");
-    lv_obj_set_style_text_color(s_guidance_label, lv_color_hex(0xAAAAAA), 0);
+    lv_obj_set_style_text_color(s_guidance_label, ui_theme_get_text_muted_color(), 0);
     lv_obj_set_style_text_font(s_guidance_label, &lv_font_montserrat_16, 0);
     lv_obj_align(s_guidance_label, LV_ALIGN_BOTTOM_MID, 0, -20);
 
@@ -297,19 +297,19 @@ void ui_enrollment_add_student(const char* name, const char* student_id) {
     lv_obj_t* card = lv_obj_create(s_student_list);
     lv_obj_set_width(card, 220);
     lv_obj_set_height(card, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_color(card, lv_color_hex(0x2A2A2A), 0);
+    lv_obj_set_style_bg_color(card, ui_theme_get_surface_color(), 0);
     lv_obj_set_style_border_width(card, 0, 0);
     lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(card, student_card_event_handler, LV_EVENT_CLICKED, (void*)(intptr_t)idx);
 
     lv_obj_t* name_lbl = lv_label_create(card);
     lv_label_set_text(name_lbl, name);
-    lv_obj_set_style_text_color(name_lbl, lv_color_white(), 0);
+    lv_obj_set_style_text_color(name_lbl, ui_theme_get_text_color(), 0);
     lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_16, 0);
 
     lv_obj_t* id_lbl = lv_label_create(card);
     lv_label_set_text_fmt(id_lbl, "ID: %s", student_id);
-    lv_obj_set_style_text_color(id_lbl, lv_color_hex(0x888888), 0);
+    lv_obj_set_style_text_color(id_lbl, ui_theme_get_text_muted_color(), 0);
     lv_obj_align_to(id_lbl, name_lbl, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 5);
 
     s_student_cards[idx] = card;
@@ -408,7 +408,8 @@ void ui_enrollment_set_status(bool success, const char* message) {
 
         /* Unhighlight the card so the user sees it's selectable again */
         if (s_current_student_idx >= 0 && s_student_cards[s_current_student_idx]) {
-            lv_obj_set_style_bg_color(s_student_cards[s_current_student_idx], lv_color_hex(0x2A2A2A), 0);
+            lv_obj_set_style_bg_color(s_student_cards[s_current_student_idx],
+                                      ui_theme_get_surface_color(), 0);
         }
 
         /* Add a visible "Try Again" button so the user doesn't have to guess */

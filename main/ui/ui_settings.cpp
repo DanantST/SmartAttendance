@@ -66,7 +66,25 @@ void ui_show_settings_screen(void) {
 
 void ui_close_settings_screen(void) {
     if (!s_settings_screen) return;
-    ui_return_to_main();
+    if (lv_scr_act() == s_settings_screen) {
+        ui_return_to_main();
+        return;
+    }
+    lv_obj_del(s_settings_screen);
+    s_settings_screen        = NULL;
+    s_brightness_slider      = NULL;
+    s_brightness_label       = NULL;
+    s_theme_switch           = NULL;
+    s_wifi_ssid_input        = NULL;
+    s_wifi_pass_input        = NULL;
+    s_telegram_token_input   = NULL;
+    s_telegram_chat_input    = NULL;
+    s_api_endpoint_input     = NULL;
+    s_about_label            = NULL;
+    s_factory_reset_btn      = NULL;
+    s_known_networks_btn     = NULL;
+    s_wifi_status_label      = NULL;
+    s_sync_interval_dropdown = NULL;
 }
 
 static void textarea_click_event_cb(lv_event_t* e) {
@@ -78,29 +96,31 @@ static void textarea_click_event_cb(lv_event_t* e) {
 static void create_settings_screen(void) {
     s_settings_screen = lv_obj_create(NULL);
     ui_add_double_tap_to_screen(s_settings_screen);
-    lv_obj_set_style_bg_color(s_settings_screen, lv_color_hex(0x121212), 0);
+    lv_obj_set_style_bg_color(s_settings_screen, ui_theme_get_bg_color(), 0);
     lv_scr_load(s_settings_screen);
-    lv_obj_set_style_bg_color(s_settings_screen, lv_color_hex(0x121212), 0);
     
     /* Title bar */
     lv_obj_t* title_bar = lv_obj_create(s_settings_screen);
-    lv_obj_set_size(title_bar, DISPLAY_WIDTH, 50);
+    lv_obj_set_size(title_bar, DISPLAY_WIDTH, 40);
     lv_obj_set_pos(title_bar, 0, 40);
-    lv_obj_set_style_bg_color(title_bar, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_set_style_bg_color(title_bar, ui_theme_get_header_color(), 0);
     lv_obj_set_style_radius(title_bar, 0, 0);
+    lv_obj_set_style_pad_all(title_bar, 0, 0);
+    lv_obj_set_style_border_width(title_bar, 0, 0);
+    lv_obj_remove_flag(title_bar, LV_OBJ_FLAG_SCROLLABLE);
     
     lv_obj_t* title_label = lv_label_create(title_bar);
     lv_label_set_text(title_label, "Settings");
-    lv_obj_set_pos(title_label, 20, 12);
-    lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
+    lv_obj_align(title_label, LV_ALIGN_LEFT_MID, 20, 0);
+    lv_obj_set_style_text_color(title_label, ui_theme_get_text_color(), 0);
     lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
     
     /* Close button */
     lv_obj_t* close_btn = lv_btn_create(title_bar);
-    lv_obj_set_size(close_btn, 40, 40);
-    lv_obj_set_pos(close_btn, DISPLAY_WIDTH - 50, 5);
+    lv_obj_set_size(close_btn, 32, 32);
+    lv_obj_align(close_btn, LV_ALIGN_RIGHT_MID, -10, 0);
     lv_obj_set_style_bg_color(close_btn, lv_color_hex(0xFF4444), 0);
-    lv_obj_set_style_radius(close_btn, 20, 0);
+    lv_obj_set_style_radius(close_btn, 16, 0);
     
     lv_obj_t* close_label = lv_label_create(close_btn);
     lv_label_set_text(close_label, LV_SYMBOL_CLOSE);
@@ -113,7 +133,7 @@ static void create_settings_screen(void) {
     lv_obj_t* content = lv_obj_create(s_settings_screen);
     lv_obj_set_size(content, DISPLAY_WIDTH, 450);
     lv_obj_set_pos(content, 0, 90);
-    lv_obj_set_style_bg_color(content, lv_color_hex(0x121212), 0);
+    lv_obj_set_style_bg_color(content, ui_theme_get_bg_color(), 0);
     lv_obj_set_style_border_width(content, 0, 0);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -191,7 +211,7 @@ static void create_settings_screen(void) {
     s_wifi_status_label = lv_label_create(wifi_card);
     lv_obj_set_pos(s_wifi_status_label, 15, 240);
     lv_label_set_text(s_wifi_status_label, "Not connected");
-    lv_obj_set_style_text_color(s_wifi_status_label, lv_color_hex(0xAAAAAA), 0);
+    lv_obj_set_style_text_color(s_wifi_status_label, ui_theme_get_text_muted_color(), 0);
     
     s_known_networks_btn = ui_create_button(wifi_card, "Known Networks", 180, 40);
     lv_obj_set_pos(s_known_networks_btn, 15, 270);
@@ -357,7 +377,7 @@ static void create_settings_screen(void) {
     s_about_label = lv_label_create(about_card);
     lv_label_set_text(s_about_label, "Smart Attendance System\nVersion 1.0.0\nCrowPanel Advanced 7\" ESP32-P4");
     lv_obj_set_pos(s_about_label, 15, 45);
-    lv_obj_set_style_text_color(s_about_label, lv_color_hex(0xAAAAAA), 0);
+    lv_obj_set_style_text_color(s_about_label, ui_theme_get_text_muted_color(), 0);
 }
 
 static void brightness_slider_event(lv_event_t* e) {

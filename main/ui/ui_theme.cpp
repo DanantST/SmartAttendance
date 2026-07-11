@@ -78,3 +78,23 @@ void ui_theme_apply_dark(void) {
     lv_style_init(&style_text);
     lv_style_set_text_color(&style_text, dark_text);
 }
+
+lv_color_t ui_theme_get_bg_color(void) {
+    return ui_get_theme() == THEME_LIGHT ? light_bg : dark_bg;
+}
+
+lv_color_t ui_theme_get_surface_color(void) {
+    return ui_get_theme() == THEME_LIGHT ? light_surface : dark_surface;
+}
+
+lv_color_t ui_theme_get_text_color(void) {
+    return ui_get_theme() == THEME_LIGHT ? light_text : dark_text;
+}
+
+lv_color_t ui_theme_get_text_muted_color(void) {
+    return ui_get_theme() == THEME_LIGHT ? light_text_secondary : dark_text_secondary;
+}
+
+lv_color_t ui_theme_get_header_color(void) {
+    return ui_get_theme() == THEME_LIGHT ? lv_color_hex(0xE8E8E8) : dark_surface;
+}

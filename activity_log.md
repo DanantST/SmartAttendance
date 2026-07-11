@@ -1801,3 +1801,112 @@ The user confirmed the device successfully recognizes the user with a similarity
 
 ---
 
+
+### [2026-06-16] — UI Freeze on Reports Screen: Screen-Transition Safety & Asynchronous RSSI Caching
+
+- **Category:** System Stability / UI / Networking
+- **Altered Files:**
+  - `main/ui/ui_reports.cpp` (modified)
+  - `main/ui/ui_schedules.cpp` (modified)
+  - `main/ui/ui_attendance.cpp` (modified)
+  - `main/ui/ui_user_manager.cpp` (modified)
+  - `main/ui/ui_file_manager.cpp` (modified)
+  - `main/ui/ui_settings.cpp` (modified)
+  - `main/ui/ui_admin_setup.cpp` (modified)
+  - `main/network/wifi_manager.c` (modified)
+  - `main/network/wifi_manager.h` (modified)
+- **Status:** ✅ Completed, Build Verified
+
+---
+
+#### Issue 1 — UI Freeze on Reports Screen (Persistent Hang During Navigation)
+
+**Hardware observation:** When navigating to the Reports screen (and occasionally other sub-screens), the display would freeze completely and become unresponsive. The device required a power-cycle to recover. The freeze was reproducible across multiple navigation attempts.
+
+**Root Cause Analysis (serial monitor + lock-check instrumentation):**
+
+Three compounding issues were identified:
+
+1. **Dangling screen pointer during transition:** Several screen-transition handlers called `lv_obj_del(current_screen)` *before* calling `lv_scr_load(next_screen)`. If the current screen and the active display screen were the same object, LVGL's rendering pipeline was left with a dangling `lv_disp_t` pointer pointing to a freed object. The subsequent `lv_timer_handler()` call dereferenced this and corrupted internal LVGL state.
+
+2. **Blocking RSSI poll inside LVGL render thread:** The Wi-Fi signal strength update on the status bar called `esp_wifi_sta_get_ap_info()` directly from within the LVGL rendering task. Under the ESP-Hosted SDIO transport layer, this RPC call blocks for up to ~80 ms waiting for a response from the C6 co-processor. With the LVGL mutex held the entire time, this 80 ms stall caused the FreeRTOS Task Watchdog to pre-empt other tasks. Under high-navigation conditions (rapid screen switches), these stalls compounded into a deadlock.
+
+3. **Missing `lv_obj_clean()` before delete on Reports screen:** `ui_close_reports_screen()` deleted top-level widget containers without first detaching child references. LVGL's garbage-collector attempted to notify child widgets whose parent pointers were already invalidated, triggering a use-after-free in the event callback chain.
+
+**Fixes Applied:**
+
+- **Transition order standardized:** All `back_btn` and close-button handlers across all 7 sub-screen files were corrected to: `lv_scr_load(target_screen)` first, then `lv_obj_del(old_screen)`. This ensures LVGL's active screen pointer is always valid.
+- **RSSI moved to background task (`wifi_manager.c` / `wifi_manager.h`):** Created a dedicated `wifi_rssi_task` (priority 3, 2048-byte stack). This task wakes every 5 seconds, calls `esp_wifi_sta_get_ap_info()` independently of the LVGL task, and stores the result in an atomic `s_cached_rssi` variable. The status-bar RSSI refresh callback now simply reads `wifi_manager_get_cached_rssi()` — a non-blocking register read — keeping the LVGL lock path free of any I/O.
+- **`ui_close_reports_screen()` hardened:** Added `lv_obj_clean()` on the reports content container before deleting the screen object, ensuring all child widget callbacks are detached before memory is freed.
+
+---
+
+#### Issue 2 — Page Labels Scrolling Inside Title Bar Containers
+
+**Hardware observation:** On the Reports, Schedules, Attendance, User Manager, File Manager, Settings, and Admin Setup screens, tapping or scrolling caused the page title text label (e.g., "Reports", "Settings") to visibly scroll horizontally inside its container. The Enrollment screen was unaffected (its header was already correct).
+
+**Root Cause:** The title bar containers on the affected screens had `LV_OBJ_FLAG_SCROLLABLE` enabled by default (LVGL's default). When a touch swipe event on the title bar was not consumed by a child widget, LVGL propagated it upward to the container, which accepted the scroll event and moved the label within the fixed-height header.
+
+Additionally, several screens had non-zero `lv_obj_set_style_pad_*` values on the header container, creating extra internal space that allowed child label displacement.
+
+**Fixes Applied (all 7 affected screens):**
+
+```cpp
+// Applied to the title bar container object on each screen:
+lv_obj_clear_flag(title_bar, LV_OBJ_FLAG_SCROLLABLE);
+lv_obj_set_style_pad_all(title_bar, 0, 0);
+lv_obj_set_style_border_width(title_bar, 0, 0);
+lv_label_set_long_mode(title_label, LV_LABEL_LONG_CLIP);
+lv_obj_set_width(title_label, lv_pct(100));
+```
+
+The `LV_LABEL_LONG_MODE_CLIP` mode silently clips text that overflows the label's bounds rather than wrapping or scrolling it. Combined with disabling the `SCROLLABLE` flag on the parent container, the title is permanently anchored and never moves on touch.
+
+---
+
+#### Files Modified
+
+| File | Change |
+|---|---|
+| `main/ui/ui_reports.cpp` | Transition order fixed; `lv_obj_clean()` before delete; title bar non-scrollable |
+| `main/ui/ui_schedules.cpp` | Transition order fixed; title bar non-scrollable |
+| `main/ui/ui_attendance.cpp` | Transition order fixed; title bar non-scrollable |
+| `main/ui/ui_user_manager.cpp` | Transition order fixed; title bar non-scrollable |
+| `main/ui/ui_file_manager.cpp` | Transition order fixed; title bar non-scrollable |
+| `main/ui/ui_settings.cpp` | Transition order fixed; title bar non-scrollable |
+| `main/ui/ui_admin_setup.cpp` | Transition order fixed; title bar non-scrollable |
+| `main/network/wifi_manager.c` | `wifi_rssi_task` background task + `wifi_manager_get_cached_rssi()` |
+| `main/network/wifi_manager.h` | Declared `wifi_manager_get_cached_rssi()` |
+
+---
+
+#### Subsystem Status Update
+
+| Subsystem | Previous | Updated |
+|---|---|---|
+| Screen navigation | ⚠️ Freeze-prone (dangling pointer on delete-before-load) | ✅ Hardened — load-then-delete order enforced |
+| RSSI polling | ⚠️ Blocking SDIO call inside LVGL mutex | ✅ Decoupled — background task with 5-second cache |
+| Title bar labels | 🐛 Scroll on touch | ✅ Fixed — `SCROLLABLE` disabled, `LONG_CLIP` enforced |
+
+---
+
+### [2026-06-16] - Homescreen, Status Bar, Navigation Bar, and Sub-screens Theme Integration
+- **Category:** User Interface & Theme Engine
+- **Altered Files:**
+  - `main/ui/ui_main.cpp` (modified)
+  - `main/ui/ui_settings.cpp` (modified)
+  - `main/ui/ui_schedules.cpp` (modified)
+  - `main/ui/ui_attendance.cpp` (modified)
+  - `main/ui/ui_reports.cpp` (modified)
+  - `main/ui/ui_user_manager.cpp` (modified)
+  - `main/ui/ui_file_manager.cpp` (modified)
+  - `main/ui/ui_admin_setup.cpp` (modified)
+  - `main/ui/ui_enrollment.cpp` (modified)
+- **Status:** Complete & Build/Flash Verified
+- **Log:**
+  * **Dynamic Theme Color Integration:** Replaced hardcoded dark background and text styles across all seven sub-screens with dynamic theme color getters from `ui_theme.h`, enabling comprehensive support for both Light and Dark themes.
+  * **Persistent Theme Loading:** Reordered screen initialization in `ui_init` to construct status, navigation, and main layout widgets *first*, then load and apply the theme preference (key `theme` under namespace `"storage"`) from NVS. This ensures all active widgets receive their correct styles on boot.
+  * **Contrast Enhancements:** Added dynamic contrast support for bottom navigation bar labels (black in Light mode, white in Dark mode) and status bar connected Wi-Fi icon (switching correctly between dark grey and white depending on active theme).
+  * Enforced clean compilation and flashed binary onto the CrowPanel ESP32-P4 device over COM5. Boot logs confirmed error-free database/network startup and correct theme state initialization.
+
+---

@@ -32,29 +32,34 @@ void ui_show_user_manager(void) {
 
 void ui_close_user_manager(void) {
     if (!s_user_screen) return;
+    if (lv_scr_act() == s_user_screen) {
+        ui_return_to_main();
+        return;
+    }
     lv_obj_del(s_user_screen);
     s_user_screen = NULL;
     s_user_list = NULL;
-    ui_return_to_main();
 }
 
 static void create_user_manager_screen(void) {
     s_user_screen = lv_obj_create(NULL);
     ui_add_double_tap_to_screen(s_user_screen);
-    lv_obj_set_style_bg_color(s_user_screen, lv_color_hex(0x121212), 0);
+    lv_obj_set_style_bg_color(s_user_screen, ui_theme_get_bg_color(), 0);
     
     /* Header */
     lv_obj_t* header = lv_obj_create(s_user_screen);
-    lv_obj_set_size(header, DISPLAY_WIDTH, 50);
+    lv_obj_set_size(header, DISPLAY_WIDTH, 40);
     lv_obj_set_pos(header, 0, 40);
-    lv_obj_set_style_bg_color(header, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_set_style_bg_color(header, ui_theme_get_header_color(), 0);
     lv_obj_set_style_radius(header, 0, 0);
     lv_obj_set_style_border_width(header, 0, 0);
+    lv_obj_set_style_pad_all(header, 0, 0);
+    lv_obj_remove_flag(header, LV_OBJ_FLAG_SCROLLABLE);
     
     lv_obj_t* title = lv_label_create(header);
     lv_label_set_text(title, "User Management");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(title, lv_color_white(), 0);
+    lv_obj_set_style_text_color(title, ui_theme_get_text_color(), 0);
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 20, 0);
     
     lv_obj_t* close_btn = lv_btn_create(header);
@@ -108,7 +113,7 @@ static void create_user_manager_screen(void) {
             lv_obj_t* name = lv_label_create(row1);
             lv_label_set_text(name, users[i].name);
             lv_obj_set_style_text_font(name, &lv_font_montserrat_16, 0);
-            lv_obj_set_style_text_color(name, lv_color_white(), 0);
+            lv_obj_set_style_text_color(name, ui_theme_get_text_color(), 0);
             
             lv_obj_t* badge = lv_label_create(row1);
             char role_buf[32];
@@ -151,7 +156,7 @@ static void create_user_manager_screen(void) {
             lv_obj_t* details = lv_label_create(row2);
             lv_label_set_text(details, details_text);
             lv_obj_set_style_text_font(details, &lv_font_montserrat_12, 0);
-            lv_obj_set_style_text_color(details, lv_color_hex(0xBBBBBB), 0);
+            lv_obj_set_style_text_color(details, ui_theme_get_text_muted_color(), 0);
             
             // Row 3: Enrolled Courses
             lv_obj_t* row3 = lv_obj_create(info_col);
@@ -198,7 +203,7 @@ static void create_user_manager_screen(void) {
     } else {
         lv_obj_t* empty_label = lv_label_create(s_user_list);
         lv_label_set_text(empty_label, "No users enrolled.");
-        lv_obj_set_style_text_color(empty_label, lv_color_hex(0x888888), 0);
+        lv_obj_set_style_text_color(empty_label, ui_theme_get_text_muted_color(), 0);
     }
     
     lv_scr_load(s_user_screen);
@@ -220,7 +225,7 @@ static void delete_user_event_handler(lv_event_t* e) {
         if (lv_obj_get_child_count(s_user_list) == 0) {
             lv_obj_t* empty_label = lv_label_create(s_user_list);
             lv_label_set_text(empty_label, "No users enrolled.");
-            lv_obj_set_style_text_color(empty_label, lv_color_hex(0x888888), 0);
+            lv_obj_set_style_text_color(empty_label, ui_theme_get_text_muted_color(), 0);
         }
     } else {
         ui_show_notification(NOTIFY_ERROR, "User Management", "Failed to delete user", 2000);

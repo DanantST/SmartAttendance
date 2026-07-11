@@ -38,6 +38,8 @@ LV_FONT_DECLARE(lv_font_montserrat_48);
 #include "ui_user_manager.h"
 #include "ui_schedules.h"
 #include "wifi_manager.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 
 static void update_time_task(lv_timer_t *timer);
 
@@ -73,7 +75,8 @@ void ui_release(void) {
 
 /* Navigation bar objects */
 static lv_obj_t* s_nav_bar = NULL;
-static lv_obj_t* s_nav_buttons[5]; /* Home, Enroll, Sync, Reports, Settings */
+static lv_obj_t* s_nav_labels[3] = {NULL, NULL, NULL};
+static bool s_wifi_connected = false;
 static void (*s_nav_callback)(ui_nav_button_t) = NULL;
 
 /* Status bar objects */
@@ -177,15 +180,23 @@ esp_err_t ui_init(void) {
     backlight_init();
     backlight_set(100); /* Force 100% brightness */
 
-    /* Apply LIGHT theme for high visibility test */
-    ui_set_theme(THEME_LIGHT);
-
     /* Create main screen layout */
     s_main_screen = lv_obj_create(NULL);
     ui_add_double_tap_to_screen(s_main_screen);
     create_main_content();
     create_status_bar();
     create_navigation_bar();
+
+    /* Load theme from NVS and apply it */
+    ui_theme_t loaded_theme = THEME_LIGHT;
+    uint8_t theme_val = (uint8_t)UI_THEME_DEFAULT;
+    nvs_handle_t nvs;
+    if (nvs_open("storage", NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u8(nvs, "theme", &theme_val);
+        nvs_close(nvs);
+    }
+    loaded_theme = (theme_val == 1) ? THEME_DARK : THEME_LIGHT;
+    ui_set_theme(loaded_theme);
     /* Create and show boot screen */
     ui_show_boot_screen();
 
@@ -384,10 +395,11 @@ void ui_set_battery_percent(int percent, bool charging) {
 void ui_set_wifi_status(bool connected, int rssi) {
     if (!s_wifi_icon) return;
     if (!ui_acquire()) return;
+    s_wifi_connected = connected;
     if (connected) {
         lv_label_set_text(s_wifi_icon, LV_SYMBOL_WIFI);
         /* Optional: color based on signal strength */
-        lv_obj_set_style_text_color(s_wifi_icon, lv_color_white(), 0);
+        lv_obj_set_style_text_color(s_wifi_icon, (s_current_theme == THEME_LIGHT) ? lv_color_hex(0x212121) : lv_color_white(), 0);
     } else {
         lv_label_set_text(s_wifi_icon, LV_SYMBOL_WIFI);
         lv_obj_set_style_text_color(s_wifi_icon, lv_color_hex(0x888888), 0);
@@ -491,13 +503,13 @@ static void nav_button_event_handler(lv_event_t* e) {
 
 static void create_navigation_bar(void) {
     s_nav_bar = lv_obj_create(lv_layer_top()); /* Persist across screens */
-    lv_obj_set_size(s_nav_bar, DISPLAY_WIDTH, 60);
-    lv_obj_set_pos(s_nav_bar, 0, DISPLAY_HEIGHT - 60);
-    lv_obj_set_style_bg_color(s_nav_bar, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_set_style_bg_color(s_nav_bar, s_current_theme == THEME_LIGHT ? lv_color_hex(0xE8E8E8) : lv_color_hex(0x1E1E1E), 0);
     lv_obj_set_style_bg_opa(s_nav_bar, LV_OPA_80, 0);
     lv_obj_set_style_radius(s_nav_bar, 0, 0);
     lv_obj_set_style_border_width(s_nav_bar, 0, 0);
     lv_obj_set_style_pad_all(s_nav_bar, 0, 0);
+    lv_obj_set_size(s_nav_bar, DISPLAY_WIDTH, 60);
+    lv_obj_set_pos(s_nav_bar, 0, DISPLAY_HEIGHT - 60);
     
     const char* icons[] = { LV_SYMBOL_LEFT, LV_SYMBOL_HOME, LV_SYMBOL_LIST };
     
@@ -510,11 +522,11 @@ static void create_navigation_bar(void) {
         lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
         lv_obj_set_style_shadow_width(btn, 0, 0);
         
-        lv_obj_t* label = lv_label_create(btn);
-        lv_label_set_text(label, icons[i]);
-        lv_obj_center(label);
-        lv_obj_set_style_text_color(label, lv_color_white(), 0);
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_24, 0);
+        s_nav_labels[i] = lv_label_create(btn);
+        lv_label_set_text(s_nav_labels[i], icons[i]);
+        lv_obj_center(s_nav_labels[i]);
+        lv_obj_set_style_text_color(s_nav_labels[i], s_current_theme == THEME_LIGHT ? lv_color_hex(0x212121) : lv_color_white(), 0);
+        lv_obj_set_style_text_font(s_nav_labels[i], &lv_font_montserrat_24, 0);
         
         lv_obj_add_event_cb(btn, nav_button_event_handler, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
     }
@@ -574,20 +586,22 @@ static void app_icon_event_handler(lv_event_t* e) {
 }
 
 static void create_main_content(void) {
+    bool is_light = (s_current_theme == THEME_LIGHT);
+    
     /* Set wallpaper/background */
-    lv_obj_set_style_bg_color(s_main_screen, lv_color_hex(0x121212), 0);
+    lv_obj_set_style_bg_color(s_main_screen, is_light ? lv_color_hex(0xF5F5F5) : lv_color_hex(0x121212), 0);
     
     /* Large Desktop Clock Widget */
     s_desktop_clock = lv_label_create(s_main_screen);
     lv_obj_set_pos(s_desktop_clock, DISPLAY_WIDTH / 2 - 80, 60);
     lv_label_set_text(s_desktop_clock, "12:00");
-    lv_obj_set_style_text_color(s_desktop_clock, lv_color_white(), 0);
+    lv_obj_set_style_text_color(s_desktop_clock, is_light ? lv_color_hex(0x212121) : lv_color_white(), 0);
     lv_obj_set_style_text_font(s_desktop_clock, &lv_font_montserrat_48, 0);
     
     s_desktop_date = lv_label_create(s_main_screen);
     lv_obj_set_pos(s_desktop_date, DISPLAY_WIDTH / 2 - 80, 120);
     lv_label_set_text(s_desktop_date, "Syncing time...");
-    lv_obj_set_style_text_color(s_desktop_date, lv_color_hex(0xAAAAAA), 0);
+    lv_obj_set_style_text_color(s_desktop_date, is_light ? lv_color_hex(0x666666) : lv_color_hex(0xAAAAAA), 0);
     lv_obj_set_style_text_font(s_desktop_date, &lv_font_montserrat_16, 0);
 
     /* Grid for App Icons */
@@ -632,51 +646,88 @@ void ui_set_theme(ui_theme_t theme) {
     
     if (theme == THEME_LIGHT) {
         /* Light theme styles */
-        lv_display_set_theme(s_display, NULL); /* Reset */
         lv_theme_t* th = lv_theme_default_init(s_display, lv_color_hex(0x3A6EA5), lv_color_hex(0xDDDDDD), 
                                                false, &lv_font_montserrat_14);
         lv_display_set_theme(s_display, th);
         
+        /* Set active screen background for instant feedback */
+        if (lv_scr_act()) {
+            lv_obj_set_style_bg_color(lv_scr_act(), lv_color_hex(0xF5F5F5), 0);
+        }
+        if (s_main_screen) {
+            lv_obj_set_style_bg_color(s_main_screen, lv_color_hex(0xF5F5F5), 0);
+        }
+        if (s_desktop_clock) {
+            lv_obj_set_style_text_color(s_desktop_clock, lv_color_hex(0x212121), 0);
+        }
+        if (s_desktop_date) {
+            lv_obj_set_style_text_color(s_desktop_date, lv_color_hex(0x666666), 0);
+        }
+        
         /* Override status bar - only if UI has been built */
         if (s_status_bar) {
             lv_obj_set_style_bg_color(s_status_bar, lv_color_hex(0xF5F5F5), 0);
-            lv_obj_set_style_text_color(s_time_label, lv_color_hex(0x333333), 0);
-            lv_obj_set_style_text_color(s_date_label, lv_color_hex(0x666666), 0);
-            lv_obj_set_style_text_color(s_battery_label, lv_color_hex(0x333333), 0);
+            if (s_time_label) lv_obj_set_style_text_color(s_time_label, lv_color_hex(0x333333), 0);
+            if (s_date_label) lv_obj_set_style_text_color(s_date_label, lv_color_hex(0x666666), 0);
+            if (s_battery_label) lv_obj_set_style_text_color(s_battery_label, lv_color_hex(0x333333), 0);
+            if (s_battery_icon) lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x333333), 0);
+            if (s_wifi_icon) {
+                lv_obj_set_style_text_color(s_wifi_icon, s_wifi_connected ? lv_color_hex(0x212121) : lv_color_hex(0x888888), 0);
+            }
         }
         
         /* Navigation bar */
         if (s_nav_bar) {
             lv_obj_set_style_bg_color(s_nav_bar, lv_color_hex(0xE8E8E8), 0);
-            for (int i = 0; i < 5; i++) {
-                if (s_nav_buttons[i]) {
-                    lv_obj_set_style_bg_color(s_nav_buttons[i], lv_color_hex(0xF0F0F0), 0);
+            for (int i = 0; i < 3; i++) {
+                if (s_nav_labels[i]) {
+                    lv_obj_set_style_text_color(s_nav_labels[i], lv_color_hex(0x212121), 0);
                 }
             }
         }
     } else {
         /* Dark theme styles (default) */
-        lv_display_set_theme(s_display, NULL);
         lv_theme_t* th = lv_theme_default_init(s_display, lv_color_hex(0x3A6EA5), lv_color_hex(0x333333), 
                                                true, &lv_font_montserrat_14);
         lv_display_set_theme(s_display, th);
         
+        /* Set active screen background for instant feedback */
+        if (lv_scr_act()) {
+            lv_obj_set_style_bg_color(lv_scr_act(), lv_color_hex(0x121212), 0);
+        }
+        if (s_main_screen) {
+            lv_obj_set_style_bg_color(s_main_screen, lv_color_hex(0x121212), 0);
+        }
+        if (s_desktop_clock) {
+            lv_obj_set_style_text_color(s_desktop_clock, lv_color_white(), 0);
+        }
+        if (s_desktop_date) {
+            lv_obj_set_style_text_color(s_desktop_date, lv_color_hex(0xAAAAAA), 0);
+        }
+        
         if (s_status_bar) {
             lv_obj_set_style_bg_color(s_status_bar, lv_color_hex(0x1E1E1E), 0);
-            lv_obj_set_style_text_color(s_time_label, lv_color_white(), 0);
-            lv_obj_set_style_text_color(s_date_label, lv_color_hex(0xAAAAAA), 0);
-            lv_obj_set_style_text_color(s_battery_label, lv_color_white(), 0);
+            if (s_time_label) lv_obj_set_style_text_color(s_time_label, lv_color_white(), 0);
+            if (s_date_label) lv_obj_set_style_text_color(s_date_label, lv_color_hex(0xAAAAAA), 0);
+            if (s_battery_label) lv_obj_set_style_text_color(s_battery_label, lv_color_white(), 0);
+            if (s_battery_icon) lv_obj_set_style_text_color(s_battery_icon, lv_color_white(), 0);
+            if (s_wifi_icon) {
+                lv_obj_set_style_text_color(s_wifi_icon, s_wifi_connected ? lv_color_white() : lv_color_hex(0x888888), 0);
+            }
         }
         
         if (s_nav_bar) {
             lv_obj_set_style_bg_color(s_nav_bar, lv_color_hex(0x1E1E1E), 0);
-            for (int i = 0; i < 5; i++) {
-                if (s_nav_buttons[i]) {
-                    lv_obj_set_style_bg_color(s_nav_buttons[i], lv_color_hex(0x2A2A2A), 0);
+            for (int i = 0; i < 3; i++) {
+                if (s_nav_labels[i]) {
+                    lv_obj_set_style_text_color(s_nav_labels[i], lv_color_white(), 0);
                 }
             }
         }
     }
+    
+    /* Explicitly report style change to refresh all active objects */
+    lv_obj_report_style_change(NULL);
     
     ESP_LOGI(TAG, "Theme set to %s", theme == THEME_LIGHT ? "light" : "dark");
 }

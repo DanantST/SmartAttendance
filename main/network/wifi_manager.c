@@ -50,6 +50,7 @@ static wifi_status_t s_wifi_status = WIFI_STATUS_DISCONNECTED;
 static int s_retry_count = 0;
 static char s_current_ssid[32] = {0};
 static char s_current_password[64] = {0};
+static int s_wifi_rssi = -120;
 
 static const bool FORCE_CONNECT_TRUE = true;
 static const bool FORCE_CONNECT_FALSE = false;
@@ -59,6 +60,7 @@ static void event_handler(void* arg, esp_event_base_t event_base,
                           int32_t event_id, void* event_data);
 static esp_err_t wifi_init_sta(void);
 static void wifi_auto_connect_daemon(void* pvParameters);
+static void wifi_rssi_task(void* pvParameters);
 
 /**
  * Issue 5.1: Replaced ESP_ERROR_CHECK (which aborts on failure) with
@@ -123,8 +125,9 @@ esp_err_t wifi_manager_init(void) {
     esp_wifi_set_ps(WIFI_PS_NONE);
     esp_wifi_set_max_tx_power(50);
     
-    /* Start background Wi-Fi Auto-Connect Daemon */
+    /* Start background Wi-Fi Auto-Connect Daemon and RSSI caching task */
     xTaskCreate(wifi_auto_connect_daemon, "wifi_daemon", 3072, NULL, 4, NULL);
+    xTaskCreate(wifi_rssi_task, "wifi_rssi", 2048, NULL, 3, NULL);
     
     ESP_LOGI(TAG, "Wi-Fi manager initialized");
     return ESP_OK;
@@ -459,13 +462,24 @@ int wifi_manager_get_retry_count(void) {
 }
 
 int wifi_manager_get_rssi(void) {
-    if (s_wifi_status != WIFI_STATUS_CONNECTED) return 0;
-    
-    wifi_ap_record_t ap_info;
-    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-        return ap_info.rssi;
+    return s_wifi_rssi;
+}
+
+static void wifi_rssi_task(void* pvParameters) {
+    (void)pvParameters;
+    while (1) {
+        if (s_wifi_status == WIFI_STATUS_CONNECTED) {
+            wifi_ap_record_t ap_info;
+            if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                s_wifi_rssi = ap_info.rssi;
+            } else {
+                s_wifi_rssi = -120;
+            }
+        } else {
+            s_wifi_rssi = -120;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10000)); // Poll co-processor every 10 seconds
     }
-    return 0;
 }
 
 int wifi_manager_scan(wifi_ap_record_t* networks, int max_networks) {
