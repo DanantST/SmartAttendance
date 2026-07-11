@@ -105,6 +105,7 @@ async def diagnostics():
     import urllib.request
     import json
     import ssl
+    import socket
     
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     public_url = os.environ.get("PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL", "")
@@ -113,24 +114,36 @@ async def diagnostics():
     token_status = "SET" if token else "NOT_SET"
     masked_token = f"{token[:6]}...{token[-4:]}" if token and len(token) > 10 else "N/A"
     
-    # Check DNS / Connectivity to api_url or api.telegram.org
-    ping_status = "unknown"
-    ping_error = None
-    try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        
-        req = urllib.request.Request(
-            api_url,
-            headers={'User-Agent': 'Mozilla/5.0'}
-        )
-        with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
-            ping_status = f"HTTP {response.getcode()}"
-    except Exception as e:
-        ping_status = "FAILED"
-        ping_error = str(e)
-        
+    # Run pings to multiple destinations
+    dests = {
+        "httpbin": "https://httpbin.org/get",
+        "api.telegram.org": "https://api.telegram.org/",
+        "cloudflare_worker": api_url
+    }
+    
+    ping_results = {}
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    
+    for name, dest_url in dests.items():
+        try:
+            req = urllib.request.Request(
+                dest_url,
+                headers={'User-Agent': 'Mozilla/5.0'}
+            )
+            # Try with a 4 second timeout
+            with urllib.request.urlopen(req, timeout=4, context=ctx) as response:
+                ping_results[name] = {
+                    "status": "SUCCESS",
+                    "code": response.getcode()
+                }
+        except Exception as e:
+            ping_results[name] = {
+                "status": "FAILED",
+                "error": str(e)
+            }
+            
     # Check getMe status
     get_me_status = "unknown"
     get_me_error = None
@@ -138,7 +151,6 @@ async def diagnostics():
     if token:
         try:
             test_url = f"{api_url}{token}/getMe"
-            
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
@@ -147,12 +159,15 @@ async def diagnostics():
                 test_url,
                 headers={'User-Agent': 'Mozilla/5.0'}
             )
-            with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
-                get_me_status = f"HTTP {response.getcode()}"
+            with urllib.request.urlopen(req, timeout=4, context=ctx) as response:
+                get_me_status = "SUCCESS"
                 get_me_result = json.loads(response.read().decode('utf-8'))
         except Exception as e:
             get_me_status = "FAILED"
             get_me_error = str(e)
+            
+    # Check if getaddrinfo is overridden
+    is_overridden = socket.getaddrinfo == getaddrinfo_ipv4
             
     return {
         "status": "ok",
@@ -160,16 +175,17 @@ async def diagnostics():
         "telegram_bot_token_masked": masked_token,
         "public_url": public_url,
         "telegram_api_url": api_url,
-        "ping_telegram_api": {
-            "status": ping_status,
-            "error": ping_error
+        "dns_info": {
+            "getaddrinfo_override_active": is_overridden
         },
+        "pings": ping_results,
         "get_me_test": {
             "status": get_me_status,
             "error": get_me_error,
             "result": get_me_result
         }
     }
+
 
 
 @web_app.post("/telegram_webhook")
