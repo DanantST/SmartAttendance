@@ -531,16 +531,31 @@ def get_enrolled_students(course_code):
     return [dict(r) for r in rows]
 
 def get_lecturer_schedules(telegram_id):
-    """Retrieves all schedules created by a specific lecturer."""
+    """
+    Retrieves all schedules for a lecturer.
+    This includes:
+      - Schedules created directly via the bot (telegram_id = lecturer's ID)
+      - Schedules uploaded from the device (telegram_id = 'device') for courses
+        the lecturer owns (via lecturer_courses table)
+    """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, course_code, course_title, start_time, end_time, event_type 
-        FROM schedules 
-        WHERE telegram_id = ? 
+        SELECT id, course_code, course_title, start_time, end_time, event_type
+        FROM schedules
+        WHERE telegram_id = ?
+
+        UNION
+
+        SELECT s.id, s.course_code, s.course_title, s.start_time, s.end_time, s.event_type
+        FROM schedules s
+        JOIN lecturer_courses lc ON s.course_code = lc.course_code
+        WHERE s.telegram_id = 'device'
+          AND lc.lecturer_telegram_id = ?
+
         ORDER BY start_time ASC
-    """, (str(telegram_id),))
+    """, (str(telegram_id), str(telegram_id)))
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -675,27 +690,39 @@ def upsert_course_from_device(code, name):
 def upsert_schedule_from_device(course_code, course_title, start_time, end_time, event_type='lecture'):
     """
     Upserts a schedule received from the device into the cloud schedules table.
-    Uses 'device' as a placeholder telegram_id for schedules not created via Telegram.
+    Tries to resolve the lecturer's real telegram_id via lecturer_courses so the
+    schedule appears under the lecturer in My Schedules. Falls back to 'device'
+    if the course is not yet linked to any lecturer.
     Deduplicates on (course_code, start_time, end_time).
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     now = int(time.time())
     try:
+        # Resolve the lecturer's telegram_id for this course (if already linked)
+        cursor.execute("""
+            SELECT lecturer_telegram_id FROM lecturer_courses
+            WHERE course_code = ?
+            LIMIT 1
+        """, (course_code,))
+        lc_row = cursor.fetchone()
+        owner_telegram_id = lc_row[0] if lc_row and lc_row[0] else 'device'
+
         # Ensure the course exists first
         cursor.execute("""
             INSERT OR IGNORE INTO courses (code, name)
             VALUES (?, ?)
         """, (course_code, course_title))
+
         # Insert only if this exact slot doesn't already exist
         cursor.execute("""
             INSERT INTO schedules (telegram_id, course_code, course_title, start_time, end_time, event_type, created_at)
-            SELECT 'device', ?, ?, ?, ?, ?, ?
+            SELECT ?, ?, ?, ?, ?, ?, ?
             WHERE NOT EXISTS (
                 SELECT 1 FROM schedules
                 WHERE course_code = ? AND start_time = ? AND end_time = ?
             )
-        """, (course_code, course_title, int(start_time), int(end_time), event_type, now,
+        """, (owner_telegram_id, course_code, course_title, int(start_time), int(end_time), event_type, now,
               course_code, int(start_time), int(end_time)))
         conn.commit()
     except Exception as e:
