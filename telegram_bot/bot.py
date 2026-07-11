@@ -68,6 +68,8 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     INPUT_END_TIME,
 ) = range(9)
 
+SELECT_EVENT_TYPE = 26
+
 # Conversation States for Course Enrollment
 SELECT_ENROLL_COURSE = 9
 
@@ -607,9 +609,9 @@ async def notify_linked_student(telegram_id, name, role):
             await bot_app.bot.send_message(
                 chat_id=telegram_id,
                 text=(
-                    f"🎉 **Registration Complete!**\n\n"
-                    f"Your account (**{name}**) has been successfully linked to the Smart Attendance bot as a **{role.capitalize()}**.\n\n"
-                    "You will now receive automatic notifications for class schedules and attendance records."
+                    f"🎉 **Profile Synced & Registration Complete!**\n\n"
+                    f"Your account (**{name}**) has been successfully synced from the attendance device and linked to the Smart Attendance bot as a **{role.capitalize()}**.\n\n"
+                    "You can now subscribe to the available courses to receive event updates (lectures, tests, exams) and attendance records."
                 ),
                 reply_markup=reply_markup,
                 parse_mode="Markdown"
@@ -618,22 +620,26 @@ async def notify_linked_student(telegram_id, name, role):
         except Exception as e:
             logger.error(f"Failed to send link notification to {telegram_id}: {e}")
 
-async def notify_students_new_schedule(course_code, course_title, date_str, start_time_str, end_time_str, lecturer_name):
+async def notify_students_new_schedule(course_code, course_title, date_str, start_time_str, end_time_str, lecturer_name, event_type="lecture"):
     global bot_app
     if bot_app:
         students = db.get_enrolled_students(course_code)
-        logger.info(f"Notifying {len(students)} enrolled students about scheduled class for {course_code}")
+        logger.info(f"Notifying {len(students)} enrolled students about scheduled {event_type} for {course_code}")
+        
+        event_name = event_type.capitalize()
+        
         for student in students:
             try:
                 await bot_app.bot.send_message(
                     chat_id=student["telegram_id"],
                     text=(
-                        f"📅 **New Class Scheduled!**\n\n"
+                        f"📅 **New {event_name} Scheduled!**\n\n"
                         f"**Course:** {course_code} - {course_title}\n"
+                        f"**Event Type:** {event_name}\n"
                         f"**Date:** {date_str}\n"
                         f"**Time:** {start_time_str} - {end_time_str}\n"
                         f"**Lecturer:** {lecturer_name}\n\n"
-                        "Please be punctual!"
+                        "Please be prepared and punctual!"
                     ),
                     parse_mode="Markdown"
                 )
@@ -684,15 +690,15 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             
         await update.message.reply_text(
-            f"Registration successful! ✅\n\n"
+            f"Registration successful and account synced! ✅\n\n"
             f"**Name:** {name}\n"
             f"**Role:** {role.capitalize()}\n\n"
-            "Your Telegram account has been linked to the attendance device.",
+            "Your Telegram account has been successfully synced and linked to the attendance device.",
             reply_markup=reply_keyboard,
         )
         if role == "student":
             await update.message.reply_text(
-                "📚 Please enroll in your courses immediately to receive attendance notifications. "
+                "📚 Please subscribe to the available courses immediately to receive event updates (lectures, tests, exams) and attendance notifications. "
                 "Tap the **📚 Enroll in Course** button below to begin!",
                 reply_markup=reply_keyboard
             )
@@ -886,8 +892,10 @@ async def my_schedules_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         start_time_str = start_dt.strftime("%H:%M")
         end_time_str = end_dt.strftime("%H:%M")
         
+        event_type = s.get("event_type", "lecture")
         text += (
             f"**{idx}. {s['course_code']} - {s['course_title']}**\n"
+            f"   Type: {event_type.capitalize()}\n"
             f"   📅 Date: {date_str}\n"
             f"   ⏰ Time: {start_time_str} - {end_time_str}\n\n"
         )
@@ -1292,9 +1300,9 @@ async def prompt_student_course_registration(telegram_id, name):
                 chat_id=telegram_id,
                 text=(
                     f"👋 **Hello {name}!**\n\n"
-                    "You have been successfully registered on the Smart Attendance system.\n"
-                    "Please register/enroll in your available courses immediately so you can receive attendance notifications!\n\n"
-                    "Tap the **📚 Enroll in Course** button below to choose your courses."
+                    "Your profile has been successfully synced from the attendance device.\n"
+                    "Please subscribe to the available courses immediately so you can receive event updates (lectures, tests, exams) and attendance notifications!\n\n"
+                    "Tap the **📚 Enroll in Course** button below to choose your courses and subscribe."
                 ),
                 reply_markup=reply_markup,
                 parse_mode="Markdown"
@@ -1437,16 +1445,23 @@ async def schedule_select_course(update: Update, context: ContextTypes.DEFAULT_T
             break
     context.user_data["course_title"] = course_title
     
-    # Direct to date selection via calendar UI
-    now = datetime.datetime.now()
-    reply_markup = build_calendar_keyboard(now.year, now.month)
+    # Present event type selector
+    keyboard = [
+        [
+            InlineKeyboardButton("📖 Lecture", callback_data="evt:lecture"),
+            InlineKeyboardButton("📝 Test", callback_data="evt:test"),
+            InlineKeyboardButton("🎓 Exam", callback_data="evt:exam")
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data="c:cancel")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
         f"Selected Course: **{course_code} - {course_title}**\n\n"
-        "Please select the **Date** for the lecture from the calendar:",
+        "Please select the **Event Type**:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
-    return SELECT_DATE
+    return SELECT_EVENT_TYPE
 
 async def schedule_input_course_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     course_code = update.message.text.strip().upper()
@@ -1477,12 +1492,46 @@ async def schedule_input_course_title(update: Update, context: ContextTypes.DEFA
     user_id = str(update.effective_user.id)
     db.link_lecturer_course(user_id, context.user_data["course_code"])
     
+    # Present event type selector
+    keyboard = [
+        [
+            InlineKeyboardButton("📖 Lecture", callback_data="evt:lecture"),
+            InlineKeyboardButton("📝 Test", callback_data="evt:test"),
+            InlineKeyboardButton("🎓 Exam", callback_data="evt:exam")
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data="c:cancel")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        f"New Course Registered: **{context.user_data['course_code']} - {course_title}**\n\n"
+        "Please select the **Event Type**:",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+    return SELECT_EVENT_TYPE
+
+async def schedule_select_event_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    
+    if data == "evt:cancel":
+        await query.edit_message_text("Operation cancelled.")
+        return ConversationHandler.END
+        
+    event_type = data.split(":")[1]
+    context.user_data["event_type"] = event_type
+    
+    course_code = context.user_data.get("course_code")
+    course_title = context.user_data.get("course_title")
+    
     # Direct to date selection
     now = datetime.datetime.now()
     reply_markup = build_calendar_keyboard(now.year, now.month)
-    await update.message.reply_text(
-        f"New Course Registered: **{context.user_data['course_code']} - {course_title}**\n\n"
-        "Please select the **Date** for the lecture from the calendar:",
+    await query.edit_message_text(
+        f"Selected Course: **{course_code} - {course_title}**\n"
+        f"Event Type: **{event_type.capitalize()}**\n\n"
+        f"Please select the **Date** for the {event_type} from the calendar:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -1500,9 +1549,11 @@ async def schedule_select_date_nav(update: Update, context: ContextTypes.DEFAULT
     reply_markup = build_calendar_keyboard(year, month)
     course_code = context.user_data.get("course_code", "Course")
     course_title = context.user_data.get("course_title", "")
+    event_type = context.user_data.get("event_type", "lecture")
     await query.edit_message_text(
-        f"Selected Course: **{course_code} - {course_title}**\n\n"
-        "Please select the **Date** for the lecture from the calendar:",
+        f"Selected Course: **{course_code} - {course_title}**\n"
+        f"Event Type: **{event_type.capitalize()}**\n\n"
+        f"Please select the **Date** for the {event_type} from the calendar:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -1522,10 +1573,12 @@ async def schedule_select_date_val(update: Update, context: ContextTypes.DEFAULT
     context.user_data["date"] = date_str
     
     reply_markup = build_time_selector_keyboard(9, 0, is_end_time=False)
+    event_type = context.user_data.get("event_type", "lecture")
     await query.edit_message_text(
         f"Selected Course: **{context.user_data.get('course_code')}**\n"
+        f"Event Type: **{event_type.capitalize()}**\n"
         f"Selected Date: **{date_str}**\n\n"
-        "Please select/adjust the **Start Time** for the lecture:",
+        f"Please select/adjust the **Start Time** for the {event_type}:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -1554,9 +1607,12 @@ async def schedule_input_date(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     context.user_data["date"] = date_str
     reply_markup = build_time_selector_keyboard(9, 0, is_end_time=False)
+    event_type = context.user_data.get("event_type", "lecture")
     await update.message.reply_text(
+        f"Selected Course: **{context.user_data.get('course_code')}**\n"
+        f"Event Type: **{event_type.capitalize()}**\n"
         f"Selected Date: **{date_str}**\n\n"
-        "Please select/adjust the **Start Time** for the lecture:",
+        f"Please select/adjust the **Start Time** for the {event_type}:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -1585,11 +1641,13 @@ async def schedule_time_adj(update: Update, context: ContextTypes.DEFAULT_TYPE):
     label = "End Time" if is_end_time else "Start Time"
     course = context.user_data.get("course_code")
     date = context.user_data.get("date")
+    event_type = context.user_data.get("event_type", "lecture")
     
     await query.edit_message_text(
         f"Selected Course: **{course}**\n"
+        f"Event Type: **{event_type.capitalize()}**\n"
         f"Selected Date: **{date}**\n\n"
-        f"Please select/adjust the **{label}** for the lecture:",
+        f"Please select/adjust the **{label}** for the {event_type}:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -1632,9 +1690,12 @@ async def schedule_input_start_time(update: Update, context: ContextTypes.DEFAUL
     h, m = map(int, time_str.split(":"))
     end_h = (h + 2) % 24
     reply_markup = build_time_selector_keyboard(end_h, m, is_end_time=True)
+    event_type = context.user_data.get("event_type", "lecture")
     await update.message.reply_text(
+        f"Selected Course: **{context.user_data.get('course_code')}**\n"
+        f"Event Type: **{event_type.capitalize()}**\n"
         f"Start Time set to: **{time_str}**\n\n"
-        "Please select/adjust the **End Time** for the lecture:",
+        f"Please select/adjust the **End Time** for the {event_type}:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -1658,11 +1719,13 @@ async def schedule_time_confirm(update: Update, context: ContextTypes.DEFAULT_TY
         
         end_h = (hour + 2) % 24
         reply_markup = build_time_selector_keyboard(end_h, minute, is_end_time=True)
+        event_type = context.user_data.get("event_type", "lecture")
         await query.edit_message_text(
             f"Selected Course: **{context.user_data.get('course_code')}**\n"
+            f"Event Type: **{event_type.capitalize()}**\n"
             f"Selected Date: **{context.user_data.get('date')}**\n"
             f"Start Time set to: **{time_str}**\n\n"
-            "Please select/adjust the **End Time** for the lecture:",
+            f"Please select/adjust the **End Time** for the {event_type}:",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
@@ -1713,18 +1776,21 @@ async def complete_schedule_creation(message, context, is_callback):
         
         course_code = context.user_data["course_code"]
         course_title = context.user_data["course_title"]
+        event_type = context.user_data.get("event_type", "lecture")
         
-        db.add_schedule(user_id, course_code, course_title, start_epoch, end_epoch)
+        db.add_schedule(user_id, course_code, course_title, start_epoch, end_epoch, event_type)
         
         # Notify enrolled students asynchronously
-        asyncio.create_task(notify_students_new_schedule(course_code, course_title, date_str, start_time_str, end_time_str, lecturer_name))
+        asyncio.create_task(notify_students_new_schedule(course_code, course_title, date_str, start_time_str, end_time_str, lecturer_name, event_type))
         
+        event_name = event_type.capitalize()
         success_text = (
-            "✅ **Lecture Scheduled Successfully!**\n\n"
+            f"✅ **{event_name} Scheduled Successfully!**\n\n"
             f"**Course:** {course_code} - {course_title}\n"
+            f"**Event Type:** {event_name}\n"
             f"**Date:** {date_str}\n"
             f"**Time:** {start_time_str} - {end_time_str}\n\n"
-            "The device will fetch and sync this lecture automatically during its next cloud sync cycle."
+            f"The device will fetch and sync this {event_type} automatically during its next cloud sync cycle."
         )
         
         # Display the lecturer keyboard again
@@ -2145,6 +2211,10 @@ async def main():
             ],
             INPUT_COURSE_TITLE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, schedule_input_course_title)
+            ],
+            SELECT_EVENT_TYPE: [
+                CallbackQueryHandler(schedule_select_event_type, pattern=r"^evt:"),
+                CallbackQueryHandler(schedule_cancel_callback, pattern=r"^c:cancel")
             ],
             SELECT_DATE: [
                 CallbackQueryHandler(schedule_select_date_nav, pattern=r"^cal_nav:"),

@@ -43,6 +43,12 @@ def init_db():
     )
     """)
     
+    # Run migration to add event_type to schedules if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE schedules ADD COLUMN event_type TEXT DEFAULT 'lecture'")
+    except sqlite3.OperationalError:
+        pass
+    
     # Table for courses
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS courses (
@@ -206,7 +212,7 @@ def get_user_by_telegram_id(telegram_id):
     conn.close()
     return dict(row) if row else None
 
-def add_schedule(telegram_id, course_code, course_title, start_time, end_time):
+def add_schedule(telegram_id, course_code, course_title, start_time, end_time, event_type="lecture"):
     """Creates a new schedule record and populates/updates the courses table."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -214,9 +220,9 @@ def add_schedule(telegram_id, course_code, course_title, start_time, end_time):
     
     # 1. Insert course schedule
     cursor.execute("""
-        INSERT INTO schedules (telegram_id, course_code, course_title, start_time, end_time, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (str(telegram_id), course_code, course_title, int(start_time), int(end_time), now))
+        INSERT INTO schedules (telegram_id, course_code, course_title, start_time, end_time, event_type, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (str(telegram_id), course_code, course_title, int(start_time), int(end_time), event_type, now))
     
     # 2. Insert or update the course details in courses table
     cursor.execute("""
@@ -244,7 +250,7 @@ def get_schedules_since(since_timestamp):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT s.course_code, s.course_title, s.start_time, s.end_time, u.uuid as lecturer_uuid
+        SELECT s.course_code, s.course_title, s.start_time, s.end_time, s.event_type, u.uuid as lecturer_uuid
         FROM schedules s
         LEFT JOIN users u ON s.telegram_id = u.telegram_id
         WHERE s.created_at > ?
@@ -530,7 +536,7 @@ def get_lecturer_schedules(telegram_id):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, course_code, course_title, start_time, end_time 
+        SELECT id, course_code, course_title, start_time, end_time, event_type 
         FROM schedules 
         WHERE telegram_id = ? 
         ORDER BY start_time ASC
