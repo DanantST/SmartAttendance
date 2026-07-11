@@ -118,7 +118,8 @@ async def diagnostics():
     dests = {
         "httpbin": "https://httpbin.org/get",
         "api.telegram.org": "https://api.telegram.org/",
-        "cloudflare_worker": api_url
+        "cloudflare_worker": api_url,
+        "vercel": "https://vercel.com"
     }
     
     ping_results = {}
