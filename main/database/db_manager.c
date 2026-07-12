@@ -677,7 +677,20 @@ esp_err_t db_delete_schedule_by_details(const char* course_code, int64_t start_t
 
     DB_LOCK();
     sqlite3_stmt *stmt;
-    const char *sql = "DELETE FROM schedule WHERE start_time = ? AND end_time = ? AND course_id IN (SELECT id FROM courses WHERE code = ?)";
+    /*
+     * Normalize spaces so "MTE534" matches "MTE 534" and vice-versa.
+     * REPLACE(code,' ','') strips all spaces in the stored code;
+     * REPLACE(?,' ','') does the same to the incoming code from the cloud.
+     * We keep the exact match as the first OR branch for performance.
+     */
+    const char *sql =
+        "DELETE FROM schedule "
+        "WHERE start_time = ? AND end_time = ? "
+        "AND course_id IN ("
+        "    SELECT id FROM courses "
+        "    WHERE code = ? "
+        "       OR REPLACE(code,' ','') = REPLACE(?,' ','')"
+        ")";
     int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         ESP_LOGE(TAG, "Prepare delete schedule by details failed: %s", sqlite3_errmsg(s_db));
@@ -687,16 +700,26 @@ esp_err_t db_delete_schedule_by_details(const char* course_code, int64_t start_t
     sqlite3_bind_int64(stmt, 1, start_time);
     sqlite3_bind_int64(stmt, 2, end_time);
     sqlite3_bind_text(stmt, 3, course_code, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, course_code, -1, SQLITE_STATIC);  /* for REPLACE(?) branch */
     rc = sqlite3_step(stmt);
+    int rows_deleted = sqlite3_changes(s_db);
     sqlite3_finalize(stmt);
     DB_UNLOCK();
     if (rc != SQLITE_DONE) {
-        ESP_LOGE(TAG, "Failed to delete schedule for %s (%lld - %lld): %s", course_code, (long long)start_time, (long long)end_time, sqlite3_errmsg(s_db));
+        ESP_LOGE(TAG, "Failed to delete schedule for %s (%lld - %lld): %s",
+                 course_code, (long long)start_time, (long long)end_time, sqlite3_errmsg(s_db));
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG, "Deleted schedule for %s (%lld - %lld) and cascaded logs", course_code, (long long)start_time, (long long)end_time);
+    if (rows_deleted == 0) {
+        ESP_LOGW(TAG, "Delete schedule for %s (%lld - %lld): no matching row found (course code mismatch?)",
+                 course_code, (long long)start_time, (long long)end_time);
+    } else {
+        ESP_LOGI(TAG, "Deleted %d schedule row(s) for %s (%lld - %lld)",
+                 rows_deleted, course_code, (long long)start_time, (long long)end_time);
+    }
     return ESP_OK;
 }
+
 
 esp_err_t db_update_user_telegram_id(const char* uuid, const char* telegram_id) {
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
