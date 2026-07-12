@@ -1513,4 +1513,106 @@ static esp_err_t db_deduplicate_schedules(void) {
     DB_UNLOCK();
     return ESP_OK;
 }
+
+/* ==================== Enrollment / Lecturer-Course Unlink ==================== */
+
+esp_err_t db_unlink_user_course(const char* user_uuid, const char* course_code) {
+    if (!s_initialized || !user_uuid || !course_code) return ESP_ERR_INVALID_ARG;
+    DB_LOCK();
+
+    /* Resolve user_id */
+    sqlite3_stmt *stmt;
+    int user_id = 0;
+    if (sqlite3_prepare_v2(s_db, "SELECT id FROM users WHERE uuid = ?", -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, user_uuid, -1, SQLITE_STATIC);
+        if (sqlite3_step(stmt) == SQLITE_ROW) user_id = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+    }
+    if (user_id == 0) {
+        ESP_LOGW(TAG, "db_unlink_user_course: user %s not found", user_uuid);
+        DB_UNLOCK();
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    /* Resolve course_id */
+    int course_id = 0;
+    if (sqlite3_prepare_v2(s_db, "SELECT id FROM courses WHERE code = ?", -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, course_code, -1, SQLITE_STATIC);
+        if (sqlite3_step(stmt) == SQLITE_ROW) course_id = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+    }
+    if (course_id == 0) {
+        ESP_LOGW(TAG, "db_unlink_user_course: course %s not found", course_code);
+        DB_UNLOCK();
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    int rc = SQLITE_DONE;
+    if (sqlite3_prepare_v2(s_db,
+            "DELETE FROM user_courses WHERE user_id = ? AND course_id = ?",
+            -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, user_id);
+        sqlite3_bind_int(stmt, 2, course_id);
+        rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+    DB_UNLOCK();
+
+    if (rc != SQLITE_DONE) {
+        ESP_LOGE(TAG, "db_unlink_user_course failed: %s", sqlite3_errmsg(s_db));
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "Unenrolled user %s from course %s", user_uuid, course_code);
+    return ESP_OK;
+}
+
+esp_err_t db_unlink_lecturer_course_by_uuid(const char* lecturer_uuid, const char* course_code) {
+    if (!s_initialized || !lecturer_uuid || !course_code) return ESP_ERR_INVALID_ARG;
+    DB_LOCK();
+
+    /* Resolve lecturer_id */
+    sqlite3_stmt *stmt;
+    int lecturer_id = 0;
+    if (sqlite3_prepare_v2(s_db, "SELECT id FROM users WHERE uuid = ?", -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, lecturer_uuid, -1, SQLITE_STATIC);
+        if (sqlite3_step(stmt) == SQLITE_ROW) lecturer_id = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+    }
+    if (lecturer_id == 0) {
+        ESP_LOGW(TAG, "db_unlink_lecturer_course_by_uuid: lecturer %s not found", lecturer_uuid);
+        DB_UNLOCK();
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    /* Resolve course_id */
+    int course_id = 0;
+    if (sqlite3_prepare_v2(s_db, "SELECT id FROM courses WHERE code = ?", -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, course_code, -1, SQLITE_STATIC);
+        if (sqlite3_step(stmt) == SQLITE_ROW) course_id = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+    }
+    if (course_id == 0) {
+        ESP_LOGW(TAG, "db_unlink_lecturer_course_by_uuid: course %s not found", course_code);
+        DB_UNLOCK();
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    int rc = SQLITE_DONE;
+    if (sqlite3_prepare_v2(s_db,
+            "DELETE FROM lecturer_courses WHERE lecturer_id = ? AND course_id = ?",
+            -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, lecturer_id);
+        sqlite3_bind_int(stmt, 2, course_id);
+        rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+    DB_UNLOCK();
+
+    if (rc != SQLITE_DONE) {
+        ESP_LOGE(TAG, "db_unlink_lecturer_course_by_uuid failed: %s", sqlite3_errmsg(s_db));
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "Unlinked lecturer %s from course %s", lecturer_uuid, course_code);
+    return ESP_OK;
+}
 

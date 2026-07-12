@@ -122,6 +122,27 @@ def init_db():
         deleted_at INTEGER NOT NULL
     )
     """)
+
+    # Table to track enrollment deletions (student unsubscriptions)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS enrollment_deletions (
+        user_uuid TEXT NOT NULL,
+        course_code TEXT NOT NULL,
+        deleted_at INTEGER NOT NULL,
+        PRIMARY KEY (user_uuid, course_code)
+    )
+    """)
+
+    # Table to track lecturer course unassignments
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS lecturer_course_deletions (
+        lecturer_telegram_id TEXT NOT NULL,
+        course_code TEXT NOT NULL,
+        deleted_at INTEGER NOT NULL,
+        PRIMARY KEY (lecturer_telegram_id, course_code)
+    )
+    """)
+
     
     # Migration: reassign 'device' schedules to real lecturer telegram_ids via lecturer_courses
     try:
@@ -623,6 +644,26 @@ def delete_course(course_code):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
+        now = int(time.time())
+
+        # Log enrollment deletions for all students currently enrolled
+        cursor.execute("SELECT user_uuid FROM user_courses WHERE course_code = ?", (course_code,))
+        enrolled_users = cursor.fetchall()
+        for eu in enrolled_users:
+            cursor.execute("""
+                INSERT OR REPLACE INTO enrollment_deletions (user_uuid, course_code, deleted_at)
+                VALUES (?, ?, ?)
+            """, (eu[0], course_code, now))
+
+        # Log lecturer course link deletions
+        cursor.execute("SELECT lecturer_telegram_id FROM lecturer_courses WHERE course_code = ?", (course_code,))
+        assigned_lecturers = cursor.fetchall()
+        for al in assigned_lecturers:
+            cursor.execute("""
+                INSERT OR REPLACE INTO lecturer_course_deletions (lecturer_telegram_id, course_code, deleted_at)
+                VALUES (?, ?, ?)
+            """, (al[0], course_code, now))
+
         # Delete from courses
         cursor.execute("DELETE FROM courses WHERE code = ?", (course_code,))
         # Delete from lecturer_courses
@@ -634,7 +675,6 @@ def delete_course(course_code):
         cursor.execute("SELECT start_time, end_time FROM schedules WHERE course_code = ?", (course_code,))
         schedules_to_delete = cursor.fetchall()
         
-        now = int(time.time())
         for s in schedules_to_delete:
             cursor.execute("""
                 INSERT INTO schedule_deletions (course_code, start_time, end_time, deleted_at)
@@ -657,6 +697,7 @@ def delete_course(course_code):
         logger.error(f"Error deleting course {course_code}: {e}")
         conn.close()
         return False
+
 
 def update_schedule_time(schedule_id, start_time, end_time):
     """Updates the schedule time and logs a deletion for the old time so the device syncs cleanly."""
@@ -739,6 +780,16 @@ def upsert_schedule_from_device(course_code, course_title, start_time, end_time,
             INSERT OR IGNORE INTO courses (code, name)
             VALUES (?, ?)
         """, (course_code, course_title))
+
+        # Skip re-inserting a schedule that the bot already deleted (prevents re-appear after device sync)
+        cursor.execute("""
+            SELECT 1 FROM schedule_deletions
+            WHERE course_code = ? AND start_time = ? AND end_time = ?
+        """, (course_code, int(start_time), int(end_time)))
+        if cursor.fetchone():
+            logger.debug(f"upsert_schedule_from_device: skipping {course_code} {start_time}-{end_time} (already deleted by bot)")
+            conn.commit()
+            return
 
         # Insert only if this exact slot doesn't already exist
         cursor.execute("""
@@ -839,3 +890,89 @@ def get_cloud_lecturer_assignments_not_known_by_device(known_pairs):
         if pair not in known_pairs:
             result.append({"lecturer_uuid": r["lecturer_uuid"], "course_code": r["course_code"]})
     return result
+
+
+def remove_lecturer_course(lecturer_telegram_id, course_code):
+    """
+    Removes a lecturer→course assignment and logs the removal in lecturer_course_deletions
+    so the device can pick up the change on its next sync.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        now = int(time.time())
+        # Log before removing so the device can sync the deletion
+        cursor.execute("""
+            INSERT OR REPLACE INTO lecturer_course_deletions (lecturer_telegram_id, course_code, deleted_at)
+            VALUES (?, ?, ?)
+        """, (str(lecturer_telegram_id), course_code, now))
+        cursor.execute("""
+            DELETE FROM lecturer_courses WHERE lecturer_telegram_id = ? AND course_code = ?
+        """, (str(lecturer_telegram_id), course_code))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error removing lecturer course ({lecturer_telegram_id}, {course_code}): {e}")
+        conn.close()
+        return False
+
+
+def unenroll_user_from_course(user_uuid, course_code):
+    """
+    Removes a student's enrollment in a specific course and logs the removal in
+    enrollment_deletions so the device can pick up the change on its next sync.
+    Returns True on success, False on error.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        now = int(time.time())
+        # Log before removing so the device can sync the deletion
+        cursor.execute("""
+            INSERT OR REPLACE INTO enrollment_deletions (user_uuid, course_code, deleted_at)
+            VALUES (?, ?, ?)
+        """, (user_uuid, course_code, now))
+        cursor.execute("""
+            DELETE FROM user_courses WHERE user_uuid = ? AND course_code = ?
+        """, (user_uuid, course_code))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error unenrolling user {user_uuid} from course {course_code}: {e}")
+        conn.close()
+        return False
+
+
+def get_enrollment_deletions_since(since_timestamp):
+    """Returns {user_uuid, course_code} pairs of unenrollments since a given timestamp."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT user_uuid, course_code
+        FROM enrollment_deletions
+        WHERE deleted_at > ?
+        ORDER BY deleted_at ASC
+    """, (int(since_timestamp),))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_lecturer_course_deletions_since(since_timestamp):
+    """Returns {lecturer_uuid, course_code} pairs of lecturer unassignments since a given timestamp."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT u.uuid AS lecturer_uuid, lcd.course_code
+        FROM lecturer_course_deletions lcd
+        JOIN users u ON lcd.lecturer_telegram_id = u.telegram_id
+        WHERE lcd.deleted_at > ?
+        ORDER BY lcd.deleted_at ASC
+    """, (int(since_timestamp),))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

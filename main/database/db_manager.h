@@ -218,9 +218,21 @@ esp_err_t db_get_user_courses(uint32_t user_id, char*** codes_out, int* count_ou
  */
 esp_err_t db_get_all_courses(char*** names, int* count);
 
+/**
+ * @brief Remove a student's enrollment in a specific course.
+ *        Called by cloud_sync when the bot pushes an enrollment deletion.
+ */
+esp_err_t db_unlink_user_course(const char* user_uuid, const char* course_code);
+
+/**
+ * @brief Remove a lecturer→course assignment by lecturer UUID and course code.
+ *        Called by cloud_sync when the bot pushes a lecturer course deletion.
+ */
+esp_err_t db_unlink_lecturer_course_by_uuid(const char* lecturer_uuid, const char* course_code);
+
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DB_MANAGER_H */
+#endif /* DB_MANAGER_H */

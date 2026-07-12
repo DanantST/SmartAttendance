@@ -43,12 +43,14 @@ static TaskHandle_t s_sync_task_handle = NULL;
 /* Forward declarations */
 static void cloud_sync_task(void* param);
 static esp_err_t sync_schedule(void);
-static esp_err_t sync_attendance_logs(void);
+static esp_err_t sync_users(void);
 static esp_err_t sync_deletions(void);
 static esp_err_t sync_course_deletions(void);
 static esp_err_t sync_schedule_deletions(void);
-static esp_err_t sync_users(void);
+static esp_err_t sync_enrollment_deletions(void);
+static esp_err_t sync_lecturer_course_deletions(void);
 static esp_err_t sync_enrollments(void);
+static esp_err_t sync_attendance_logs(void);
 static esp_err_t sync_report_requests(void);
 static char* build_sync_payload(void);
 static int parse_schedule_response(const char* response, size_t len);
@@ -147,6 +149,20 @@ static void cloud_sync_task(void* param) {
     ret = sync_schedule_deletions();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Schedule deletion sync failed: %d", ret);
+        overall_result = ret;
+    }
+
+    /* Step 0.7: Download enrollment deletions (student unenrollments) */
+    ret = sync_enrollment_deletions();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Enrollment deletion sync failed: %d", ret);
+        overall_result = ret;
+    }
+
+    /* Step 0.8: Download lecturer course deletions (lecturer unassignments) */
+    ret = sync_lecturer_course_deletions();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Lecturer course deletion sync failed: %d", ret);
         overall_result = ret;
     }
 
@@ -966,6 +982,86 @@ static esp_err_t sync_report_requests(void) {
         ESP_LOGE(TAG, "Failed to fetch report requests from cloud (err=%d)", err);
     }
     
+    return err;
+}
+
+static esp_err_t sync_enrollment_deletions(void) {
+    if (strlen(s_api_endpoint) == 0) {
+        ESP_LOGW(TAG, "Server endpoint URL not configured. Skipping enrollment deletion sync.");
+        return ESP_OK;
+    }
+
+    char url[512];
+    snprintf(url, sizeof(url), "%s/api/get_enrollment_deletions?since=%ld", s_api_endpoint, (long)s_last_sync_timestamp);
+    ESP_LOGI(TAG, "Fetching enrollment deletions from %s", url);
+
+    char *response = NULL;
+    size_t response_len = 0;
+    esp_err_t err = http_request(url, "GET", NULL, &response, &response_len);
+
+    if (err == ESP_OK && response) {
+        cJSON *root = cJSON_Parse(response);
+        if (root && cJSON_IsArray(root)) {
+            int size = cJSON_GetArraySize(root);
+            if (size > 0) {
+                ESP_LOGI(TAG, "Processing %d enrollment deletions from cloud", size);
+                for (int i = 0; i < size; i++) {
+                    cJSON *item = cJSON_GetArrayItem(root, i);
+                    cJSON *uuid_json = cJSON_GetObjectItem(item, "user_uuid");
+                    cJSON *code_json = cJSON_GetObjectItem(item, "course_code");
+                    if (uuid_json && uuid_json->valuestring && code_json && code_json->valuestring) {
+                        ESP_LOGI(TAG, "Unenrolling user %s from course %s",
+                                 uuid_json->valuestring, code_json->valuestring);
+                        db_unlink_user_course(uuid_json->valuestring, code_json->valuestring);
+                    }
+                }
+            }
+        }
+        if (root) cJSON_Delete(root);
+        free(response);
+    } else {
+        ESP_LOGE(TAG, "Failed to fetch enrollment deletions (err=%d)", err);
+    }
+    return err;
+}
+
+static esp_err_t sync_lecturer_course_deletions(void) {
+    if (strlen(s_api_endpoint) == 0) {
+        ESP_LOGW(TAG, "Server endpoint URL not configured. Skipping lecturer course deletion sync.");
+        return ESP_OK;
+    }
+
+    char url[512];
+    snprintf(url, sizeof(url), "%s/api/get_lecturer_course_deletions?since=%ld", s_api_endpoint, (long)s_last_sync_timestamp);
+    ESP_LOGI(TAG, "Fetching lecturer course deletions from %s", url);
+
+    char *response = NULL;
+    size_t response_len = 0;
+    esp_err_t err = http_request(url, "GET", NULL, &response, &response_len);
+
+    if (err == ESP_OK && response) {
+        cJSON *root = cJSON_Parse(response);
+        if (root && cJSON_IsArray(root)) {
+            int size = cJSON_GetArraySize(root);
+            if (size > 0) {
+                ESP_LOGI(TAG, "Processing %d lecturer course deletions from cloud", size);
+                for (int i = 0; i < size; i++) {
+                    cJSON *item = cJSON_GetArrayItem(root, i);
+                    cJSON *uuid_json = cJSON_GetObjectItem(item, "lecturer_uuid");
+                    cJSON *code_json = cJSON_GetObjectItem(item, "course_code");
+                    if (uuid_json && uuid_json->valuestring && code_json && code_json->valuestring) {
+                        ESP_LOGI(TAG, "Unlinking lecturer %s from course %s",
+                                 uuid_json->valuestring, code_json->valuestring);
+                        db_unlink_lecturer_course_by_uuid(uuid_json->valuestring, code_json->valuestring);
+                    }
+                }
+            }
+        }
+        if (root) cJSON_Delete(root);
+        free(response);
+    } else {
+        ESP_LOGE(TAG, "Failed to fetch lecturer course deletions (err=%d)", err);
+    }
     return err;
 }
 

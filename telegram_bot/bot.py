@@ -385,6 +385,31 @@ async def get_schedule_deletions(since: int = 0):
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 
+
+@web_app.get("/api/get_enrollment_deletions")
+async def get_enrollment_deletions(since: int = 0):
+    """Returns student unenrollments since a timestamp so the device can remove them locally."""
+    try:
+        logger.info(f"Device requesting enrollment deletions since: {since}")
+        deletions = db.get_enrollment_deletions_since(since)
+        return JSONResponse(status_code=200, content=deletions)
+    except Exception as e:
+        logger.error(f"Error fetching enrollment deletions: {e}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
+@web_app.get("/api/get_lecturer_course_deletions")
+async def get_lecturer_course_deletions(since: int = 0):
+    """Returns lecturer→course unassignments since a timestamp so the device can remove them locally."""
+    try:
+        logger.info(f"Device requesting lecturer course deletions since: {since}")
+        deletions = db.get_lecturer_course_deletions_since(since)
+        return JSONResponse(status_code=200, content=deletions)
+    except Exception as e:
+        logger.error(f"Error fetching lecturer course deletions: {e}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
 @web_app.post("/api/sync_schedules")
 async def sync_schedules_bidirectional(request: Request):
     """
@@ -2168,12 +2193,13 @@ async def unenroll_student_id(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def unenroll_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Receives confirmation and deletes the student if YES.
+    Receives confirmation and removes the student from the course (not the whole user).
     """
     confirm = update.message.text.strip().upper()
     uuid = context.user_data.get("unenroll_uuid")
     name = context.user_data.get("unenroll_name")
     student_id = context.user_data.get("unenroll_student_id")
+    course_code = context.user_data.get("unenroll_course_code")  # set by unenroll_student_id step
 
     reply_keyboard = ReplyKeyboardMarkup(
         [
@@ -2185,16 +2211,24 @@ async def unenroll_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if confirm == "YES":
-        if db.delete_user_by_uuid(uuid):
+        if course_code:
+            # Per-course unenrollment — keeps the student account intact
+            ok = db.unenroll_user_from_course(uuid, course_code)
+        else:
+            # Fallback: full deletion (legacy behaviour when no course specified)
+            ok = db.delete_user_by_uuid(uuid)
+        if ok:
+            course_info = f" from **{course_code}**" if course_code else ""
             await update.message.reply_text(
-                f"✅ **Student Successfully Unenrolled!**\n\n"
+                f"✅ **Student Successfully Unenrolled{course_info}!**\n\n"
                 f"**Name:** {name}\n"
                 f"**Student ID:** {student_id}\n\n"
-                f"The attendance device will delete this user from its local database during its next sync cycle.",
-                reply_markup=reply_keyboard
+                f"The attendance device will remove this enrollment during its next sync cycle.",
+                reply_markup=reply_keyboard,
+                parse_mode="Markdown"
             )
         else:
-            await update.message.reply_text("❌ An error occurred while deleting the student. Please try again.", reply_markup=reply_keyboard)
+            await update.message.reply_text("❌ An error occurred while unenrolling the student. Please try again.", reply_markup=reply_keyboard)
         return ConversationHandler.END
     elif confirm == "NO":
         await update.message.reply_text("Operation cancelled.", reply_markup=reply_keyboard)
