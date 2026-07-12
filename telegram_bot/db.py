@@ -123,9 +123,35 @@ def init_db():
     )
     """)
     
+    # Migration: reassign 'device' schedules to real lecturer telegram_ids via lecturer_courses
+    try:
+        cursor.execute("""
+            UPDATE schedules
+            SET telegram_id = (
+                SELECT lc.lecturer_telegram_id
+                FROM lecturer_courses lc
+                WHERE lc.course_code = schedules.course_code
+                  AND lc.lecturer_telegram_id IS NOT NULL
+                  AND lc.lecturer_telegram_id != ''
+                LIMIT 1
+            )
+            WHERE telegram_id = 'device'
+              AND EXISTS (
+                SELECT 1 FROM lecturer_courses lc2
+                WHERE lc2.course_code = schedules.course_code
+                  AND lc2.lecturer_telegram_id IS NOT NULL
+                  AND lc2.lecturer_telegram_id != ''
+              )
+        """)
+        if cursor.rowcount > 0:
+            logger.info(f"Migration: reassigned {cursor.rowcount} 'device' schedule(s) to real lecturer IDs.")
+    except Exception as e:
+        logger.warning(f"Migration (device->lecturer telegram_id reassign) skipped: {e}")
+
     conn.commit()
     conn.close()
     logger.info("Database initialized successfully.")
+
 
 def normalize_phone(phone):
     """Normalizes phone number by keeping only digits."""
