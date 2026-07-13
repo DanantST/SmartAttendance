@@ -200,9 +200,13 @@ static esp_err_t isp_init_proc(void)
     err = esp_isp_new_awb_controller(s_isp_proc, &awb_cfg, &awb_ctlr);
     if (err == ESP_OK) {
         esp_isp_awb_cbs_t awb_cb = { .on_statistics_done = awb_stats_cb };
-        esp_isp_awb_register_event_callbacks(awb_ctlr, &awb_cb, NULL);
-        esp_isp_awb_controller_enable(awb_ctlr);
-        esp_isp_awb_controller_start_continuous_statistics(awb_ctlr);
+        esp_err_t r_err = esp_isp_awb_register_event_callbacks(awb_ctlr, &awb_cb, NULL);
+        esp_err_t e_err = esp_isp_awb_controller_enable(awb_ctlr);
+        esp_err_t s_err = esp_isp_awb_controller_start_continuous_statistics(awb_ctlr);
+        ESP_LOGI(TAG, "ISP AWB: register=%s, enable=%s, start=%s",
+                 esp_err_to_name(r_err), esp_err_to_name(e_err), esp_err_to_name(s_err));
+    } else {
+        ESP_LOGE(TAG, "Failed to create AWB controller: %s", esp_err_to_name(err));
     }
 
     /* Auto Exposure */
@@ -212,12 +216,21 @@ static esp_err_t isp_init_proc(void)
     isp_ae_ctlr_t ae_ctlr = NULL;
     err = esp_isp_new_ae_controller(s_isp_proc, &ae_cfg, &ae_ctlr);
     if (err == ESP_OK) {
+        esp_isp_ae_env_config_t env_cfg = {
+            .interval = 3, /* trigger statistics callback every 3 frames */
+        };
+        esp_err_t c_err = esp_isp_ae_controller_set_env_detector(ae_ctlr, &env_cfg);
+        
         esp_isp_ae_env_detector_evt_cbs_t ae_cbs = {
             .on_env_statistics_done = ae_stats_cb,
         };
-        esp_isp_ae_env_detector_register_event_callbacks(ae_ctlr, &ae_cbs, NULL);
-        esp_isp_ae_controller_enable(ae_ctlr);
-        esp_isp_ae_controller_start_continuous_statistics(ae_ctlr);
+        esp_err_t r_err = esp_isp_ae_env_detector_register_event_callbacks(ae_ctlr, &ae_cbs, NULL);
+        esp_err_t e_err = esp_isp_ae_controller_enable(ae_ctlr);
+        esp_err_t s_err = esp_isp_ae_controller_start_continuous_statistics(ae_ctlr);
+        ESP_LOGI(TAG, "ISP AE: set_env=%s, register=%s, enable=%s, start=%s",
+                 esp_err_to_name(c_err), esp_err_to_name(r_err), esp_err_to_name(e_err), esp_err_to_name(s_err));
+    } else {
+        ESP_LOGE(TAG, "Failed to create AE controller: %s", esp_err_to_name(err));
     }
 
     /* Color Correction Matrix */
@@ -515,6 +528,14 @@ camera_fb_t *camera_capture_frame(void)
                     ESP_LOGI(TAG, "AE bright lum=%lu err=%lu exp=%lu gain=%lu",
                              (unsigned long)lum, (unsigned long)err,
                              (unsigned long)s_exp_val, (unsigned long)s_gain);
+                }
+            } else {
+                static int debug_count = 0;
+                debug_count++;
+                if (debug_count >= 30) {  /* log every ~9 seconds */
+                    debug_count = 0;
+                    ESP_LOGI(TAG, "AE stats not ready yet (s_cam_dev=%s, latest_lum=%lu)",
+                             s_cam_dev ? "OK" : "NULL", (unsigned long)s_latest_luminance);
                 }
             }
         }
