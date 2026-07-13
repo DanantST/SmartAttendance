@@ -137,16 +137,23 @@ static bool awb_stats_cb(isp_awb_ctlr_t awb_ctlr,
 }
 
 static IRAM_ATTR bool ae_stats_cb(isp_ae_ctlr_t ae_ctlr,
-                                  const esp_isp_ae_env_detector_evt_data_t *edata,
-                                  void *user_data)
+                                   const esp_isp_ae_env_detector_evt_data_t *edata,
+                                   void *user_data)
 {
-    uint32_t sum = 0;
+    /*
+     * Center-weighted metering: the inner 3×3 grid cells are weighted 2×
+     * so that a face standing in the middle of the frame drives the exposure
+     * target rather than a bright window behind the subject.
+     */
+    uint32_t sum = 0, weight = 0;
     for (int i = 0; i < 5; i++) {
         for (int j = 0; j < 5; j++) {
-            sum += edata->ae_result.luminance[i][j];
+            int w = (i >= 1 && i <= 3 && j >= 1 && j <= 3) ? 2 : 1;
+            sum    += edata->ae_result.luminance[i][j] * w;
+            weight += w;
         }
     }
-    s_latest_luminance = sum / 25;
+    s_latest_luminance = sum / weight;   /* weighted average: 0..255 */
     s_ae_stats_ready = true;
     return false;
 }
@@ -322,14 +329,17 @@ esp_err_t camera_init(void)
     esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_VFLIP,   &mirror_off, sizeof(int));
     ESP_LOGI(TAG, "HMIRROR=0 VFLIP=0 (BGGR)");
 
-    /* 8. Indoor exposure baseline */
-    uint32_t exp_us  = 20000;
-    uint32_t exp_val = 200;
-    uint32_t gain    = 100;
+    /* 8. Indoor exposure baseline (hardware-validated values from KB:
+     *    exposure_us=15000, exposure_val=1100, gain=4000 give a bright,
+     *    low-rolling-shutter image under typical indoor lighting.)
+     */
+    uint32_t exp_us  = 15000;
+    uint32_t exp_val = 1100;
+    uint32_t gain    = 4000;
     esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_EXPOSURE_US,  &exp_us,  sizeof(uint32_t));
     esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_EXPOSURE_VAL, &exp_val, sizeof(uint32_t));
     esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_GAIN,         &gain,    sizeof(uint32_t));
-    ESP_LOGI(TAG, "Exposure: %"PRIu32"us val=%"PRIu32" gain=%"PRIu32, exp_us, exp_val, gain);
+    ESP_LOGI(TAG, "Exposure baseline: %"PRIu32"us val=%"PRIu32" gain=%"PRIu32, exp_us, exp_val, gain);
 
     /* 9. ISP (must be before CSI controller) */
     if (isp_init_proc() != ESP_OK) return ESP_FAIL;
@@ -433,50 +443,78 @@ camera_fb_t *camera_capture_frame(void)
          * written by the CSI DMA (M2C = Memory-to-CPU direction). */
         esp_cache_msync(s_frame_buffer, s_frame_buf_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
         
-        /* Run software auto-exposure loop every 10 frames */
+        /*
+         * Software AE loop — runs every 3 captured frames (~100 ms at 30 fps).
+         *
+         * Control law: proportional step sizes so the camera converges quickly
+         * for large lighting changes (dark room ↔ bright window) and settles
+         * gently near the target.  Priority order:
+         *   • Brighten: increase exposure first (less noise), then gain.
+         *   • Darken:   decrease gain first (less noise), then exposure.
+         *
+         * Sensor parameter limits (hardware-validated on SC2336 / ESP32-P4):
+         *   exposure_val : 50 … 1500   (register units)
+         *   gain         : 100 … 8000  (sensor gain × 100)
+         */
         static int ae_frame_count = 0;
         ae_frame_count++;
-        if (ae_frame_count >= 10) {
+        if (ae_frame_count >= 3) {
             ae_frame_count = 0;
             if (s_ae_stats_ready && s_cam_dev) {
                 s_ae_stats_ready = false;
-                uint32_t current_lum = s_latest_luminance;
-                static uint32_t s_current_exposure = 200;
-                static uint32_t s_current_gain = 100;
-                static bool s_ae_initialized = false;
-                if (!s_ae_initialized) {
-                    s_current_exposure = 200;
-                    s_current_gain = 100;
-                    s_ae_initialized = true;
-                }
-                
-                uint32_t target_lum = 120;
-                uint32_t deadband = 15;
-                
-                if (current_lum < target_lum - deadband) {
-                    // Too dark -> increase brightness
-                    if (s_current_exposure < 1500) {
-                        s_current_exposure += 50;
-                        esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_EXPOSURE_VAL, &s_current_exposure, sizeof(uint32_t));
-                    } else if (s_current_gain < 6000) {
-                        s_current_gain += 150;
-                        esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_GAIN, &s_current_gain, sizeof(uint32_t));
+                uint32_t lum = s_latest_luminance;
+
+                /* Static state – initialised to the hardware-baseline values
+                 * set in camera_init() so the AE loop starts from a good point
+                 * rather than having to climb from near-zero. */
+                static uint32_t s_exp_val  = 1100;
+                static uint32_t s_gain     = 4000;
+
+                const uint32_t TARGET_LUM = 120;
+                const uint32_t DEADBAND   = 10;   /* ±10 counts before reacting */
+                const uint32_t EXP_MIN    = 50;
+                const uint32_t EXP_MAX    = 1500;
+                const uint32_t GAIN_MIN   = 100;
+                const uint32_t GAIN_MAX   = 8000;
+
+                if (lum < TARGET_LUM - DEADBAND) {
+                    /* --- Too dark: brighten --- */
+                    uint32_t err = (TARGET_LUM - DEADBAND) - lum;
+                    /* Proportional: large error → big step (max 300), small → 50 */
+                    uint32_t exp_step  = (err > 50) ? 300 : (err > 20) ? 150 : 50;
+                    uint32_t gain_step = exp_step * 3;  /* gain steps are coarser */
+
+                    if (s_exp_val < EXP_MAX) {
+                        s_exp_val = (s_exp_val + exp_step > EXP_MAX) ? EXP_MAX : s_exp_val + exp_step;
+                        esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_EXPOSURE_VAL,
+                                                      &s_exp_val, sizeof(uint32_t));
+                    } else if (s_gain < GAIN_MAX) {
+                        s_gain = (s_gain + gain_step > GAIN_MAX) ? GAIN_MAX : s_gain + gain_step;
+                        esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_GAIN,
+                                                      &s_gain, sizeof(uint32_t));
                     }
-                    ESP_LOGD(TAG, "AE: lum=%lu < %lu (too dark) -> set exp=%lu gain=%lu", (unsigned long)current_lum, (unsigned long)(target_lum - deadband), (unsigned long)s_current_exposure, (unsigned long)s_current_gain);
-                } else if (current_lum > target_lum + deadband) {
-                    // Too bright -> decrease brightness
-                    if (s_current_gain > 100) {
-                        if (s_current_gain >= 150) {
-                            s_current_gain -= 150;
-                        } else {
-                            s_current_gain = 100;
-                        }
-                        esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_GAIN, &s_current_gain, sizeof(uint32_t));
-                    } else if (s_current_exposure > 50) {
-                        s_current_exposure -= 50;
-                        esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_EXPOSURE_VAL, &s_current_exposure, sizeof(uint32_t));
+                    ESP_LOGD(TAG, "AE dark  lum=%lu err=%lu exp=%lu gain=%lu",
+                             (unsigned long)lum, (unsigned long)err,
+                             (unsigned long)s_exp_val, (unsigned long)s_gain);
+
+                } else if (lum > TARGET_LUM + DEADBAND) {
+                    /* --- Too bright: darken --- */
+                    uint32_t err = lum - (TARGET_LUM + DEADBAND);
+                    uint32_t exp_step  = (err > 50) ? 300 : (err > 20) ? 150 : 50;
+                    uint32_t gain_step = exp_step * 3;
+
+                    if (s_gain > GAIN_MIN) {
+                        s_gain = (s_gain < GAIN_MIN + gain_step) ? GAIN_MIN : s_gain - gain_step;
+                        esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_GAIN,
+                                                      &s_gain, sizeof(uint32_t));
+                    } else if (s_exp_val > EXP_MIN) {
+                        s_exp_val = (s_exp_val < EXP_MIN + exp_step) ? EXP_MIN : s_exp_val - exp_step;
+                        esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_EXPOSURE_VAL,
+                                                      &s_exp_val, sizeof(uint32_t));
                     }
-                    ESP_LOGD(TAG, "AE: lum=%lu > %lu (too bright) -> set exp=%lu gain=%lu", (unsigned long)current_lum, (unsigned long)(target_lum + deadband), (unsigned long)s_current_exposure, (unsigned long)s_current_gain);
+                    ESP_LOGD(TAG, "AE bright lum=%lu err=%lu exp=%lu gain=%lu",
+                             (unsigned long)lum, (unsigned long)err,
+                             (unsigned long)s_exp_val, (unsigned long)s_gain);
                 }
             }
         }
