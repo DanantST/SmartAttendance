@@ -493,7 +493,7 @@ camera_fb_t *camera_capture_frame(void)
                         esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_GAIN,
                                                       &s_gain, sizeof(uint32_t));
                     }
-                    ESP_LOGD(TAG, "AE dark  lum=%lu err=%lu exp=%lu gain=%lu",
+                    ESP_LOGI(TAG, "AE dark  lum=%lu err=%lu exp=%lu gain=%lu",
                              (unsigned long)lum, (unsigned long)err,
                              (unsigned long)s_exp_val, (unsigned long)s_gain);
 
@@ -512,7 +512,7 @@ camera_fb_t *camera_capture_frame(void)
                         esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_EXPOSURE_VAL,
                                                       &s_exp_val, sizeof(uint32_t));
                     }
-                    ESP_LOGD(TAG, "AE bright lum=%lu err=%lu exp=%lu gain=%lu",
+                    ESP_LOGI(TAG, "AE bright lum=%lu err=%lu exp=%lu gain=%lu",
                              (unsigned long)lum, (unsigned long)err,
                              (unsigned long)s_exp_val, (unsigned long)s_gain);
                 }
