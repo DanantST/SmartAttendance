@@ -186,6 +186,9 @@ static const char* s_portal_html = R"html(<!DOCTYPE html>
             <div class="success-title" id="successTitle">Successfully Registered!</div>
             <p class="success-desc" id="successDesc">Your details have been saved successfully.</p>
             <div class="details-box" id="successDetails"></div>
+            <a href="https://t.me/MyUniAttendance_Bot" target="_blank" id="btnTelegram" class="btn" style="background: #0088cc; text-decoration: none; margin-bottom: 12px; box-shadow: 0 4px 12px rgba(0, 136, 204, 0.3);">
+                💬 Open Telegram Bot (@MyUniAttendance_Bot)
+            </a>
             <button class="btn btn-outline" id="btnBack" onclick="resetForm()">Register Another</button>
         </div>
     </div>
@@ -216,7 +219,7 @@ static const char* s_portal_html = R"html(<!DOCTYPE html>
             const btn = document.getElementById('btnSubmitStudent'); btn.disabled = true; btn.textContent = "Submitting...";
             try {
                 const response = await fetch('/submit_student', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin, name, student_id, phone_number: phone }) });
-                if (response.ok) { showSuccess('Student Submitted!', 'Your details are queued. Please stand in front of the camera when prompted.', `<div class="detail-row"><span class="detail-label">Name:</span><span class="detail-val">${name}</span></div><div class="detail-row"><span class="detail-label">ID:</span><span class="detail-val">${student_id}</span></div>`); }
+                if (response.ok) { showSuccess('Student Submitted!', 'Your details are queued. Please stand in front of the camera when prompted.<br><br>👉 <strong>Step 2:</strong> Click below to open Telegram and tap <strong>Start / Share Contact</strong> to link your account!', `<div class="detail-row"><span class="detail-label">Name:</span><span class="detail-val">${name}</span></div><div class="detail-row"><span class="detail-label">ID:</span><span class="detail-val">${student_id}</span></div>`, true); }
                 else showError(await response.text() || "Submission failed.");
             } catch (err) { showError("Network failure."); } finally { btn.disabled = false; btn.textContent = "Submit & Await Face Scan"; }
         }
@@ -228,7 +231,7 @@ static const char* s_portal_html = R"html(<!DOCTYPE html>
             const btn = document.getElementById('btnSubmitLecturer'); btn.disabled = true; btn.textContent = "Submitting...";
             try {
                 const response = await fetch('/submit_lecturer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin, name, phone_number: phone, courses }) });
-                if (response.ok) { showSuccess('Lecturer Registered!', 'Success!', `<div class="detail-row"><span class="detail-label">Name:</span><span class="detail-val">${name}</span></div>`); }
+                if (response.ok) { showSuccess('Lecturer Registered!', 'Registration saved successfully!<br><br>👉 <strong>Step 2:</strong> Click below to open Telegram and tap <strong>Start / Share Contact</strong> to link your account!', `<div class="detail-row"><span class="detail-label">Name:</span><span class="detail-val">${name}</span></div>`, true); }
                 else showError(await response.text() || "Submission failed.");
             } catch (err) { showError("Network failure."); } finally { btn.disabled = false; btn.textContent = "Register as Lecturer"; }
         }
@@ -240,11 +243,18 @@ static const char* s_portal_html = R"html(<!DOCTYPE html>
             const btn = document.getElementById('btnSubmitUnenroll'); btn.disabled = true; btn.textContent = "Processing...";
             try {
                 const response = await fetch('/unenroll_student', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin, student_id }) });
-                if (response.ok) { showSuccess('Student Unenrolled!', 'The student details and attendance logs have been removed.', `<div class="detail-row"><span class="detail-label">ID:</span><span class="detail-val">${student_id}</span></div>`); }
+                if (response.ok) { showSuccess('Student Unenrolled!', 'The student details and attendance logs have been removed.', `<div class="detail-row"><span class="detail-label">ID:</span><span class="detail-val">${student_id}</span></div>`, false); }
                 else showError(await response.text() || "Unenrollment failed.");
             } catch (err) { showError("Network failure."); } finally { btn.disabled = false; btn.textContent = "Delete Student"; }
         }
-        function showSuccess(title, desc, detailsHtml) { document.getElementById('successTitle').textContent = title; document.getElementById('successDesc').textContent = desc; document.getElementById('successDetails').innerHTML = detailsHtml; document.getElementById('formContainer').classList.add('hidden'); document.getElementById('successContainer').classList.add('active'); }
+        function showSuccess(title, desc, detailsHtml, showTelegram = true) {
+            document.getElementById('successTitle').textContent = title;
+            document.getElementById('successDesc').innerHTML = desc;
+            document.getElementById('successDetails').innerHTML = detailsHtml;
+            document.getElementById('btnTelegram').style.display = showTelegram ? 'flex' : 'none';
+            document.getElementById('formContainer').classList.add('hidden');
+            document.getElementById('successContainer').classList.add('active');
+        }
         function resetForm() { document.getElementById('successContainer').classList.remove('active'); document.getElementById('formContainer').classList.remove('hidden'); clearError(); }
     </script>
 </body>
