@@ -235,15 +235,38 @@ async def sync_users(request: Request):
                 if pending_tel_id:
                     telegram_id = pending_tel_id
                     db.delete_pending_link(phone_number)
-                    # Notify the student asynchronously
+                    # notify_linked_student handles the phone-pairing path (marks welcomed implicitly)
                     asyncio.create_task(notify_linked_student(pending_tel_id, name, role))
+                    db.mark_user_welcomed(uuid)   # paired users count as welcomed
                     if role == "student":
                         asyncio.create_task(prompt_student_course_registration(pending_tel_id, name))
                 db.upsert_user(uuid, name, student_id, phone_number, telegram_id, role)
+
         # Reconcile: delete users on the bot database that were deleted from the device
         db.reconcile_users(received_uuids)
-        
-        # Fetch all users who have linked their Telegram account
+
+        # ── Welcome sweep ────────────────────────────────────────────────────
+        # Find every user that now has a telegram_id but has never been welcomed.
+        # This covers:
+        #   (a) Users whose telegram_id arrived in this very sync batch.
+        #   (b) Users already in the DB (pre-feature) who were never welcomed.
+        try:
+            unwelcomed = db.get_unwelcomed_linked_users()
+            logger.info(
+                f"Welcome sweep: {len(unwelcomed)} unwelcomed linked user(s) found "
+                f"(total users in this sync batch: {len(users)})."
+            )
+            for u in unwelcomed:
+                logger.info(f"  → Will welcome: {u['name']} (uuid={u['uuid']}, telegram_id={u['telegram_id']})")
+                asyncio.create_task(
+                    welcome_newly_enrolled_user(u["uuid"], u["telegram_id"], u["name"], u["role"])
+                )
+            if not unwelcomed:
+                logger.info("Welcome sweep: no action needed (all linked users already welcomed, or no linked users yet).")
+        except Exception as sweep_err:
+            logger.error(f"Welcome sweep failed: {sweep_err}")
+
+        # Fetch all users who have linked their Telegram account (for device response)
         import sqlite3
         conn = sqlite3.connect(db.DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -262,6 +285,8 @@ async def sync_users(request: Request):
     except Exception as e:
         logger.error(f"Error syncing users: {e}")
         return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+
 
 
 @web_app.get("/api/dump_db")
@@ -294,6 +319,33 @@ async def dump_db():
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+
+@web_app.post("/api/trigger_welcome_sweep")
+async def trigger_welcome_sweep():
+    """
+    Manually triggers the welcome sweep: sends a first-time welcome to every linked user
+    who has not yet been welcomed. Useful after deployments or for debugging.
+    """
+    try:
+        unwelcomed = db.get_unwelcomed_linked_users()
+        logger.info(f"Manual welcome sweep triggered: {len(unwelcomed)} unwelcomed linked user(s).")
+        results = []
+        for u in unwelcomed:
+            logger.info(f"  → Manually welcoming: {u['name']} (telegram_id={u['telegram_id']})")
+            asyncio.create_task(
+                welcome_newly_enrolled_user(u["uuid"], u["telegram_id"], u["name"], u["role"])
+            )
+            results.append({"uuid": u["uuid"], "name": u["name"], "telegram_id": u["telegram_id"]})
+        return JSONResponse(status_code=200, content={
+            "status": "ok",
+            "welcomed_count": len(unwelcomed),
+            "users": results
+        })
+    except Exception as e:
+        logger.error(f"Manual welcome sweep failed: {e}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 
 @web_app.get("/api/get_schedules")
@@ -737,6 +789,55 @@ async def notify_linked_student(telegram_id, name, role):
             logger.info(f"Sent automatic link notification to: {name} ({telegram_id})")
         except Exception as e:
             logger.error(f"Failed to send link notification to {telegram_id}: {e}")
+
+async def welcome_newly_enrolled_user(uuid, telegram_id, name, role):
+    """
+    Sends a first-time welcome message to a user who was enrolled on the device
+    and already has a Telegram ID linked but has never received a welcome from the bot.
+    Marks welcomed_at in the DB so this only fires once per user.
+    """
+    global bot_app
+    if not bot_app:
+        return
+    try:
+        if role in ["lecturer", "admin"]:
+            keyboard = [
+                ["📅 Schedule Class", "📅 My Schedules"],
+                ["📊 Attendance Report", "📚 My Courses"],
+                ["🛠️ Developer Auth", "❓ Help"]
+            ]
+            role_blurb = (
+                f"As a **{role.capitalize()}**, you can schedule classes, view attendance reports, "
+                "and manage your courses directly from this bot."
+            )
+        else:
+            keyboard = [
+                ["📚 Enroll in Course"],
+                ["👤 My Status", "❓ Help"]
+            ]
+            role_blurb = (
+                "You will receive automatic attendance notifications each time your face is recognised "
+                "by the attendance device. Use the menu below to **enroll in your courses** so you "
+                "start receiving event reminders too."
+            )
+
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        await bot_app.bot.send_message(
+            chat_id=telegram_id,
+            text=(
+                f"👋 Welcome aboard, **{name}**!\n\n"
+                f"Your profile has been synced from the Smart Attendance device and you are registered as a **{role.capitalize()}**.\n\n"
+                f"{role_blurb}\n\n"
+                "Type /help at any time to see what this bot can do."
+            ),
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        # Mark as welcomed so we never send this again
+        db.mark_user_welcomed(uuid)
+        logger.info(f"Sent first-time welcome to {name} ({telegram_id}, uuid={uuid})")
+    except Exception as e:
+        logger.error(f"Failed to send welcome message to {telegram_id} ({name}): {e}")
 
 async def notify_students_new_schedule(course_code, course_title, date_str, start_time_str, end_time_str, lecturer_name, event_type="lecture"):
     global bot_app
@@ -2441,6 +2542,25 @@ async def main():
     logger.info("Initializing Telegram Bot...")
     await bot_app.initialize()
     await bot_app.start()
+
+    # ── Startup welcome sweep ────────────────────────────────────────────────
+    # Runs 5 seconds after startup to welcome any users that were in the DB
+    # with telegram_ids before this feature was deployed (welcomed_at IS NULL).
+    async def _startup_welcome_sweep():
+        await asyncio.sleep(5)
+        try:
+            unwelcomed = db.get_unwelcomed_linked_users()
+            if unwelcomed:
+                logger.info(f"Startup sweep: found {len(unwelcomed)} unwelcomed linked user(s).")
+                for u in unwelcomed:
+                    logger.info(f"  → Startup welcome: {u['name']} (telegram_id={u['telegram_id']})")
+                    await welcome_newly_enrolled_user(u["uuid"], u["telegram_id"], u["name"], u["role"])
+                    await asyncio.sleep(0.5)  # small delay to avoid Telegram rate limits
+            else:
+                logger.info("Startup sweep: no unwelcomed linked users found.")
+        except Exception as e:
+            logger.error(f"Startup welcome sweep failed: {e}")
+    asyncio.create_task(_startup_welcome_sweep())
     
     # Check if we should use Webhook (Render/Koyeb) or Polling (Local Dev)
     public_url = os.environ.get("PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL")

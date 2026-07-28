@@ -169,6 +169,13 @@ def init_db():
     except Exception as e:
         logger.warning(f"Migration (device->lecturer telegram_id reassign) skipped: {e}")
 
+    # Migration: add welcomed_at column to track first-time welcome messages
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN welcomed_at INTEGER DEFAULT NULL")
+        logger.info("Migration: added welcomed_at column to users table.")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     conn.commit()
     conn.close()
     logger.info("Database initialized successfully.")
@@ -244,6 +251,36 @@ def link_telegram_id(uuid, telegram_id):
     """, (telegram_id, now, uuid))
     conn.commit()
     conn.close()
+
+def mark_user_welcomed(uuid):
+    """Stamps welcomed_at for a user so they are not welcomed again on future syncs."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now = int(time.time())
+    cursor.execute("UPDATE users SET welcomed_at = ? WHERE uuid = ?", (now, uuid))
+    conn.commit()
+    conn.close()
+
+def get_unwelcomed_linked_users():
+    """
+    Returns all users that:
+      - have a non-empty telegram_id (they have linked their Telegram account), AND
+      - have welcomed_at IS NULL (bot has never sent them a welcome message).
+    Each returned dict has: uuid, name, role, telegram_id.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT uuid, name, role, telegram_id
+        FROM users
+        WHERE telegram_id IS NOT NULL
+          AND telegram_id != ''
+          AND welcomed_at IS NULL
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 def get_user_by_telegram_id(telegram_id):
     """Retrieves a user by their Telegram ID."""
