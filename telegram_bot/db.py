@@ -288,7 +288,7 @@ def get_user_by_telegram_id(telegram_id):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT uuid, name, student_id, phone_number, telegram_id, role 
+        SELECT uuid, name, student_id, phone_number, telegram_id, role, welcomed_at
         FROM users 
         WHERE telegram_id = ?
     """, (str(telegram_id),))

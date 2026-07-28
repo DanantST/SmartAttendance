@@ -711,6 +711,7 @@ def build_time_selector_keyboard(hour: int, minute: int, is_end_time: bool):
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Greets the user and checks registration status. Displays role-based keyboards.
+    If the user is registered but has never been welcomed, sends the first-time welcome.
     """
     user_id = str(update.effective_user.id)
     user = db.get_user_by_telegram_id(user_id)
@@ -718,6 +719,15 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user:
         role = user.get("role")
         name = user.get("name")
+        uuid = user.get("uuid")
+        welcomed_at = user.get("welcomed_at")
+
+        # If this user has never received a welcome message, send it now
+        if not welcomed_at:
+            await welcome_newly_enrolled_user(uuid, user_id, name, role)
+            return
+
+        # Already welcomed — show the normal "welcome back" keyboard
         if role in ["lecturer", "admin"]:
             reply_keyboard = ReplyKeyboardMarkup(
                 [
@@ -759,6 +769,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "please click the button below to share your phone number.",
             reply_markup=contact_keyboard,
         )
+
 
 async def notify_linked_student(telegram_id, name, role):
     global bot_app
@@ -887,6 +898,7 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if matched_user:
         db.link_telegram_id(matched_user["uuid"], user_id)
+        db.mark_user_welcomed(matched_user["uuid"])   # contact-share reply is their welcome
         role = matched_user["role"]
         name = matched_user["name"]
         
