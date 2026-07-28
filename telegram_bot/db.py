@@ -492,6 +492,34 @@ def link_lecturer_course(telegram_id, course_code):
     conn.commit()
     conn.close()
 
+def add_lecturer_course(telegram_id, course_code, course_title):
+    """Registers a new course and links it to the specified lecturer."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    code = course_code.strip().upper()
+    title = course_title.strip()
+    
+    # 1. Insert or update course in courses table
+    cursor.execute("""
+        INSERT OR IGNORE INTO courses (code, name)
+        VALUES (?, ?)
+    """, (code, title))
+    cursor.execute("""
+        UPDATE courses 
+        SET name = ? 
+        WHERE code = ?
+    """, (title, code))
+    
+    # 2. Link course to lecturer in lecturer_courses table
+    cursor.execute("""
+        INSERT OR IGNORE INTO lecturer_courses (lecturer_telegram_id, course_code)
+        VALUES (?, ?)
+    """, (str(telegram_id), code))
+    
+    conn.commit()
+    conn.close()
+    return True
+
 def get_lecturer_courses(telegram_id):
     """Retrieves all courses assigned to a lecturer."""
     conn = sqlite3.connect(DB_PATH)

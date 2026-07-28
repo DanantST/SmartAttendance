@@ -89,6 +89,9 @@ SELECT_REPORT_COURSE = 12
     EDIT_INPUT_END_TIME,
 ) = range(20, 26)
 
+# Conversation States for Registering New Course
+ADD_COURSE_CODE, ADD_COURSE_TITLE = range(30, 32)
+
 # FastAPI Application
 web_app = FastAPI()
 
@@ -1042,7 +1045,7 @@ async def share_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def my_courses_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lists courses assigned to the lecturer with options to delete."""
+    """Lists courses assigned to the lecturer with options to delete or register a new course."""
     user_id = str(update.effective_user.id)
     user = db.get_user_by_telegram_id(user_id)
     if not user or user.get("role") not in ["lecturer", "admin"]:
@@ -1051,19 +1054,22 @@ async def my_courses_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     courses = db.get_lecturer_courses(user_id)
-    if not courses:
-        msg = update.message if update.message else update.callback_query.message
-        await msg.reply_text("📚 You have no courses assigned yet. Tap **📅 Schedule Class** and add a course to assign it to yourself.")
-        return
     
     # Show courses as inline buttons
     keyboard = []
-    for c in courses:
-        keyboard.append([InlineKeyboardButton(f"📚 {c['course_code']} - {c['name']}", callback_data=f"mng_c:view:{c['course_code']}")])
+    if courses:
+        for c in courses:
+            keyboard.append([InlineKeyboardButton(f"📚 {c['course_code']} - {c['name']}", callback_data=f"mng_c:view:{c['course_code']}")])
+    
+    keyboard.append([InlineKeyboardButton("➕ Register New Course", callback_data="mng_c:add_new")])
     keyboard.append([InlineKeyboardButton("❌ Close Menu", callback_data="mng_c:cancel")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    msg_text = "📚 **Your Assigned Courses:**\n\nTap a course below to manage or delete it:"
+    if courses:
+        msg_text = "📚 **Your Assigned Courses:**\n\nTap a course below to manage/delete it, or tap **➕ Register New Course** to add a new course:"
+    else:
+        msg_text = "📚 **Your Assigned Courses:**\n\nYou currently have no courses assigned. Tap **➕ Register New Course** below to register a new course:"
+        
     if update.callback_query:
         await update.callback_query.edit_message_text(msg_text, reply_markup=reply_markup, parse_mode="Markdown")
     else:
@@ -1085,6 +1091,9 @@ async def mng_courses_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == "list":
         await my_courses_cmd(update, context)
         return
+
+    if action == "add_new":
+        return await add_course_start(update, context)
         
     course_code = parts[2]
     
@@ -1125,6 +1134,68 @@ async def mng_courses_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             )
         else:
             await query.edit_message_text("❌ Failed to delete course. It may have already been deleted.")
+
+# ----------------- Course Registration Conversation Handler -----------------
+
+async def add_course_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point for registering a new course."""
+    user_id = str(update.effective_user.id)
+    user = db.get_user_by_telegram_id(user_id)
+    if not user or user.get("role") not in ["lecturer", "admin"]:
+        msg = update.message if update.message else update.callback_query.message
+        await msg.reply_text("❌ Unauthorized. Only Lecturers or Admins can register courses.")
+        return ConversationHandler.END
+
+    text = (
+        "➕ **Register New Course**\n\n"
+        "Please enter the **Course Code** (e.g. `ECE320` or `CS480`):\n\n"
+        "*(Or type /cancel to abort)*"
+    )
+    if update.callback_query:
+        await update.callback_query.message.reply_text(text, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, parse_mode="Markdown")
+        
+    return ADD_COURSE_CODE
+
+
+async def add_course_input_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives the course code and prompts for course title."""
+    code = update.message.text.strip().upper()
+    if not code or len(code) > 15:
+        await update.message.reply_text("❌ Invalid course code. Please enter a valid code (e.g. `ECE320`):")
+        return ADD_COURSE_CODE
+        
+    context.user_data["new_course_code"] = code
+    await update.message.reply_text(
+        f"Course Code: **{code}** ✅\n\n"
+        f"Now enter the **Course Title** (e.g. `Embedded Systems` or `Computer Vision`):",
+        parse_mode="Markdown"
+    )
+    return ADD_COURSE_TITLE
+
+
+async def add_course_input_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives the course title and registers the course."""
+    user_id = str(update.effective_user.id)
+    title = update.message.text.strip()
+    code = context.user_data.get("new_course_code", "")
+    
+    if not title or len(title) > 64:
+        await update.message.reply_text("❌ Invalid course title. Please enter a valid title (max 64 characters):")
+        return ADD_COURSE_TITLE
+        
+    db.add_lecturer_course(user_id, code, title)
+    context.user_data.pop("new_course_code", None)
+    
+    await update.message.reply_text(
+        f"🎉 **Course Registered Successfully!**\n\n"
+        f"**Course Code:** `{code}`\n"
+        f"**Course Title:** {title}\n\n"
+        f"This course is now assigned to you and will sync to the attendance device on the next sync cycle.",
+        parse_mode="Markdown"
+    )
+    return ConversationHandler.END
 
 async def my_schedules_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Lists schedules created by the lecturer with options to cancel or edit."""
@@ -2576,6 +2647,27 @@ async def main():
         ],
     )
     bot_app.add_handler(unenroll_conv)
+    
+    # Course Registration Conversation Handler (Lecturers/Admins)
+    add_course_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("add_course", add_course_start),
+            CallbackQueryHandler(add_course_start, pattern=r"^mng_c:add_new$")
+        ],
+        states={
+            ADD_COURSE_CODE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_course_input_code)
+            ],
+            ADD_COURSE_TITLE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_course_input_title)
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_cmd),
+            MessageHandler(filters.Regex(r"^❌ Abort Process$"), cancel_cmd)
+        ],
+    )
+    bot_app.add_handler(add_course_conv)
     
     # Reply Keyboard Button Mapper (general text mapper when not in conversation, registered last to avoid shadowing conversation entry points)
     button_filter = filters.TEXT & filters.Regex(r"^(📅 Schedule Class|📅 My Schedules|📊 Attendance Report|📚 My Courses|📲 Share Bot Link|🛠️ Developer Auth|❓ Help|📚 Enroll in Course|👤 My Status)$")
