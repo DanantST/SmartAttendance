@@ -733,7 +733,8 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [
                     ["📅 Schedule Class", "📅 My Schedules"],
                     ["📊 Attendance Report", "📚 My Courses"],
-                    ["🛠️ Developer Auth", "❓ Help"]
+                    ["📲 Share Bot Link", "🛠️ Developer Auth"],
+                    ["❓ Help"]
                 ],
                 resize_keyboard=True
             )
@@ -745,7 +746,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             reply_keyboard = ReplyKeyboardMarkup(
                 [
-                    ["📚 Enroll in Course"],
+                    ["📚 Enroll in Course", "📲 Share Bot Link"],
                     ["👤 My Status", "❓ Help"]
                 ],
                 resize_keyboard=True
@@ -815,7 +816,8 @@ async def welcome_newly_enrolled_user(uuid, telegram_id, name, role):
             keyboard = [
                 ["📅 Schedule Class", "📅 My Schedules"],
                 ["📊 Attendance Report", "📚 My Courses"],
-                ["🛠️ Developer Auth", "❓ Help"]
+                ["📲 Share Bot Link", "🛠️ Developer Auth"],
+                ["❓ Help"]
             ]
             role_blurb = (
                 f"As a **{role.capitalize()}**, you can schedule classes, view attendance reports, "
@@ -823,7 +825,7 @@ async def welcome_newly_enrolled_user(uuid, telegram_id, name, role):
             )
         else:
             keyboard = [
-                ["📚 Enroll in Course"],
+                ["📚 Enroll in Course", "📲 Share Bot Link"],
                 ["👤 My Status", "❓ Help"]
             ]
             role_blurb = (
@@ -907,14 +909,15 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [
                     ["📅 Schedule Class", "📅 My Schedules"],
                     ["📊 Attendance Report", "📚 My Courses"],
-                    ["🛠️ Developer Auth", "❓ Help"]
+                    ["📲 Share Bot Link", "🛠️ Developer Auth"],
+                    ["❓ Help"]
                 ],
                 resize_keyboard=True
             )
         else:
             reply_keyboard = ReplyKeyboardMarkup(
                 [
-                    ["📚 Enroll in Course"],
+                    ["📚 Enroll in Course", "📲 Share Bot Link"],
                     ["👤 My Status", "❓ Help"]
                 ],
                 resize_keyboard=True
@@ -1008,9 +1011,34 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• **Schedule Class:** (Lecturers) Creates a new lecture slot with calendar and time dials.\n"
         "• **Attendance Report:** (Lecturers) Requests a CSV report of a course. The admin is notified to sync, and it's sent to you.\n"
         "• **Enroll in Course:** (Students) Registers you to courses using easy button selections.\n"
+        "• **Share Bot Link:** (📲 Share Bot Link or `/share`) Forwards the bot link directly to classmates/colleagues.\n"
         "• **My Status:** Check your local registration card details.\n"
         "• **My Courses:** Lists all courses assigned to you.\n"
         "• **Cancel:** Use `/cancel` or click Cancel to exit any setup wizard."
+    )
+
+async def share_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Provides a direct Telegram share link allowing linked users to forward
+    the Smart Attendance bot invitation link to unlinked classmates/colleagues.
+    """
+    share_url = (
+        "https://t.me/share/url?"
+        "url=https://t.me/MyUniAttendance_Bot"
+        "&text=%F0%9F%90%8B%20Join%20the%20Smart%20Attendance%20Bot!%20Tap%20the%20link%20and%20press%20Start%20%2F%20Share%20Contact%20to%20receive%20your%20attendance%20notifications%20and%20class%20schedules."
+    )
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(text="📲 Forward Bot Link to Contact / Group", url=share_url)]
+    ])
+    
+    await update.message.reply_text(
+        "📲 **Share Smart Attendance Bot**\n\n"
+        "Know someone who hasn't linked their Telegram account yet?\n\n"
+        "Click the button below to directly forward the bot link and invitation "
+        "to any classmate, lecturer, or group on Telegram!",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
     )
 
 async def my_courses_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2361,6 +2389,8 @@ async def button_mapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await report_start(update, context)
     elif text == "📚 My Courses":
         await my_courses_cmd(update, context)
+    elif text == "📲 Share Bot Link":
+        await share_cmd(update, context)
     elif text == "🛠️ Developer Auth":
         await auth_me_dev_cmd(update, context)
     elif text == "❓ Help":
@@ -2393,6 +2423,7 @@ async def main():
     bot_app.add_handler(CommandHandler("report", report_start))
     bot_app.add_handler(CommandHandler("courses", my_courses_cmd))
     bot_app.add_handler(CommandHandler("schedules", my_schedules_cmd))
+    bot_app.add_handler(CommandHandler("share", share_cmd))
     bot_app.add_handler(CommandHandler("help", help_cmd))
     bot_app.add_handler(MessageHandler(filters.CONTACT, contact_handler))
     bot_app.add_handler(CallbackQueryHandler(mng_courses_callback, pattern=r"^mng_c:"))
@@ -2547,7 +2578,7 @@ async def main():
     bot_app.add_handler(unenroll_conv)
     
     # Reply Keyboard Button Mapper (general text mapper when not in conversation, registered last to avoid shadowing conversation entry points)
-    button_filter = filters.TEXT & filters.Regex(r"^(📅 Schedule Class|📅 My Schedules|📊 Attendance Report|📚 My Courses|🛠️ Developer Auth|❓ Help|📚 Enroll in Course|👤 My Status)$")
+    button_filter = filters.TEXT & filters.Regex(r"^(📅 Schedule Class|📅 My Schedules|📊 Attendance Report|📚 My Courses|📲 Share Bot Link|🛠️ Developer Auth|❓ Help|📚 Enroll in Course|👤 My Status)$")
     bot_app.add_handler(MessageHandler(button_filter, button_mapper))
     
     # Initialize Bot App
