@@ -649,14 +649,17 @@ def get_lecturer_schedules(telegram_id):
       - Schedules created directly via the bot (telegram_id = lecturer's ID)
       - Schedules uploaded from the device (telegram_id = 'device') for courses
         the lecturer owns (via lecturer_courses table)
+    Only returns schedules whose end_time has not yet passed (no expired classes).
     """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    now_ts = int(time.time())
     cursor.execute("""
         SELECT id, course_code, course_title, start_time, end_time, event_type
         FROM schedules
         WHERE telegram_id = ?
+          AND end_time > ?
 
         UNION
 
@@ -665,9 +668,10 @@ def get_lecturer_schedules(telegram_id):
         JOIN lecturer_courses lc ON s.course_code = lc.course_code
         WHERE s.telegram_id = 'device'
           AND lc.lecturer_telegram_id = ?
+          AND s.end_time > ?
 
         ORDER BY start_time ASC
-    """, (str(telegram_id), str(telegram_id)))
+    """, (str(telegram_id), now_ts, str(telegram_id), now_ts))
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]
