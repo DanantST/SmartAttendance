@@ -790,15 +790,16 @@ async def notify_linked_student(telegram_id, name, role):
                     ["👤 My Status", "❓ Help"]
                 ]
             reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            import html as _html
             await bot_app.bot.send_message(
                 chat_id=telegram_id,
                 text=(
-                    f"🎉 **Profile Synced & Registration Complete!**\n\n"
-                    f"Your account (**{name}**) has been successfully synced from the attendance device and linked to the Smart Attendance bot as a **{role.capitalize()}**.\n\n"
+                    f"🎉 <b>Profile Synced &amp; Registration Complete!</b>\n\n"
+                    f"Your account (<b>{_html.escape(name)}</b>) has been successfully synced from the attendance device and linked to the Smart Attendance bot as a <b>{_html.escape(role.capitalize())}</b>.\n\n"
                     "You can now subscribe to the available courses to receive event updates (lectures, tests, exams) and attendance records."
                 ),
                 reply_markup=reply_markup,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             logger.info(f"Sent automatic link notification to: {name} ({telegram_id})")
         except Exception as e:
@@ -814,6 +815,10 @@ async def welcome_newly_enrolled_user(uuid, telegram_id, name, role):
     if not bot_app:
         return
     try:
+        import html as _html
+        safe_name = _html.escape(name)
+        safe_role = _html.escape(role.capitalize())
+
         if role in ["lecturer", "admin"]:
             keyboard = [
                 ["📅 Schedule Class", "📅 My Schedules"],
@@ -821,7 +826,7 @@ async def welcome_newly_enrolled_user(uuid, telegram_id, name, role):
                 ["📲 Share Bot Link", "❓ Help"]
             ]
             role_blurb = (
-                f"As a **{role.capitalize()}**, you can schedule classes, view attendance reports, "
+                f"As a <b>{safe_role}</b>, you can schedule classes, view attendance reports, "
                 "and manage your courses directly from this bot."
             )
         else:
@@ -831,7 +836,7 @@ async def welcome_newly_enrolled_user(uuid, telegram_id, name, role):
             ]
             role_blurb = (
                 "You will receive automatic attendance notifications each time your face is recognised "
-                "by the attendance device. Use the menu below to **enroll in your courses** so you "
+                "by the attendance device. Use the menu below to <b>enroll in your courses</b> so you "
                 "start receiving event reminders too."
             )
 
@@ -839,13 +844,13 @@ async def welcome_newly_enrolled_user(uuid, telegram_id, name, role):
         await bot_app.bot.send_message(
             chat_id=telegram_id,
             text=(
-                f"👋 Welcome aboard, **{name}**!\n\n"
-                f"Your profile has been synced from the Smart Attendance device and you are registered as a **{role.capitalize()}**.\n\n"
+                f"👋 Welcome aboard, <b>{safe_name}</b>!\n\n"
+                f"Your profile has been synced from the Smart Attendance device and you are registered as a <b>{safe_role}</b>.\n\n"
                 f"{role_blurb}\n\n"
                 "Type /help at any time to see what this bot can do."
             ),
             reply_markup=reply_markup,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         # Mark as welcomed so we never send this again
         db.mark_user_welcomed(uuid)
@@ -863,18 +868,19 @@ async def notify_students_new_schedule(course_code, course_title, date_str, star
         
         for student in students:
             try:
+                import html as _html
                 await bot_app.bot.send_message(
                     chat_id=student["telegram_id"],
                     text=(
-                        f"📅 **New {event_name} Scheduled!**\n\n"
-                        f"**Course:** {course_code} - {course_title}\n"
-                        f"**Event Type:** {event_name}\n"
-                        f"**Date:** {date_str}\n"
-                        f"**Time:** {start_time_str} - {end_time_str}\n"
-                        f"**Lecturer:** {lecturer_name}\n\n"
+                        f"📅 <b>New {_html.escape(event_name)} Scheduled!</b>\n\n"
+                        f"<b>Course:</b> {_html.escape(course_code)} - {_html.escape(course_title)}\n"
+                        f"<b>Event Type:</b> {_html.escape(event_name)}\n"
+                        f"<b>Date:</b> {_html.escape(date_str)}\n"
+                        f"<b>Time:</b> {_html.escape(start_time_str)} - {_html.escape(end_time_str)}\n"
+                        f"<b>Lecturer:</b> {_html.escape(lecturer_name)}\n\n"
                         "Please be prepared and punctual!"
                     ),
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
             except Exception as e:
                 logger.error(f"Failed to notify student {student['telegram_id']} about class schedule: {e}")
