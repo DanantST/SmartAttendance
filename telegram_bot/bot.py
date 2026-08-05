@@ -1051,8 +1051,12 @@ async def mng_courses_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await my_courses_cmd(update, context)
         return
 
+    # NOTE: "add_new" is intentionally NOT handled here.
+    # It is the entry point of add_course_conv (ConversationHandler) and must
+    # not be intercepted by this global CallbackQueryHandler or the conversation
+    # state machine will never be entered and subsequent messages will be lost.
     if action == "add_new":
-        return await add_course_start(update, context)
+        return
         
     course_code = parts[2]
     
@@ -2453,7 +2457,9 @@ async def main():
     bot_app.add_handler(CommandHandler("share", share_cmd))
     bot_app.add_handler(CommandHandler("help", help_cmd))
     bot_app.add_handler(MessageHandler(filters.CONTACT, contact_handler))
-    bot_app.add_handler(CallbackQueryHandler(mng_courses_callback, pattern=r"^mng_c:"))
+    # Pattern excludes "add_new" — that callback is the entry point of add_course_conv
+    # and must be handled exclusively by that ConversationHandler, not here.
+    bot_app.add_handler(CallbackQueryHandler(mng_courses_callback, pattern=r"^mng_c:(?!add_new)"))
     bot_app.add_handler(CallbackQueryHandler(mng_schedules_callback, pattern=r"^mng_s:(delete|confirm_delete|list|cancel)"))
 
     # Course Enrollment Conversation (Students)
