@@ -27,6 +27,11 @@ typedef struct {
     face_embedding_t embedding;
     uint32_t created_at;
     uint32_t updated_at;
+    uint8_t enroll_quality;     /* Numeric quality score (0-100) */
+    uint8_t enroll_accepted;    /* Valid/accepted frame count */
+    uint8_t enroll_rejected;    /* Rejected frame count */
+    uint8_t model_version;      /* Model version (1 = MobileFaceNet) */
+    uint16_t embedding_dim;     /* Embedding vector dimension (128) */
 } user_t;
 
 typedef struct {
@@ -219,6 +224,11 @@ esp_err_t db_get_user_courses(uint32_t user_id, char*** codes_out, int* count_ou
 esp_err_t db_get_all_courses(char*** names, int* count);
 
 /**
+ * @brief Get all course IDs and names from the database for reports filtering.
+ */
+esp_err_t db_get_all_courses_with_ids(int** ids, char*** names, int* count);
+
+/**
  * @brief Remove a student's enrollment in a specific course.
  *        Called by cloud_sync when the bot pushes an enrollment deletion.
  */
@@ -229,6 +239,27 @@ esp_err_t db_unlink_user_course(const char* user_uuid, const char* course_code);
  *        Called by cloud_sync when the bot pushes a lecturer course deletion.
  */
 esp_err_t db_unlink_lecturer_course_by_uuid(const char* lecturer_uuid, const char* course_code);
+
+/**
+ * @brief Get total count of present attendance records logged today
+ */
+int db_get_today_attendance_count(void);
+
+/**
+ * @brief Check if a student's attendance has already been recorded for a given schedule.
+ * @param user_id   Internal user row ID
+ * @param schedule_id  Schedule row ID (0 = no active schedule, always returns false)
+ * @return true if attendance already exists for this user + schedule combination
+ */
+bool db_attendance_exists_for_schedule(uint32_t user_id, uint32_t schedule_id);
+bool db_is_test_or_exam_schedule(uint32_t schedule_id);
+
+/**
+ * @brief Query SQLite for currently active schedule matching start_time <= now AND end_time >= now
+ * @param out_schedule Pointer to receive active schedule details
+ * @return ESP_OK if active schedule found, ESP_ERR_NOT_FOUND if none active
+ */
+esp_err_t db_get_active_schedule(db_schedule_t *out_schedule);
 
 
 #ifdef __cplusplus

@@ -130,6 +130,60 @@ QueueHandle_t g_db_request_queue = NULL;
 static TaskHandle_t s_camera_task_handle = NULL;
 static uint8_t *s_detection_fb_buf = NULL;
 
+/* ---------------------------------------------------------------------------
+ * In-memory attendance dedup table
+ * Prevents duplicate inserts caused by the async DB queue: when a student
+ * scans repeatedly in quick succession the DB write may not have committed
+ * yet, so the SQL check would return false multiple times. This table is
+ * updated IMMEDIATELY (before the queue send), acting as a reliable gate.
+ * --------------------------------------------------------------------------- */
+#define SESSION_DEDUP_MAX 200   /* supports up to 200 unique student+class combos */
+typedef struct { 
+    uint32_t user_id; 
+    uint32_t schedule_id; 
+    int scan_count;
+} session_key_t;
+static session_key_t s_session_dedup[SESSION_DEDUP_MAX];
+static int           s_session_dedup_count = 0;
+static portMUX_TYPE  s_session_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static bool session_already_recorded(uint32_t user_id, uint32_t schedule_id, bool is_test_or_exam) {
+    bool found = false;
+    portENTER_CRITICAL(&s_session_mux);
+    for (int i = 0; i < s_session_dedup_count; i++) {
+        if (s_session_dedup[i].user_id == user_id &&
+            s_session_dedup[i].schedule_id == schedule_id) {
+            int max_allowed = is_test_or_exam ? 2 : 1;
+            if (s_session_dedup[i].scan_count >= max_allowed) {
+                found = true;
+            }
+            break;
+        }
+    }
+    portEXIT_CRITICAL(&s_session_mux);
+    return found;
+}
+
+static void session_record_attendance(uint32_t user_id, uint32_t schedule_id) {
+    portENTER_CRITICAL(&s_session_mux);
+    bool found = false;
+    for (int i = 0; i < s_session_dedup_count; i++) {
+        if (s_session_dedup[i].user_id == user_id &&
+            s_session_dedup[i].schedule_id == schedule_id) {
+            s_session_dedup[i].scan_count++;
+            found = true;
+            break;
+        }
+    }
+    if (!found && s_session_dedup_count < SESSION_DEDUP_MAX) {
+        s_session_dedup[s_session_dedup_count].user_id     = user_id;
+        s_session_dedup[s_session_dedup_count].schedule_id = schedule_id;
+        s_session_dedup[s_session_dedup_count].scan_count   = 1;
+        s_session_dedup_count++;
+    }
+    portEXIT_CRITICAL(&s_session_mux);
+}
+
 #define SYSTEM_EVENT_RECOGNITION_SUCCESS   (1 << 0)
 #define SYSTEM_EVENT_RECOGNITION_FAIL      (1 << 1)
 #define SYSTEM_EVENT_ENROLLMENT_COMPLETE   (1 << 2)
@@ -168,6 +222,9 @@ static void battery_task(void *pvParameters);
 static void system_state_machine(void);
 static esp_err_t process_recognition_result(user_t *user, float confidence);
 void start_enrollment_task(void *pvParam);
+/* Screen deferred for safe deletion from admin setup wizard (ui_admin_setup.cpp) */
+extern lv_obj_t *g_admin_setup_screen_to_delete;
+static void schedule_checker_task(void *pvParameters);
 static void handle_low_battery(void);
 static void graceful_shutdown(void);
 static void pin_auth_callback(bool success);
@@ -508,6 +565,8 @@ void app_main(void) {
     /* NOTE: audio_async_task is now created inside audio_init() — no separate create here */
     xTaskCreate(battery_task, "battery", TASK_BATTERY_STACK_SIZE, NULL,
                 TASK_BATTERY_PRIORITY, NULL);
+    xTaskCreate(schedule_checker_task, "sched_check", 8192, NULL,
+                2, NULL);
 
     ESP_LOGI(TAG, "All tasks started. System ready.");
 
@@ -715,41 +774,107 @@ static void detection_recognition_task(void *pvParameters) {
 }
 
 /**
- * @brief Process successful recognition and log attendance
- * Issue 3.2: Heap-allocates log data so pointer survives queue transit.
- * Issue 3.1: Generates proper hex UUID string.
- * Issue 3.3: Uses strncpy for status field instead of string literal initializer.
+ * @brief Process successful recognition and log attendance.
+ *
+ * Duplicate prevention uses a TWO-LAYER gate:
+ *  1. In-memory dedup table (session_already_recorded) — checked FIRST.
+ *     This is updated atomically BEFORE the async DB queue send, so even if
+ *     10 frames arrive within one DB write cycle, only the first passes.
+ *  2. DB query (db_attendance_exists_for_schedule) — checked SECOND as a
+ *     safety net after power-cycle or app restart for the same class window.
+ *
+ * When no active schedule exists (schedule_id == 0), we still dedup using
+ * a sentinel schedule_id of UINT32_MAX so the same student is only recorded
+ * once per boot session.
  */
 static esp_err_t process_recognition_result(user_t *user, float confidence) {
-    /* Heap-allocate so the pointer remains valid after this function returns (Issue 3.2) */
+    /* --- Determine active schedule --- */
+    uint32_t schedule_id = db_get_current_schedule_id();
+
+    /* --- Outside of a scheduled event, just show name and return --- */
+    if (schedule_id == 0) {
+        static char id_msg[96];
+        snprintf(id_msg, sizeof(id_msg), "Identified as %s", user->name);
+        ui_show_attendance_feedback(id_msg, 2); /* 2 = Neutral blue/gray banner */
+        return ESP_OK;
+    }
+
+    bool is_test_or_exam = db_is_test_or_exam_schedule(schedule_id);
+
+    /* --- Fetch active schedule name for personalised message --- */
+    db_schedule_t active_sched;
+    bool has_class = (db_get_active_schedule(&active_sched) == ESP_OK);
+
+    /* ---------------------------------------------------------------
+     * LAYER 1: In-memory dedup — instant, no DB latency
+     * --------------------------------------------------------------- */
+    if (session_already_recorded(user->id, schedule_id, is_test_or_exam)) {
+        ui_show_attendance_feedback(
+            "Your attendance has been previously recorded for this class", 1);
+        ESP_LOGI(TAG, "Dedup(mem): user %lu already in session (schedule %lu)",
+                 (unsigned long)user->id, (unsigned long)schedule_id);
+        return ESP_OK;
+    }
+
+    /* ---------------------------------------------------------------
+     * LAYER 2: DB check — catches reboot/restart within same window
+     * --------------------------------------------------------------- */
+    if (db_attendance_exists_for_schedule(user->id, schedule_id)) {
+        session_record_attendance(user->id, schedule_id);
+        ui_show_attendance_feedback(
+            "Your attendance has been previously recorded for this class", 1);
+        ESP_LOGI(TAG, "Dedup(db): user %lu already in DB for schedule %lu",
+                 (unsigned long)user->id, (unsigned long)schedule_id);
+        return ESP_OK;
+    }
+
+    /* ---------------------------------------------------------------
+     * FIRST/SECOND SCAN: register in memory table NOW (before queue send)
+     * --------------------------------------------------------------- */
+    session_record_attendance(user->id, schedule_id);
+
+    /* --- Insert attendance log (async) --- */
     attendance_log_t *log = calloc(1, sizeof(attendance_log_t));
     if (!log) {
         ESP_LOGE(TAG, "Failed to allocate attendance log");
         return ESP_ERR_NO_MEM;
     }
 
-    log->user_id = user->id;
-    log->schedule_id = db_get_current_schedule_id();
-    log->timestamp = time(NULL);
-    strncpy(log->status, "present", sizeof(log->status) - 1);  /* Issue 3.3 */
+    log->user_id     = user->id;
+    log->schedule_id = schedule_id;
+    log->timestamp   = time(NULL);
+    strncpy(log->status, "present", sizeof(log->status) - 1);
     log->status[sizeof(log->status) - 1] = '\0';
     log->synced = 0;
-    
-    /* Generate proper hex UUID (Issue 3.1) */
     generate_uuid_hex(log->uuid, sizeof(log->uuid));
-    
-    /* Queue database insert — db_task will free the data */
+
     db_request_t req = {
-        .type = DB_REQUEST_INSERT_LOG,
-        .data = log,
-        .data_len = sizeof(attendance_log_t),
+        .type      = DB_REQUEST_INSERT_LOG,
+        .data      = log,
+        .data_len  = sizeof(attendance_log_t),
         .free_data = true
     };
-    
+
     if (xQueueSend(g_db_request_queue, &req, pdMS_TO_TICKS(100)) != pdTRUE) {
         free(log);
         return ESP_FAIL;
     }
+
+    /* --- Increment attendance counter on screen --- */
+    ui_attendance_increment_count();
+
+    /* --- Show green success feedback --- */
+    static char ok_msg[160];
+    if (has_class) {
+        snprintf(ok_msg, sizeof(ok_msg),
+                 "%.40s, your attendance for %.50s has been recorded",
+                 user->name, active_sched.course_name);
+    } else {
+        snprintf(ok_msg, sizeof(ok_msg),
+                 "%.40s, your attendance has been recorded", user->name);
+    }
+    ui_show_attendance_feedback(ok_msg, 0);
+
     return ESP_OK;
 }
 
@@ -757,265 +882,425 @@ static esp_err_t process_recognition_result(user_t *user, float confidence) {
  * @brief Start enrollment mode
  * Called from UI when user taps "Enroll" button
  */
-static esp_err_t process_enrollment_frames_for_user(user_t* new_user) {
-    /* Heap-allocate large arrays to prevent stack overflow */
-    camera_fb_t **frames = (camera_fb_t**)calloc(ENROLL_FRAMES_TOTAL, sizeof(camera_fb_t *));
-    aligned_face_t *aligned_frames = (aligned_face_t*)calloc(ENROLL_FRAMES_TOTAL, sizeof(aligned_face_t));
-    face_embedding_t *embeddings = (face_embedding_t*)calloc(ENROLL_FRAMES_TOTAL, sizeof(face_embedding_t));
-    float *quality_scores = (float*)calloc(ENROLL_FRAMES_TOTAL, sizeof(float));
+static float compute_int8_cosine_similarity(const face_embedding_t *a, const face_embedding_t *b) {
+    long long dot = 0, norm_a = 0, norm_b = 0;
+    for (int i = 0; i < EMBEDDING_DIM; i++) {
+        dot += (int)a->values[i] * (int)b->values[i];
+        norm_a += (int)a->values[i] * (int)a->values[i];
+        norm_b += (int)b->values[i] * (int)b->values[i];
+    }
+    if (norm_a == 0 || norm_b == 0) return 0.0f;
+    return (float)dot / (sqrtf((float)norm_a) * sqrtf((float)norm_b));
+}
 
-    if (!frames || !aligned_frames || !embeddings || !quality_scores) {
-        ESP_LOGE(TAG, "Failed to allocate enrollment buffers");
-        free(frames); free(aligned_frames); free(embeddings); free(quality_scores);
+/**
+ * @brief Statistically robust 8-step facial template enrollment algorithm
+ * 1. Capture 30 valid frames with single-face, blur, brightness & pose gates
+ * 2. Store embeddings in PSRAM temporary array
+ * 3. Pairwise similarity outlier removal (\mu - 1.5\sigma threshold clamped \ge 0.65)
+ * 4. K-Means pose clustering (K=3) with automatic fallback for empty clusters
+ * 5. Compute centroids for non-empty clusters
+ * 6. Cluster-size weighted averaging and L2 norm restoration
+ * 7. Score quality (0-100 / EXCELLENT, GOOD, AVERAGE, POOR) & persist single template + metadata
+ * 8. UI quality feedback (Redo button shown ONLY when quality is POOR)
+ */
+static esp_err_t process_enrollment_frames_for_user(user_t* new_user) {
+    ESP_LOGI(TAG, "Starting robust 8-step enrollment for %s", new_user->name);
+
+    /* Step 1 & 2: Allocate PSRAM buffers for 30 valid samples */
+    camera_fb_t **frames = (camera_fb_t**)heap_caps_calloc(ENROLL_FRAMES_TOTAL, sizeof(camera_fb_t *), MALLOC_CAP_SPIRAM);
+    aligned_face_t *aligned_frames = (aligned_face_t*)heap_caps_calloc(ENROLL_FRAMES_TOTAL, sizeof(aligned_face_t), MALLOC_CAP_SPIRAM);
+    face_embedding_t *embeddings = (face_embedding_t*)heap_caps_calloc(ENROLL_FRAMES_TOTAL, sizeof(face_embedding_t), MALLOC_CAP_SPIRAM);
+    float *quality_scores = (float*)heap_caps_calloc(ENROLL_FRAMES_TOTAL, sizeof(float), MALLOC_CAP_SPIRAM);
+    float *sharpness_vals = (float*)heap_caps_calloc(ENROLL_FRAMES_TOTAL, sizeof(float), MALLOC_CAP_SPIRAM);
+
+    if (!frames || !aligned_frames || !embeddings || !quality_scores || !sharpness_vals) {
+        ESP_LOGE(TAG, "Failed to allocate enrollment PSRAM buffers");
+        if (frames) free(frames);
+        if (aligned_frames) free(aligned_frames);
+        if (embeddings) free(embeddings);
+        if (quality_scores) free(quality_scores);
+        if (sharpness_vals) free(sharpness_vals);
         return ESP_ERR_NO_MEM;
     }
 
-    int kept = 0;
     esp_err_t ret = ESP_OK;
-    
-    /* Drain any stale frame already queued in the binary semaphore */
+    int valid_count = 0;
+    int rejected_count = 0;
+    int total_attempts = 0;
+    const int MAX_ATTEMPTS = 120;
+
     xSemaphoreTake(camera_get_frame_sem(), 0);
-    
-    ESP_LOGI(TAG, "Starting enrollment for %s, capturing %d frames", new_user->name, ENROLL_FRAMES_TOTAL);
-    
     camera_set_framesize(CAMERA_ENROLL_FRAME_SIZE);
 
-    #if 0  /* ENABLE_BLE_ENROLLMENT removed 2026-06-12 — Web AP is the only transport */
-    if (false) {
-        ble_registration_update_status(ENROLL_STATUS_CAPTURING, "Capturing face frames...");
-    }
-    #endif
-    
-    /* Capture burst of frames. Wait if face is not detected. */
-    int i = 0;
-    int progress_update_count = 0;  /* Only update UI every 3 iterations to reduce LVGL contention */
-    
-    while (i < ENROLL_FRAMES_TOTAL) {
+    /* Step 1: Capture 30 valid samples with filtering & live progress display */
+    while (valid_count < ENROLL_FRAMES_TOTAL && total_attempts < MAX_ATTEMPTS) {
         if (g_enrollment_cancel) {
             ret = ESP_FAIL;
             goto cleanup;
         }
-        
-        /* ✅ Update UI only every 3 iterations to reduce LVGL mutex contention */
-        if (++progress_update_count % 3 == 0) {
-            if (ui_acquire()) {
-                ui_enrollment_set_capture_progress(i, ENROLL_FRAMES_TOTAL);
-                ui_release();
-            }
+        total_attempts++;
+
+        /* Update UI progress */
+        if (ui_acquire()) {
+            ui_enrollment_set_capture_progress(valid_count, ENROLL_FRAMES_TOTAL);
+            ui_release();
         }
-        
-        /* Capture frame with autofocus */
+
         camera_fb_t* fb = camera_capture_with_autofocus();
         if (fb == NULL) {
-            ESP_LOGW(TAG, "Frame %d capture failed", i);
-            vTaskDelay(pdMS_TO_TICKS(100));
+            rejected_count++;
+            vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
-        
-        /* ✅ Update camera preview (heavy operation, mutex held briefly for invalidation only) */
+
         ui_update_enrollment_camera_frame(fb->buf, fb->width, fb->height);
-        
-        /* ✅ Yield briefly after frame capture to let LVGL task render */
         vTaskDelay(pdMS_TO_TICKS(5));
-        
-        /* Detect face in frame - expensive ML inference */
+
+        /* Single face detection check */
         detection_result_t det_result;
         esp_err_t det_err = face_detector_run(fb, &det_result);
-        if (det_err != ESP_OK || det_result.face_count == 0) {
+        if (det_err != ESP_OK || det_result.face_count != 1) {
             camera_return_frame(fb);
+            rejected_count++;
             if (ui_acquire()) {
                 ui_enrollment_set_face_detected(false);
+                ui_show_pose_guidance(det_result.face_count > 1 ? "Only 1 face allowed in frame" : "Position face in camera frame");
                 ui_release();
             }
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue; /* Do not increment 'i', force user to show face */
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
         }
-        
-        /* ✅ Yield after face detection to prevent LVGL task starvation */
-        vTaskDelay(pdMS_TO_TICKS(5));
-        
+
+        detected_face_t *face = &det_result.faces[0];
+
+        /* Quality gates: confidence, size, blur, brightness, yaw limits */
+        float sharpness = face_detector_compute_sharpness(fb, face);
+        float brightness = face_detector_compute_brightness(fb, face);
+        float yaw = face_detector_compute_yaw(face);
+
+        bool passes_gates = (face->confidence >= FACE_DETECT_CONFIDENCE_MIN) &&
+                            (face->w >= FACE_MIN_SIZE_PX && face->h >= FACE_MIN_SIZE_PX) &&
+                            (sharpness >= ENROLL_SHARPNESS_MIN) &&
+                            (brightness >= ENROLL_BRIGHTNESS_MIN && brightness <= ENROLL_BRIGHTNESS_MAX) &&
+                            (fabsf(yaw) <= ENROLL_YAW_MAX_DEG);
+
+        if (!passes_gates) {
+            camera_return_frame(fb);
+            rejected_count++;
+            if (ui_acquire()) {
+                if (sharpness < ENROLL_SHARPNESS_MIN) ui_show_pose_guidance("Hold still (blur detected)");
+                else if (brightness < ENROLL_BRIGHTNESS_MIN) ui_show_pose_guidance("Too dark - add lighting");
+                else if (brightness > ENROLL_BRIGHTNESS_MAX) ui_show_pose_guidance("Too bright - reduce glare");
+                else if (fabsf(yaw) > ENROLL_YAW_MAX_DEG) ui_show_pose_guidance("Face camera directly");
+                else ui_show_pose_guidance("Adjust position");
+                ui_release();
+            }
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
         if (ui_acquire()) {
             ui_enrollment_set_face_detected(true);
             ui_release();
         }
 
-        detected_face_t *face = &det_result.faces[0];
-        
-        /* Compute quality metrics */
-        float sharpness = face_detector_compute_sharpness(fb, face);
-        float brightness = face_detector_compute_brightness(fb, face);
-        float yaw = face_detector_compute_yaw(face);
-        
-        float q_score = (sharpness / 100.0f) * 0.5f;
-        q_score += (1.0f - (fabs(yaw) / ENROLL_YAW_MAX_DEG)) * 0.3f;
-        q_score += (brightness >= ENROLL_BRIGHTNESS_MIN && 
-                    brightness <= ENROLL_BRIGHTNESS_MAX) ? 0.2f : 0.0f;
-        
-        /* Clip quality score to positive minimum to avoid negative total weights */
-        if (q_score < 0.01f) {
-            q_score = 0.01f;
-        }
-        quality_scores[i] = q_score;
-        
-        ESP_LOGI(TAG, "Captured frame %d successfully, width=%d height=%d, sharpness=%.2f, brightness=%.2f, yaw=%.2f -> score=%.2f", 
-                 i, fb->width, fb->height, sharpness, brightness, yaw, quality_scores[i]);
-        
-        /* ✅ Align face - yield after heavy operation */
-        if (face_alignment_align(fb, face, &aligned_frames[i]) != ESP_OK) {
+        /* Step 2: Align face crop and extract embedding */
+        if (face_alignment_align(fb, face, &aligned_frames[valid_count]) != ESP_OK) {
             camera_return_frame(fb);
+            rejected_count++;
             continue;
         }
-        
-        /* ✅ Yield after alignment to let LVGL task render */
+
+        if (feature_extractor_run(&aligned_frames[valid_count], &embeddings[valid_count]) != ESP_OK) {
+            face_alignment_free(&aligned_frames[valid_count]);
+            camera_return_frame(fb);
+            rejected_count++;
+            continue;
+        }
+
+        /* Calculate frame quality score */
+        float q_score = (sharpness / 100.0f) * 0.5f +
+                        (1.0f - (fabsf(yaw) / ENROLL_YAW_MAX_DEG)) * 0.3f + 0.2f;
+        if (q_score < 0.01f) q_score = 0.01f;
+
+        quality_scores[valid_count] = q_score;
+        sharpness_vals[valid_count] = sharpness;
+        frames[valid_count] = fb;
+
+        valid_count++;
+        ESP_LOGI(TAG, "Accepted sample %d/30 (sharpness=%.1f, brightness=%.1f, yaw=%.1f)", valid_count, sharpness, brightness, yaw);
         vTaskDelay(pdMS_TO_TICKS(5));
-        
-        frames[i] = fb;
-        i++; /* Frame successfully captured and aligned */
     }
-    
-    /* (BLE status update removed 2026-06-12) */
-    
-    /* Select best frames */
-    int selected_indices[ENROLL_FRAMES_KEEP];
-    for (int j = 0; j < ENROLL_FRAMES_KEEP; j++) {
-        selected_indices[j] = -1;
-    }
-    
-    for (int j = 0; j < ENROLL_FRAMES_TOTAL; j++) {
-        if (frames[j] == NULL) continue;
-        for (int k = 0; k < ENROLL_FRAMES_KEEP; k++) {
-            if (selected_indices[k] == -1 || quality_scores[j] > quality_scores[selected_indices[k]]) {
-                for (int m = ENROLL_FRAMES_KEEP - 1; m > k; m--) {
-                    selected_indices[m] = selected_indices[m-1];
-                }
-                selected_indices[k] = j;
-                break;
-            }
-        }
-    }
-    
-    /* Extract embeddings - yield after each heavy operation */
-    for (int j = 0; j < ENROLL_FRAMES_KEEP; j++) {
-        int idx = selected_indices[j];
-        if (idx == -1) continue;
-        ESP_LOGI(TAG, "Extracting features from selected frame index %d (quality=%.2f)...", idx, quality_scores[idx]);
-        if (feature_extractor_run(&aligned_frames[idx], &embeddings[idx]) != ESP_OK) {
-            ESP_LOGW(TAG, "Feature extraction failed for frame index %d", idx);
-            selected_indices[j] = -1;
-            continue;
-        }
-        kept++;
-        /* ✅ Yield after each embedding extraction to let LVGL task render */
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    
-    if (kept == 0) {
+
+    if (valid_count < 10) {
+        ESP_LOGE(TAG, "Enrollment failed: Insufficient valid samples (%d/30)", valid_count);
         ret = ESP_FAIL;
         goto cleanup;
     }
-    
-    /* Compute target norm as the average norm of all kept embeddings,
-     * and compute the quality-weighted average vector. */
-    float target_norm = 0.0f;
-    float sum_norms = 0.0f;
-    float weighted_sum[EMBEDDING_DIM] = {0.0f};
-    float total_weight = 0.0f;
 
-    for (int j = 0; j < ENROLL_FRAMES_KEEP; j++) {
-        int idx = selected_indices[j];
-        if (idx == -1) continue;
+    /* Step 3: Remove Outliers using Adaptive Threshold (\mu - 1.5\sigma, clamp \ge 0.65) */
+    {
+        float mean_sims[ENROLL_FRAMES_TOTAL] = {0.0f};
+        float sum_all_means = 0.0f;
 
-        /* Calculate norm of this embedding */
-        float norm_sq = 0.0f;
-        for (int m = 0; m < EMBEDDING_DIM; m++) {
-            float val = (float)embeddings[idx].values[m];
-            norm_sq += val * val;
+        for (int i = 0; i < valid_count; i++) {
+            float sum_sim = 0.0f;
+            int count_sim = 0;
+            for (int j = 0; j < valid_count; j++) {
+                if (i == j) continue;
+                sum_sim += compute_int8_cosine_similarity(&embeddings[i], &embeddings[j]);
+                count_sim++;
+            }
+            mean_sims[i] = (count_sim > 0) ? (sum_sim / (float)count_sim) : 0.0f;
+            sum_all_means += mean_sims[i];
         }
-        sum_norms += sqrtf(norm_sq);
 
-        /* Weighted accumulation */
-        float weight = quality_scores[idx];
-        total_weight += weight;
-        for (int m = 0; m < EMBEDDING_DIM; m++) {
-            weighted_sum[m] += (float)embeddings[idx].values[m] * weight;
+        float grand_mean = sum_all_means / (float)valid_count;
+        float variance_sum = 0.0f;
+        for (int i = 0; i < valid_count; i++) {
+            float diff = mean_sims[i] - grand_mean;
+            variance_sum += diff * diff;
         }
-    }
+        float std_dev = sqrtf(variance_sum / (float)valid_count);
 
-    if (kept > 0) {
-        target_norm = sum_norms / (float)kept;
-    }
-
-    face_embedding_t final_embedding;
-    memset(&final_embedding, 0, sizeof(face_embedding_t));
-
-    if (total_weight > 0.0f) {
-        float avg_vector[EMBEDDING_DIM] = {0.0f};
-        float avg_norm_sq = 0.0f;
-
-        /* Calculate raw weighted average and its norm */
-        for (int m = 0; m < EMBEDDING_DIM; m++) {
-            avg_vector[m] = weighted_sum[m] / total_weight;
-            avg_norm_sq += avg_vector[m] * avg_vector[m];
+        float adaptive_threshold = grand_mean - 1.5f * std_dev;
+        if (adaptive_threshold < 0.65f) {
+            adaptive_threshold = 0.65f; /* Clamped to minimum 0.65 */
         }
-        float avg_norm = sqrtf(avg_norm_sq);
 
-        /* Scale raw average to target norm, round, clip strictly, and store */
-        float scale = (avg_norm > 1e-6f) ? (target_norm / avg_norm) : 0.0f;
+        ESP_LOGI(TAG, "Outlier Filter: grand_mean=%.3f, std_dev=%.3f -> Adaptive Threshold=%.3f", grand_mean, std_dev, adaptive_threshold);
+
+        int inlier_indices[ENROLL_FRAMES_TOTAL];
+        int inlier_count = 0;
+        int outlier_count = 0;
+
+        for (int i = 0; i < valid_count; i++) {
+            if (mean_sims[i] >= adaptive_threshold) {
+                inlier_indices[inlier_count++] = i;
+            } else {
+                outlier_count++;
+                ESP_LOGW(TAG, "Outlier discarded: sample %d (mean_sim=%.3f < threshold=%.3f)", i, mean_sims[i], adaptive_threshold);
+            }
+        }
+
+        if (inlier_count == 0) {
+            /* Fallback: pick top 5 highest similarity samples if all dropped */
+            inlier_count = valid_count < 5 ? valid_count : 5;
+            for (int i = 0; i < inlier_count; i++) inlier_indices[i] = i;
+        }
+
+        /* Step 4 & 5: K-Means Pose Clustering (K=3 with Automatic Fallback) */
+        int K_target = 3;
+        if (inlier_count < K_target) K_target = inlier_count;
+
+        int cluster_labels[ENROLL_FRAMES_TOTAL];
+        float centroids[3][EMBEDDING_DIM];
+        memset(centroids, 0, sizeof(centroids));
+
+        /* Initialise centroids spread across inliers */
+        for (int k = 0; k < K_target; k++) {
+            int init_idx = inlier_indices[(k * inlier_count) / K_target];
+            for (int m = 0; m < EMBEDDING_DIM; m++) {
+                centroids[k][m] = (float)embeddings[init_idx].values[m];
+            }
+        }
+
+        /* Run 10 iterations of K-Means */
+        for (int iter = 0; iter < 10; iter++) {
+            /* Assign points to nearest centroid */
+            for (int i = 0; i < inlier_count; i++) {
+                int idx = inlier_indices[i];
+                float max_sim = -2.0f;
+                int best_c = 0;
+                for (int k = 0; k < K_target; k++) {
+                    float dot = 0.0f, c_norm_sq = 0.0f, e_norm_sq = 0.0f;
+                    for (int m = 0; m < EMBEDDING_DIM; m++) {
+                        float ev = (float)embeddings[idx].values[m];
+                        float cv = centroids[k][m];
+                        dot += ev * cv;
+                        e_norm_sq += ev * ev;
+                        c_norm_sq += cv * cv;
+                    }
+                    float sim = (e_norm_sq > 0.0f && c_norm_sq > 0.0f) ? (dot / (sqrtf(e_norm_sq) * sqrtf(c_norm_sq))) : -1.0f;
+                    if (sim > max_sim) {
+                        max_sim = sim;
+                        best_c = k;
+                    }
+                }
+                cluster_labels[i] = best_c;
+            }
+
+            /* Update centroids */
+            float new_centroids[3][EMBEDDING_DIM];
+            int cluster_sizes[3] = {0};
+            memset(new_centroids, 0, sizeof(new_centroids));
+
+            for (int i = 0; i < inlier_count; i++) {
+                int c = cluster_labels[i];
+                int idx = inlier_indices[i];
+                cluster_sizes[c]++;
+                for (int m = 0; m < EMBEDDING_DIM; m++) {
+                    new_centroids[c][m] += (float)embeddings[idx].values[m];
+                }
+            }
+
+            for (int k = 0; k < K_target; k++) {
+                if (cluster_sizes[k] > 0) {
+                    for (int m = 0; m < EMBEDDING_DIM; m++) {
+                        centroids[k][m] = new_centroids[k][m] / (float)cluster_sizes[k];
+                    }
+                }
+            }
+        }
+
+        /* Fallback: count non-empty clusters and gather centroids */
+        float active_centroids[3][EMBEDDING_DIM];
+        int active_sizes[3] = {0};
+        int K_effective = 0;
+
+        for (int k = 0; k < K_target; k++) {
+            int size_k = 0;
+            for (int i = 0; i < inlier_count; i++) {
+                if (cluster_labels[i] == k) size_k++;
+            }
+            if (size_k > 0) {
+                active_sizes[K_effective] = size_k;
+                memcpy(active_centroids[K_effective], centroids[k], sizeof(float) * EMBEDDING_DIM);
+                K_effective++;
+            }
+        }
+
+        ESP_LOGI(TAG, "Pose Clustering complete: Inliers=%d, Effective Clusters K=%d (Sizes: %d, %d, %d)",
+                 inlier_count, K_effective, active_sizes[0], active_sizes[1], active_sizes[2]);
+
+        /* Step 6: Cluster-Size Weighted Averaging & Norm Restoration */
+        float weighted_repr[EMBEDDING_DIM] = {0.0f};
+        float total_inlier_weight = 0.0f;
+
+        for (int k = 0; k < K_effective; k++) {
+            float weight = (float)active_sizes[k];
+            total_inlier_weight += weight;
+            for (int m = 0; m < EMBEDDING_DIM; m++) {
+                weighted_repr[m] += active_centroids[k][m] * weight;
+            }
+        }
+
+        /* Calculate mean L2 norm of inliers */
+        float sum_inlier_norms = 0.0f;
+        for (int i = 0; i < inlier_count; i++) {
+            int idx = inlier_indices[i];
+            float norm_sq = 0.0f;
+            for (int m = 0; m < EMBEDDING_DIM; m++) {
+                float val = (float)embeddings[idx].values[m];
+                norm_sq += val * val;
+            }
+            sum_inlier_norms += sqrtf(norm_sq);
+        }
+        float target_norm = (inlier_count > 0) ? (sum_inlier_norms / (float)inlier_count) : 100.0f;
+
+        /* Normalize weighted_repr to target_norm and quantise to int8 */
+        float repr_norm_sq = 0.0f;
         for (int m = 0; m < EMBEDDING_DIM; m++) {
-            float scaled_val = avg_vector[m] * scale;
-            int rounded = (int)roundf(scaled_val);
+            weighted_repr[m] /= total_inlier_weight;
+            repr_norm_sq += weighted_repr[m] * weighted_repr[m];
+        }
+        float repr_norm = sqrtf(repr_norm_sq);
+        float scale = (repr_norm > 1e-6f) ? (target_norm / repr_norm) : 1.0f;
+
+        face_embedding_t final_embedding;
+        for (int m = 0; m < EMBEDDING_DIM; m++) {
+            int rounded = (int)roundf(weighted_repr[m] * scale);
             if (rounded < -128) rounded = -128;
             if (rounded > 127)  rounded = 127;
             final_embedding.values[m] = (int8_t)rounded;
         }
-        ESP_LOGI(TAG, "Master vector generated: target_norm=%.3f, avg_norm=%.3f, scale=%.3f, total_weight=%.3f", target_norm, avg_norm, scale, total_weight);
-        ESP_LOGI(TAG, "Master embedding sample: %d %d %d %d %d", 
-                 final_embedding.values[0], final_embedding.values[1], 
-                 final_embedding.values[2], final_embedding.values[3], 
-                 final_embedding.values[4]);
-    } else {
-        ESP_LOGE(TAG, "Master vector generation skipped because total_weight=%.3f (kept=%d)", total_weight, kept);
+
+        /* Step 7: Compute Numeric Enrollment Quality Score (0-100) & Store Metadata */
+        float inlier_ratio_score = ((float)inlier_count / (float)ENROLL_FRAMES_TOTAL) * 100.0f;
+        
+        float inlier_sim_sum = 0.0f;
+        for (int i = 0; i < inlier_count; i++) {
+            inlier_sim_sum += mean_sims[inlier_indices[i]];
+        }
+        float mean_inlier_sim = (inlier_count > 0) ? (inlier_sim_sum / (float)inlier_count) : 0.65f;
+        float compactness_score = ((mean_inlier_sim - 0.65f) / 0.35f) * 100.0f;
+        if (compactness_score < 0.0f) compactness_score = 0.0f;
+        if (compactness_score > 100.0f) compactness_score = 100.0f;
+
+        float sharpness_sum = 0.0f;
+        for (int i = 0; i < inlier_count; i++) sharpness_sum += sharpness_vals[inlier_indices[i]];
+        float avg_sharpness = (inlier_count > 0) ? (sharpness_sum / (float)inlier_count) : 50.0f;
+        float sharpness_score = (avg_sharpness / 120.0f) * 100.0f;
+        if (sharpness_score > 100.0f) sharpness_score = 100.0f;
+
+        int final_quality_score = (int)roundf(0.40f * inlier_ratio_score + 0.40f * compactness_score + 0.20f * sharpness_score);
+        if (final_quality_score < 0) final_quality_score = 0;
+        if (final_quality_score > 100) final_quality_score = 100;
+
+        const char* rating_str = "POOR";
+        if (final_quality_score >= 85) rating_str = "EXCELLENT";
+        else if (final_quality_score >= 70) rating_str = "GOOD";
+        else if (final_quality_score >= 55) rating_str = "AVERAGE";
+
+        ESP_LOGI(TAG, "Enrollment Quality Evaluation: Score=%d/100, Rating=%s (Inliers=%d/%d, Discarded=%d)",
+                 final_quality_score, rating_str, inlier_count, valid_count, rejected_count + outlier_count);
+
+        /* Duplicate enrollment check against existing DB templates */
+        user_t *existing_user = NULL;
+        float existing_confidence = 0.0f;
+        recognizer_identify(&final_embedding, &existing_user, &existing_confidence);
+        if (existing_user != NULL && existing_confidence >= RECOGNITION_THRESHOLD) {
+            ESP_LOGW(TAG, "Face already enrolled under user: %s (confidence: %.2f)", existing_user->name, existing_confidence);
+            ret = ESP_ERR_INVALID_STATE;
+            goto cleanup;
+        }
+
+        /* Populate new_user record with representative embedding and metadata */
+        new_user->embedding = final_embedding;
+        new_user->created_at = (uint32_t)time(NULL);
+        new_user->updated_at = new_user->created_at;
+        new_user->enroll_quality = (uint8_t)final_quality_score;
+        new_user->enroll_accepted = (uint8_t)inlier_count;
+        new_user->enroll_rejected = (uint8_t)(rejected_count + outlier_count);
+        new_user->model_version = 1;
+        new_user->embedding_dim = 128;
+        generate_uuid_hex(new_user->uuid, sizeof(new_user->uuid));
+
+        /* Store ONLY single representative embedding into database */
+        ret = db_insert_user(new_user);
+        if (ret == ESP_OK) {
+            recognizer_add_to_cache(new_user);
+            vTaskDelay(pdMS_TO_TICKS(5));
+
+            /* Step 8: Update UI with Quality Result Card (Redo option shown ONLY if POOR) */
+            if (ui_acquire()) {
+                int student_idx = (int)(intptr_t)new_user->id;
+                ui_enrollment_show_quality_result(rating_str, final_quality_score, inlier_count,
+                                                  rejected_count + outlier_count, new_user->name, student_idx);
+                ui_release();
+            }
+        }
     }
-    
-    /* Check if user is already enrolled */
-    user_t *existing_user = NULL;
-    float existing_confidence = 0.0f;
-    recognizer_identify(&final_embedding, &existing_user, &existing_confidence);
-    if (existing_user != NULL && existing_confidence >= RECOGNITION_THRESHOLD) {
-        ESP_LOGW(TAG, "Face already enrolled under user: %s (confidence: %.2f)", existing_user->name, existing_confidence);
-        ret = ESP_ERR_INVALID_STATE;
-        goto cleanup;
-    }
-    
-    /* Store in database */
-    new_user->embedding = final_embedding;
-    new_user->created_at = time(NULL);
-    generate_uuid_hex(new_user->uuid, sizeof(new_user->uuid));
-    
-    ret = db_insert_user(new_user);
-    if (ret == ESP_OK) {
-        recognizer_add_to_cache(new_user);
-        /* ✅ Yield after cache update */
-        vTaskDelay(pdMS_TO_TICKS(5));
-    }
-    
+
 cleanup:
     camera_set_framesize(CAMERA_FRAME_SIZE);
     for (int j = 0; j < ENROLL_FRAMES_TOTAL; j++) {
         if (frames[j]) camera_return_frame(frames[j]);
         if (aligned_frames[j].data) face_alignment_free(&aligned_frames[j]);
     }
-    free(frames);
-    free(aligned_frames);
-    free(embeddings);
-    free(quality_scores);
-    
-    camera_set_framesize(CAMERA_FRAME_SIZE);
+    heap_caps_free(frames);
+    heap_caps_free(aligned_frames);
+    heap_caps_free(embeddings);
+    heap_caps_free(quality_scores);
+    heap_caps_free(sharpness_vals);
+
     return ret;
 }
 
 void start_single_capture_task(void *pvParam) {
     int student_idx = (int)(intptr_t)pvParam;
+    g_enrollment_cancel = false;
     
     enrollment_data_t reg_data;
     if (!ble_registration_peek_student(student_idx, &reg_data)) {
@@ -1056,6 +1341,27 @@ void start_single_capture_task(void *pvParam) {
             ble_registration_consume_student(student_idx);
             ui_enrollment_show_success(new_user.name, student_idx);
             ble_registration_set_result(true, new_user.id);
+
+            /* If this was an admin enrollment, apply the Telegram username saved
+             * in NVS by the Admin Setup Wizard before face capture started. */
+            if (strncmp((const char*)g_enrollment_role_override, "admin",
+                        sizeof(g_enrollment_role_override)) == 0) {
+                nvs_handle_t nvs_h;
+                if (nvs_open("storage", NVS_READWRITE, &nvs_h) == ESP_OK) {
+                    char tg_username[64] = {0};
+                    size_t tg_len = sizeof(tg_username);
+                    if (nvs_get_str(nvs_h, "admin_telegram", tg_username, &tg_len) == ESP_OK
+                            && strlen(tg_username) > 0) {
+                        db_update_user_telegram_id(new_user.uuid, tg_username);
+                        ESP_LOGI(TAG, "Set admin telegram_id to '%s' for uuid %s",
+                                 tg_username, new_user.uuid);
+                        /* Clear the key so it doesn't persist to future enrollments */
+                        nvs_erase_key(nvs_h, "admin_telegram");
+                        nvs_commit(nvs_h);
+                    }
+                    nvs_close(nvs_h);
+                }
+            }
         } else {
             if (ret == ESP_ERR_INVALID_STATE) {
                 ui_enrollment_set_status(false, "Face already registered!");
@@ -1081,6 +1387,14 @@ void start_enrollment_task(void *pvParam) {
     #endif
     
     if (ui_acquire()) {
+        /* Delete deferred admin setup screen safely within LVGL lock.
+         * Deleting it from the button callback (via lv_obj_delete_async) caused
+         * a use-after-free: the display refresh timer fired in the same
+         * lv_timer_handler cycle and accessed the freed screen's child list. */
+        if (g_admin_setup_screen_to_delete) {
+            lv_obj_delete(g_admin_setup_screen_to_delete);
+            g_admin_setup_screen_to_delete = NULL;
+        }
         ui_show_enrollment_screen();
         ui_release();
     }
@@ -1169,6 +1483,28 @@ static void db_task(void *pvParameters) {
  * @brief Network sync task - periodic and manual cloud synchronization
  */
 static void network_sync_task(void *pvParameters) {
+    bool s_boot_sync_done = false;
+
+    /* --- Wait for Wi-Fi connection before running boot sync --- */
+    ESP_LOGI(TAG, "Waiting for Wi-Fi before boot sync...");
+    int boot_wait = 0;
+    while (wifi_manager_get_status() != WIFI_STATUS_CONNECTED && boot_wait < 600) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        boot_wait++;
+    }
+
+    if (wifi_manager_get_status() == WIFI_STATUS_CONNECTED) {
+        ESP_LOGI(TAG, "Wi-Fi connected on boot — triggering immediate cloud sync");
+        /* Signal the main loop body below to run a sync immediately */
+        s_boot_sync_done = false; /* will be set true after first sync */
+    } else {
+        s_boot_sync_done = true; /* No Wi-Fi; skip boot sync */
+        ESP_LOGW(TAG, "No Wi-Fi on boot — skipping boot sync");
+    }
+
+    /* Clear the boot-triggered sync bit so we don't execute a duplicate second sync cycle immediately */
+    xEventGroupClearBits(g_system_event_group, SYSTEM_EVENT_TOUCH_MENU);
+
     while (1) {
         uint32_t sync_interval_ms = CLOUD_SYNC_INTERVAL_MS;
         nvs_handle_t nvs_int;
@@ -1176,10 +1512,14 @@ static void network_sync_task(void *pvParameters) {
             nvs_get_u32(nvs_int, "sync_ms", &sync_interval_ms);
             nvs_close(nvs_int);
         }
-        
+
         ESP_LOGI(TAG, "Sync task waiting. Interval: %lu ms", (unsigned long)sync_interval_ms);
-        
-        if (sync_interval_ms == 0) {
+
+        /* First iteration: skip the wait so we sync immediately on boot */
+        if (!s_boot_sync_done) {
+            s_boot_sync_done = true;
+            ESP_LOGI(TAG, "Boot sync: skipping timer wait");
+        } else if (sync_interval_ms == 0) {
             /* "Never" - wait indefinitely for manual trigger */
             xEventGroupWaitBits(g_system_event_group, SYSTEM_EVENT_TOUCH_MENU, pdTRUE, pdFALSE, portMAX_DELAY);
         } else {
@@ -1259,12 +1599,55 @@ static void network_sync_task(void *pvParameters) {
             
             if (ui_acquire()) {
                 ui_set_sync_status(false);
+                /* Show synchronization successful banner */
+                ui_show_notification(NOTIFY_SUCCESS, "Cloud Sync", "Synchronization Successful!", 4000);
                 ui_release();
             }
             set_system_state(SYSTEM_STATE_NORMAL);
-            
+
             ESP_LOGI(TAG, "Sync cycle completed and disconnected");
         }
+    }
+}
+
+/**
+ * @brief Schedule checker task — polls every 10 s for an active class period.
+ *        When a new active schedule is found, shows a clickable notification
+ *        banner. Tapping the banner opens the Attendance Scanner app.
+ */
+static void schedule_checker_task(void *pvParameters) {
+    static char s_last_notified_course[32] = {0};
+    static time_t s_last_notified_time = 0;
+
+    /* Give the system time to fully boot before the first check */
+    vTaskDelay(pdMS_TO_TICKS(15000));
+
+    while (1) {
+        db_schedule_t active;
+        if (db_get_active_schedule(&active) == ESP_OK) {
+            /* Only notify once per course per start_time window */
+            bool already_notified = (strcmp(s_last_notified_course, active.course_code) == 0 &&
+                                     s_last_notified_time == (time_t)active.start_time);
+
+            if (!already_notified) {
+                strncpy(s_last_notified_course, active.course_code, sizeof(s_last_notified_course) - 1);
+                s_last_notified_time = (time_t)active.start_time;
+
+                ESP_LOGI(TAG, "Active schedule detected: %s — %s", active.course_code, active.course_name);
+
+                /* Build notification message */
+                static char msg[160];
+                snprintf(msg, sizeof(msg), "%.60s (%.28s) has started. Tap to open scanner.",
+                         active.course_name, active.course_code);
+
+                if (ui_acquire()) {
+                    ui_show_notification(NOTIFY_INFO, "Class Started", msg, 10000);
+                    ui_release();
+                }
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10000)); /* check every 10 seconds */
     }
 }
 

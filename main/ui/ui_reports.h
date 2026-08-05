@@ -25,10 +25,11 @@ void ui_close_reports_screen(void);
 
 /**
  * @brief Populate course list in reports screen
+ * @param ids array of course IDs (or NULL)
  * @param courses array of course names
  * @param count number of courses
  */
-void ui_reports_populate_courses(const char** courses, int count);
+void ui_reports_populate_courses(const int* ids, const char** courses, int count);
 
 /**
  * @brief Show attendance report data (CSV or formatted)

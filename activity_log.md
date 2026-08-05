@@ -1910,3 +1910,329 @@ The `LV_LABEL_LONG_MODE_CLIP` mode silently clips text that overflows the label'
   * Enforced clean compilation and flashed binary onto the CrowPanel ESP32-P4 device over COM5. Boot logs confirmed error-free database/network startup and correct theme state initialization.
 
 ---
+
+### [2026-07-11] - Telegram Bot Outage Diagnosis & Vercel Proxy Fix
+- **Category:** Cloud Infrastructure / Backend Fix
+- **Altered Files:**
+  - `telegram_bot/bot.py` (modified)
+  - `telegram_proxy_vercel/vercel.json` (new)
+  - `telegram_proxy_vercel/api/index.js` (new)
+- **Status:** Complete & Verified — Bot fully responsive on Telegram
+
+#### Background
+`@MyUniAttendance_Bot` hosted on the Hugging Face Space `DanantST/smart-attendance-bot` (`https://danantst-smart-attendance-bot.hf.space`) stopped responding to all Telegram messages. The Space itself was running (health endpoint returned 200), but webhook delivery was failing.
+
+#### Phase 1 — Diagnostics Infrastructure
+Added a `GET /api/diagnostics` FastAPI endpoint to `telegram_bot/bot.py`. The endpoint reports from inside the running container:
+- Masked `TELEGRAM_BOT_TOKEN` status
+- `PUBLIC_URL` and `TELEGRAM_API_URL` env vars
+- Whether the global `socket.getaddrinfo` IPv4 override is active
+- Live HTTP ping results to: `httpbin.org`, `api.telegram.org`, the configured proxy URL, and `vercel.com`
+- A live `getMe` call to the configured Telegram API URL
+
+#### Phase 2 — Fault-Tolerant Startup
+Wrapped `set_webhook()` and `delete_webhook()` calls in `try...except` blocks in `bot.py`. The FastAPI web server now boots and serves the REST API / diagnostics even if the Telegram API or proxy is completely unreachable, preventing the entire Space from going offline due to a network error.
+
+#### Phase 3 — IPv4 DNS Override Disabled
+The global `socket.getaddrinfo = getaddrinfo_ipv4` override (previously added to fix HF IPv6 resolution timeouts) was commented out to test if it was causing the TLS handshake failures to Cloudflare Workers:
+```python
+# socket.getaddrinfo = getaddrinfo_ipv4  # Disabled override
+```
+Changes committed as `e9558df` and pushed to GitHub, triggering a Hugging Face Space rebuild.
+
+#### Phase 4 — Diagnostics Results (Root Cause Confirmed)
+After redeployment, queried `/api/diagnostics`:
+```
+httpbin.org         ? SUCCESS (200)  — general internet works
+api.telegram.org    ? FAILED  — _ssl.c:999: The handshake operation timed out
+cloudflare_worker   ? FAILED  — _ssl.c:999: The handshake operation timed out
+vercel.com          ? SUCCESS (200)  — Vercel is NOT blocked
+```
+**Root cause confirmed:** Hugging Face Spaces intentionally blocks all outbound TLS connections to `api.telegram.org` and `*.workers.dev` (Cloudflare) at the platform level to prevent bot/API abuse. This is an intentional platform policy, not a code bug. General HTTPS to other domains (httpbin, vercel) works fine.
+
+#### Phase 5 — Vercel Proxy Deployment
+Since Hugging Face does not block Vercel, deployed a lightweight Node.js serverless proxy on Vercel to act as a transparent relay between Hugging Face and `api.telegram.org`.
+
+**New files created:**
+
+`telegram_proxy_vercel/vercel.json`:
+```json
+{
+  "version": 2,
+  "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
+}
+```
+
+`telegram_proxy_vercel/api/index.js`:
+- Serverless handler that receives requests from Hugging Face
+- Forwards method, headers (minus `Host`), and body to `https://api.telegram.org{path}`
+- Streams the response back to the caller
+- Includes CORS headers and a 10-second timeout
+
+**Deployment steps:**
+1. Installed Vercel CLI globally: `npm install -g vercel`
+2. Authenticated via device flow: `vercel whoami` ? `akintolapeace201027-7553`
+3. Deployed non-interactively: `vercel deploy --yes`
+4. **Proxy live at:** `https://telegram-proxy-gold.vercel.app/bot`
+
+#### Phase 6 — Hugging Face Secret Update & Restart
+Updated the `TELEGRAM_API_URL` secret in Hugging Face Space Settings from the old Cloudflare Workers URL to:
+```
+https://telegram-proxy-gold.vercel.app/bot
+```
+The bot already reads this env var in `main()`:
+```python
+api_url = os.environ.get("TELEGRAM_API_URL", "https://api.telegram.org/bot")
+bot_app = ApplicationBuilder().token(BOT_TOKEN).base_url(api_url).build()
+```
+Triggered a Factory Rebuild of the Space to apply the new secret.
+
+#### Final Diagnostics Verification
+```json
+{
+  "telegram_api_url": "https://telegram-proxy-gold.vercel.app/bot",
+  "pings": {
+    "httpbin": { "status": "SUCCESS", "code": 200 },
+    "vercel":  { "status": "SUCCESS", "code": 200 }
+  },
+  "get_me_test": {
+    "status": "SUCCESS",
+    "result": { "ok": true, "first_name": "Attendance Device Bot", "username": "MyUniAttendance_Bot" }
+  }
+}
+```
+
+#### End-to-End Bot Verification
+Tested `@MyUniAttendance_Bot` on Telegram — all commands confirmed working:
+- ? Developer Auth ? registered as Lecturer
+- ? My Courses ? lists enrolled courses
+- ? Schedule Class ? full multi-step conversation flow
+- ? Abort Process ? cancels and returns to main menu
+- ? All reply keyboard buttons respond correctly
+
+---
+
+### [2026-07-11] - Event Type Specification and Improved Sync Messaging Updates
+- **Category:** User Interface / Backend Upgrades
+- **Altered Files:**
+  - `telegram_bot/db.py` (modified — schedules table migration, read/write event types)
+  - `telegram_bot/bot.py` (modified — conversation flow, prompts, dynamic notifications, and student sync templates)
+- **Status:** Complete & Verified — Bot running with updated schema and commands on Hugging Face Spaces
+
+#### Feature 1 — Event Type Selection during Scheduling
+Added support for specifying event types (Lecture, Test, Exam) during class scheduling.
+- **Database Migration**: An automatic SQLite migration is executed at startup (`ALTER TABLE schedules ADD COLUMN event_type TEXT DEFAULT 'lecture'`) to keep the DB schema clean.
+- **State Flow**: Declared `SELECT_EVENT_TYPE = 26` and registered it in the scheduling `ConversationHandler`.
+- **UI Prompt**: Lecturers are prompted to select **?? Lecture**, **?? Test**, or **?? Exam** via inline keyboard buttons after choosing/registering a course.
+- **Summary**: All subsequent date, time, and confirmation messages display the chosen event type (e.g. `Event Type: Exam`).
+- **Listed view**: Updated `/schedules` (and schedules list buttons) to display the event type of each scheduled item.
+
+#### Feature 2 — Dynamic Notifications for Scheduled Events
+Enrolled students are notified asynchronously using dynamic templates based on the event type:
+- e.g. `?? New Test Scheduled!` or `?? New Exam Scheduled!` advising them to "be prepared and punctual".
+
+#### Feature 3 — Synced & Subscription Enrollment Messages
+Updated all templates to inform students that their registration details have been successfully synced and prompt them to subscribe to available courses for event updates.
+- **Device Sync (`notify_linked_student` & `prompt_student_course_registration`)**: Sends welcome prompts informing them that their profile is synced, advising them to subscribe to available courses immediately to receive event updates (lectures, tests, exams) and attendance notifications.
+- **Pairing Flow (`contact_handler`)**: Welcomes paired contacts by letting them know their Telegram account has been linked and synced, prompting them to subscribe to courses.
+
+#### Verification
+- Rebuilt Space status: ? Running
+- Diagnostics endpoint `/api/diagnostics`: ? SUCCESS with `get_me_test: SUCCESS`
+- Manual test checks: All dialogue flows work, event types are correctly selected/listed, and messages carry the sync & subscription terms.
+
+---
+
+## Session – 2026-07-11 (Evening) — Bidirectional Schedule / Course / Lecturer Sync
+
+### User Request
+> "The device is syncing but it is not including the device schedules. I want the device and the cloud to be able to compare information in their databases and update one another during syncing"
+> (Extended to also include registered courses and lecturer assignments)
+
+### Implementation
+
+#### Architecture
+Replaced the old one-way GET /api/get_schedules pull with a **single bidirectional round-trip** via a new POST /api/sync_schedules endpoint.
+
+`
+Device  ------------------------------------------?  Cloud Bot
+         POST /api/sync_schedules
+         Body: { schedules[], courses[], lecturers[] }
+?--------------------------------------------------
+         Response: { new_schedules[], new_courses[], new_lecturers[] }
+`
+
+- Cloud upserts everything it receives from the device.
+- Cloud returns only the data the device is missing (diff computed by comparing known keys).
+- Device upserts the response into its local DB.
+
+#### Files Changed
+
+**	elegram_bot/db.py** — 6 new bidirectional sync helpers:
+- upsert_course_from_device(code, name) — INSERT OR IGNORE into cloud courses
+- upsert_schedule_from_device(...) — INSERT into cloud schedules using 'device' as placeholder 	elegram_id, deduplicated on (course_code, start_time, end_time)
+- upsert_lecturer_course_from_device(lecturer_uuid, course_code) — resolves UUID?telegram_id, inserts into lecturer_courses
+- get_cloud_schedules_not_known_by_device(known_keys) — returns cloud schedules not in device's known set
+- get_cloud_courses_not_known_by_device(known_codes) — returns cloud courses not in device's known set
+- get_cloud_lecturer_assignments_not_known_by_device(known_pairs) — returns cloud lecturer?course links not in device's known set
+
+**	elegram_bot/bot.py** — New endpoint POST /api/sync_schedules:
+- Accepts { schedules[], courses[], lecturers[] } from device
+- Upserts all device data (courses first, then lecturers, then schedules)
+- Computes diff and returns { new_schedules[], new_courses[], new_lecturers[] }
+
+**main/database/db_manager.h** — New types and declarations:
+- db_course_t struct { code[32], name[64] }
+- db_lecturer_assignment_t struct { lecturer_uuid[37], course_code[32] }
+- db_get_all_courses_full() — returns both code and name per course
+- db_get_all_lecturer_assignments() — returns flat lecturer?course pairs via JOIN
+
+**main/database/db_manager.c** — Implemented both new functions above.
+
+**main/network/cloud_sync.c** — Major changes:
+- **sync_schedule() completely rewritten** to:
+  - Step A: Collect local schedules (db_get_future_schedules), courses (db_get_all_courses_full), lecturer links (db_get_all_lecturer_assignments)
+  - Step B: Serialize into JSON payload
+  - Step C: POST to /api/sync_schedules
+  - Step D: Parse response and upsert new_courses, new_lecturers, new_schedules into device DB
+- **cloud_sync_task() reordered**: sync_users() now runs **before** sync_schedule() so lecturer UUIDs are known on both sides when the bidirectional endpoint resolves them
+
+#### Commit
+73dd66d — feat: bidirectional sync for schedules, courses, and lecturer assignments
+
+---
+
+
+---
+
+## Session - 2026-07-28 - First-Time Welcome Message on Device Sync
+
+### User Request
+> "The telegram bot does not welcome newly enrolled users aboard yet when the device syncs. The cloud bot should check if it has any chat history with a user and welcome them if not."
+
+### Implementation
+
+#### Problem
+When a user was enrolled on the attendance device their record was synced to the cloud bot via POST /api/sync_users. However, **no welcome message was sent** unless the user had previously shared their phone number through the bot (the pending-link path). A user enrolled directly on the device who had never opened the bot would receive no notification at all.
+
+#### Solution: welcomed_at stamp + catch-up sweep
+
+**	elegram_bot/db.py** changes:
+- init_db() — Added ALTER TABLE users ADD COLUMN welcomed_at INTEGER DEFAULT NULL migration (safe no-op on re-run if column already exists).
+- New function mark_user_welcomed(uuid) — Stamps welcomed_at = now for a given user.
+- New function get_unwelcomed_linked_users() — Returns all users with a non-empty 	elegram_id AND welcomed_at IS NULL.
+
+**	elegram_bot/bot.py** changes:
+- New async function welcome_newly_enrolled_user(uuid, telegram_id, name, role):
+  - Sends a personalised "?? Welcome aboard" message with the correct role-based keyboard.
+  - Calls db.mark_user_welcomed(uuid) immediately after a successful send, preventing duplicate welcomes on subsequent syncs.
+  - Logs success/failure.
+- sync_users endpoint updated:
+  - After all upserts and reconciliation, calls db.get_unwelcomed_linked_users().
+  - Fires syncio.create_task(welcome_newly_enrolled_user(...)) for every returned user.
+  - Pre-existing users (enrolled before this feature was deployed) are caught by this same sweep on the very next sync cycle.
+  - Users paired via the phone-link path (
+otify_linked_student) are immediately stamped with mark_user_welcomed so they skip the sweep and only receive one message.
+
+#### Behaviour
+| Scenario | Message sent |
+|---|---|
+| New enroll, no Telegram link | None (no telegram_id yet — nothing changes) |
+| New enroll, device sends telegram_id in sync payload | ?? Welcome message on first sync |
+| Returning user, already welcomed | No duplicate (welcomed_at is set) |
+| Phone-link pairing path (existing) | ?? Synced & Linked message (unchanged) |
+| Pre-feature user with linked account | ?? Welcome on next sync (catch-up) |
+
+#### Files Changed
+- 	elegram_bot/db.py — schema migration + 2 new helpers
+- 	elegram_bot/bot.py — welcome_newly_enrolled_user() function + sync_users sweep
+
+#### Status
+Complete. Requires Hugging Face Space restart to pick up changes.
+
+
+---
+
+## Session - 2026-07-28 - WebAP Success Page Telegram Link Button
+
+### User Request
+> "Can't the bot message them to link their accounts? ... there is no need for qr code. just use link for now."
+
+### Implementation
+
+#### Explanation
+Telegram's Bot API strict privacy policy prevents bots from sending unsolicited messages or initiating chats with users who have not previously started a conversation with @MyUniAttendance_Bot.
+
+#### Solution
+Added a direct **"?? Open Telegram Bot (@MyUniAttendance_Bot)"** link button and Step 2 instructions (https://t.me/MyUniAttendance_Bot) directly onto the WebAP portal success screen.
+
+**main/network/wifi_ap_portal.cpp** changes:
+- Added styled blue button linking to https://t.me/MyUniAttendance_Bot on the submission success page (successContainer).
+- Updated submitStudent() and submitLecturer() success prompts instructing users to tap the button right after submitting their enrollment form on their phone.
+- Updated showSuccess() JavaScript handler to toggle the button visibility dynamically.
+
+#### Commit
+12f778 - feat: add direct Telegram bot link button to WebAP registration portal success page
+
+
+---
+
+## Session - 2026-07-28 - ESP32-P4 Firmware Build & Flash (COM3)
+
+### User Request
+> "the physical device is on com3" -> "proceed to flash the update"
+
+### Implementation & Flashing Summary
+- Built SmartAttendance.bin (size:  x540340 bytes, 12% free in app partition).
+- Configured lash_workaround.bat to target port COM3.
+- Flashed bootloader, partition table, ota_data_initial.bin, and main firmware binary to ESP32-P4 via COM3 at 460800 baud.
+- Hard reset executed cleanly via RTS pin. Device is now running the updated WebAP captive portal with the direct Telegram bot link button.
+
+
+---
+
+## Session - 2026-07-28 - Telegram Bot Forwardable Invitation Feature
+
+### User Request
+> "also add a feature in the telegram bot to allow a linked user to share the telegrem link directly to any user that hasnt been linked"
+
+### Implementation
+
+#### Feature Overview
+Added a direct invitation sharing feature (/share command and **?? Share Bot Link** reply keyboard button) allowing any linked student or lecturer to forward the bot invitation directly to unlinked contacts or Telegram groups.
+
+**	elegram_bot/bot.py** changes:
+- Created share_cmd() handler that generates a native Telegram share link (https://t.me/share/url?url=https://t.me/MyUniAttendance_Bot&text=...).
+- Added an inline button **"?? Forward Bot Link to Contact / Group"** which opens Telegram's native contact picker when clicked.
+- Added **?? Share Bot Link** button to main menu keyboards for both Students and Lecturers/Admins.
+- Registered /share command handler and mapped the reply keyboard button in utton_mapper and utton_filter.
+
+#### Commit
+2af8970 - feat: add share bot link feature (/share and ?? Share Bot Link button)
+
+
+---
+
+## Session - 2026-07-28 - Lecturer Course Registration via Telegram
+
+### User Request
+> "For the lecturer role. In the my courses menu on telegram, let it have a feature to register new course."
+
+### Implementation
+
+#### Feature Overview
+Added an interactive **? Register New Course** option inside the **My Courses** menu (/courses) and a dedicated /add_course command for Lecturers/Admins.
+
+**	elegram_bot/db.py** changes:
+- Created dd_lecturer_course(telegram_id, course_code, course_title):
+  - Upserts the course into the courses table.
+  - Links the course to the lecturer's Telegram ID in lecturer_courses.
+
+**	elegram_bot/bot.py** changes:
+- Added ADD_COURSE_CODE and ADD_COURSE_TITLE conversation state constants.
+- Updated my_courses_cmd() to render a prominent **? Register New Course** inline button.
+- Added dd_course_start(), dd_course_input_code(), and dd_course_input_title() conversation handlers.
+- Registered dd_course_conv in main() with entry points /add_course and mng_c:add_new callback query.
+
+#### Commit
+cbaef24 - feat: add ? Register New Course feature to My Courses menu for lecturers

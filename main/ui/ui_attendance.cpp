@@ -19,13 +19,25 @@ static lv_obj_t* s_camera_image = NULL;
 static lv_obj_t* s_detection_overlay = NULL;
 static lv_obj_t* s_recognition_label = NULL;
 static lv_obj_t* s_attendance_label = NULL;
+static lv_obj_t* s_feedback_panel = NULL;
+static lv_obj_t* s_feedback_label = NULL;
+static int s_present_count = 0;
 
 static lv_draw_buf_t s_camera_img_dsc;
 static uint8_t* s_camera_buffer = NULL;
 
+#include "database/db_manager.h"
+
 extern "C" void ui_show_attendance_screen(void) {
     ESP_LOGI(TAG, "Opening Attendance Scanner");
+    
+    /* Query today's present count from DB */
+    s_present_count = db_get_today_attendance_count();
+
     if (s_attendance_screen) {
+        if (s_attendance_label) {
+            lv_label_set_text_fmt(s_attendance_label, "Today: %d present", s_present_count);
+        }
         lv_scr_load(s_attendance_screen);
         return;
     }
@@ -53,7 +65,7 @@ extern "C" void ui_show_attendance_screen(void) {
     /* Attendance count label */
     s_attendance_label = lv_label_create(s_attendance_screen);
     lv_obj_set_pos(s_attendance_label, 20, 100);
-    lv_label_set_text(s_attendance_label, "Today: 0 present");
+    lv_label_set_text_fmt(s_attendance_label, "Today: %d present", s_present_count);
     lv_obj_set_style_text_color(s_attendance_label, ui_theme_get_text_color(), 0);
     lv_obj_set_style_text_font(s_attendance_label, &lv_font_montserrat_14, 0);
 
@@ -100,6 +112,26 @@ extern "C" void ui_show_attendance_screen(void) {
     lv_obj_set_style_radius(s_recognition_label, 5, 0);
     lv_label_set_text(s_recognition_label, "Scanning...");
     lv_obj_set_style_text_color(s_recognition_label, lv_color_white(), 0);
+
+    /* Feedback banner — below camera preview */
+    int feedback_y = preview_y + preview_height + 12;
+    s_feedback_panel = lv_obj_create(s_attendance_screen);
+    lv_obj_set_size(s_feedback_panel, preview_width, 52);
+    lv_obj_set_pos(s_feedback_panel, preview_x, feedback_y);
+    lv_obj_set_style_bg_color(s_feedback_panel, lv_color_hex(0x1E1E2E), 0);
+    lv_obj_set_style_border_width(s_feedback_panel, 0, 0);
+    lv_obj_set_style_radius(s_feedback_panel, 10, 0);
+    lv_obj_set_style_pad_all(s_feedback_panel, 8, 0);
+    lv_obj_remove_flag(s_feedback_panel, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_feedback_label = lv_label_create(s_feedback_panel);
+    lv_obj_set_width(s_feedback_label, preview_width - 20);
+    lv_label_set_long_mode(s_feedback_label, LV_LABEL_LONG_WRAP);
+    lv_obj_align(s_feedback_label, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(s_feedback_label, "Point your face at the camera");
+    lv_obj_set_style_text_color(s_feedback_label, lv_color_hex(0x888888), 0);
+    lv_obj_set_style_text_font(s_feedback_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(s_feedback_label, LV_TEXT_ALIGN_CENTER, 0);
 
     /* Load screen directly (keep main screen in memory) */
     lv_scr_load(s_attendance_screen);
@@ -179,5 +211,49 @@ extern "C" void ui_update_detection_bounding_box(int x, int y, int w, int h, boo
         lv_obj_set_style_border_width(box, 2, 0);
         lv_obj_set_style_radius(box, 0, 0);
     }
+    ui_release();
+}
+
+extern "C" void ui_attendance_increment_count(void) {
+    if (!ui_acquire()) return;
+    s_present_count++;
+    if (s_attendance_label) {
+        lv_label_set_text_fmt(s_attendance_label, "Today: %d present", s_present_count);
+    }
+    ui_release();
+}
+
+extern "C" void ui_attendance_set_count(int count) {
+    if (!ui_acquire()) return;
+    s_present_count = count;
+    if (s_attendance_label) {
+        lv_label_set_text_fmt(s_attendance_label, "Today: %d present", s_present_count);
+    }
+    ui_release();
+}
+
+extern "C" void ui_show_attendance_feedback(const char* msg, int type) {
+    if (!ui_acquire()) return;
+    if (!s_feedback_label || !s_feedback_panel || !s_attendance_screen) {
+        ui_release();
+        return;
+    }
+
+    lv_label_set_text(s_feedback_label, msg ? msg : "");
+
+    if (type == 1) {
+        /* Orange panel for duplicate scans */
+        lv_obj_set_style_bg_color(s_feedback_panel, lv_color_hex(0x3D2000), 0);
+        lv_obj_set_style_text_color(s_feedback_label, lv_color_hex(0xFF9800), 0);
+    } else if (type == 0) {
+        /* Green panel for first-time recorded */
+        lv_obj_set_style_bg_color(s_feedback_panel, lv_color_hex(0x003D1A), 0);
+        lv_obj_set_style_text_color(s_feedback_label, lv_color_hex(0x44DD77), 0);
+    } else {
+        /* Neutral panel for identification outside event */
+        lv_obj_set_style_bg_color(s_feedback_panel, lv_color_hex(0x2C3E50), 0);
+        lv_obj_set_style_text_color(s_feedback_label, lv_color_hex(0xECF0F1), 0);
+    }
+
     ui_release();
 }

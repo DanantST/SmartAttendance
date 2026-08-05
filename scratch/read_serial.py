@@ -2,7 +2,7 @@ import serial
 import sys
 import time
 
-port = 'COM4'
+port = 'COM3'
 baud = 115200
 
 print(f"Connecting to {port} at {baud}...")

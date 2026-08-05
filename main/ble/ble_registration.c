@@ -123,20 +123,20 @@ esp_err_t ble_registration_add_pending_student(const char* name,
             s_pending_students[s_pending_count] = entry;
             int new_idx = s_pending_count++;
             ESP_LOGI(TAG, "Queued %s [%d] — %s", entry.role, new_idx, entry.name);
-
-            /* Push name to enrollment UI list if that screen is already open */
-            if (get_system_state() == SYSTEM_STATE_ENROLLMENT) {
-                if (ui_acquire()) {
-                    ui_enrollment_add_student(entry.name, entry.student_id);
-                    ui_release();
-                }
-            }
             ret = ESP_OK;
         } else {
             ESP_LOGW(TAG, "Queue full — dropping %s", name);
             ret = ESP_ERR_NO_MEM;
         }
         xSemaphoreGive(s_queue_mutex);
+    }
+
+    /* Push update to UI outside s_queue_mutex to avoid lock hierarchy / deadlock */
+    if (ret == ESP_OK && get_system_state() == SYSTEM_STATE_ENROLLMENT) {
+        if (ui_acquire()) {
+            ui_enrollment_refresh_student_list();
+            ui_release();
+        }
     }
     return ret;
 }

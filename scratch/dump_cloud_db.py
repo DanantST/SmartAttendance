@@ -16,5 +16,17 @@ try:
         print("\n--- Schedules ---")
         for s in data.get("schedules", []):
             print(s)
+        print("\n--- Courses ---")
+        for c in data.get("courses", []):
+            print(c)
+        print("\n--- Lecturer Courses ---")
+        for lc in data.get("lecturer_courses", []):
+            print(lc)
+        print("\n--- User Courses ---")
+        for uc in data.get("user_courses", []):
+            print(uc)
+        print("\n--- Pending Links ---")
+        for pl in data.get("pending_links", []):
+            print(pl)
 except Exception as e:
     print("Error:", e)

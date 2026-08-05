@@ -818,11 +818,18 @@ static esp_err_t sync_schedule_deletions(void) {
     esp_err_t err = http_request(url, "GET", NULL, &response, &response_len);
     
     if (err == ESP_OK && response) {
+        ESP_LOGI(TAG, "Raw schedule deletions response: '%s'", response);
         cJSON *root = cJSON_Parse(response);
-        if (root && cJSON_IsArray(root)) {
+        if (!root) {
+            ESP_LOGE(TAG, "cJSON_Parse failed for schedule deletions response");
+        } else if (!cJSON_IsArray(root)) {
+            ESP_LOGE(TAG, "Parsed JSON is not an array");
+        } else {
             int size = cJSON_GetArraySize(root);
+            ESP_LOGI(TAG, "Parsed schedule deletions array size: %d", size);
             if (size > 0) {
                 ESP_LOGI(TAG, "Parsed %d schedule deletions from cloud", size);
+
                 for (int i = 0; i < size; i++) {
                     cJSON *item = cJSON_GetArrayItem(root, i);
                     cJSON *code_json = cJSON_GetObjectItem(item, "course_code");

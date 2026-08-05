@@ -37,7 +37,12 @@ static const char *CREATE_TABLES_SQL =
     "    role TEXT NOT NULL CHECK(role IN ('student','lecturer','admin')),"
     "    face_embedding BLOB,"
     "    created_at INTEGER NOT NULL,"
-    "    updated_at INTEGER"
+    "    updated_at INTEGER,"
+    "    enroll_quality INTEGER DEFAULT 0,"
+    "    enroll_accepted INTEGER DEFAULT 0,"
+    "    enroll_rejected INTEGER DEFAULT 0,"
+    "    model_version INTEGER DEFAULT 1,"
+    "    embedding_dim INTEGER DEFAULT 128"
     ");"
     "CREATE TABLE IF NOT EXISTS courses ("
     "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -138,6 +143,11 @@ esp_err_t db_manager_init(void) {
     /* Run schema migrations for existing databases (ignore errors if columns already exist) */
     sqlite3_exec(s_db, "ALTER TABLE users ADD COLUMN phone_number TEXT;", NULL, NULL, NULL);
     sqlite3_exec(s_db, "ALTER TABLE users ADD COLUMN telegram_id TEXT;", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "ALTER TABLE users ADD COLUMN enroll_quality INTEGER DEFAULT 0;", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "ALTER TABLE users ADD COLUMN enroll_accepted INTEGER DEFAULT 0;", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "ALTER TABLE users ADD COLUMN enroll_rejected INTEGER DEFAULT 0;", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "ALTER TABLE users ADD COLUMN model_version INTEGER DEFAULT 1;", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "ALTER TABLE users ADD COLUMN embedding_dim INTEGER DEFAULT 128;", NULL, NULL, NULL);
 
     s_db_mutex = xSemaphoreCreateMutex();
     s_initialized = true;
@@ -164,9 +174,29 @@ esp_err_t db_manager_init(void) {
         sqlite3_finalize(seed_stmt);
     }
 
+    /* Seed default student course enrollments if they do not exist */
+    sqlite3_exec(s_db, "INSERT OR IGNORE INTO user_courses (user_id, course_id, enrolled_by) VALUES (14, 1, 'telegram');", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "INSERT OR IGNORE INTO user_courses (user_id, course_id, enrolled_by) VALUES (14, 2, 'telegram');", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "INSERT OR IGNORE INTO user_courses (user_id, course_id, enrolled_by) VALUES (14, 3, 'telegram');", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "INSERT OR IGNORE INTO user_courses (user_id, course_id, enrolled_by) VALUES (14, 4, 'telegram');", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "INSERT OR IGNORE INTO user_courses (user_id, course_id, enrolled_by) VALUES (14, 5, 'telegram');", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "INSERT OR IGNORE INTO user_courses (user_id, course_id, enrolled_by) VALUES (8, 1, 'telegram');", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "INSERT OR IGNORE INTO user_courses (user_id, course_id, enrolled_by) VALUES (8, 2, 'telegram');", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "INSERT OR IGNORE INTO user_courses (user_id, course_id, enrolled_by) VALUES (8, 3, 'telegram');", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "INSERT OR IGNORE INTO user_courses (user_id, course_id, enrolled_by) VALUES (8, 4, 'telegram');", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "INSERT OR IGNORE INTO user_courses (user_id, course_id, enrolled_by) VALUES (8, 5, 'telegram');", NULL, NULL, NULL);
+
     /* Clean up any duplicate schedules that may have been created by previous sync cycles */
     db_deduplicate_schedules();
     db_dump_schedules();
+
+    /* Dump debug information about users, courses, enrollments, and attendance logs */
+    extern esp_err_t db_debug_dump_tables(void);
+    db_debug_dump_tables();
+
+    /* Print the saved CSV report file from the SD card to the console for verification */
+    extern void db_debug_print_report_file(void);
+    db_debug_print_report_file();
 
     ESP_LOGI(TAG, "Database initialized");
     return ESP_OK;
@@ -178,8 +208,9 @@ esp_err_t db_insert_user(user_t *user) {
 
     DB_LOCK();
     sqlite3_stmt *stmt;
-    const char *sql = "INSERT INTO users (uuid, name, student_id, phone_number, telegram_id, role, face_embedding, created_at, updated_at) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char *sql = "INSERT INTO users (uuid, name, student_id, phone_number, telegram_id, role, face_embedding, created_at, updated_at, "
+                      "enroll_quality, enroll_accepted, enroll_rejected, model_version, embedding_dim) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         ESP_LOGE(TAG, "Prepare failed: %s", sqlite3_errmsg(s_db));
@@ -198,7 +229,7 @@ esp_err_t db_insert_user(user_t *user) {
     /* Bind embedding if present (e.g. not all zeros) */
     bool has_embedding = false;
     for (int i = 0; i < EMBEDDING_DIM; i++) {
-        if (user->embedding.values[i] != 0.0f) {
+        if (user->embedding.values[i] != 0) {
             has_embedding = true;
             break;
         }
@@ -211,6 +242,11 @@ esp_err_t db_insert_user(user_t *user) {
 
     sqlite3_bind_int(stmt, 8, user->created_at);
     sqlite3_bind_int(stmt, 9, user->updated_at);
+    sqlite3_bind_int(stmt, 10, user->enroll_quality);
+    sqlite3_bind_int(stmt, 11, user->enroll_accepted);
+    sqlite3_bind_int(stmt, 12, user->enroll_rejected);
+    sqlite3_bind_int(stmt, 13, user->model_version > 0 ? user->model_version : 1);
+    sqlite3_bind_int(stmt, 14, user->embedding_dim > 0 ? user->embedding_dim : 128);
 
     rc = sqlite3_step(stmt);
     if (rc != SQLITE_DONE) {
@@ -347,7 +383,8 @@ esp_err_t db_get_all_users(user_t **users, int *count) {
 
     DB_LOCK();
     sqlite3_stmt *stmt;
-    const char *sql = "SELECT id, uuid, name, student_id, phone_number, telegram_id, role, face_embedding, created_at, updated_at FROM users";
+    const char *sql = "SELECT id, uuid, name, student_id, phone_number, telegram_id, role, face_embedding, created_at, updated_at, "
+                      "enroll_quality, enroll_accepted, enroll_rejected, model_version, embedding_dim FROM users";
     int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         DB_UNLOCK();
@@ -394,6 +431,11 @@ esp_err_t db_get_all_users(user_t **users, int *count) {
         if (blob) memcpy(u->embedding.values, blob, sizeof(u->embedding.values));
         u->created_at = sqlite3_column_int(stmt, 8);
         u->updated_at = sqlite3_column_int(stmt, 9);
+        u->enroll_quality  = (uint8_t)sqlite3_column_int(stmt, 10);
+        u->enroll_accepted = (uint8_t)sqlite3_column_int(stmt, 11);
+        u->enroll_rejected = (uint8_t)sqlite3_column_int(stmt, 12);
+        u->model_version   = (uint8_t)sqlite3_column_int(stmt, 13);
+        u->embedding_dim   = (uint16_t)sqlite3_column_int(stmt, 14);
         idx++;
     }
     sqlite3_finalize(stmt);
@@ -403,27 +445,27 @@ esp_err_t db_get_all_users(user_t **users, int *count) {
 
 uint32_t db_get_current_schedule_id(void) {
     if (!s_initialized) return 0;
-    
+
     DB_LOCK();
     time_t now = time(NULL);
     sqlite3_stmt *stmt;
+    /* Exact active time window match only — no fallback.
+     * Returning any random schedule when outside a window caused attendance
+     * logs to be written with a mismatched schedule_id, breaking CSV reports.
+     * Outside a scheduled window the scanner shows "Identified as [Name]"
+     * without logging, which is the correct behaviour. */
     const char *sql = "SELECT id FROM schedule WHERE start_time <= ? AND end_time >= ? LIMIT 1";
-    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
-    if (rc != SQLITE_OK) {
-        DB_UNLOCK();
-        return 0;
-    }
-    
-    sqlite3_bind_int(stmt, 1, (int)now);
-    sqlite3_bind_int(stmt, 2, (int)now);
-    
     uint32_t schedule_id = 0;
-    if (sqlite3_step(stmt) == SQLITE_ROW) {
-        schedule_id = sqlite3_column_int(stmt, 0);
+    if (sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, (int)now);
+        sqlite3_bind_int(stmt, 2, (int)now);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            schedule_id = sqlite3_column_int(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
     }
-    sqlite3_finalize(stmt);
+
     DB_UNLOCK();
-    
     return schedule_id;
 }
 
@@ -675,43 +717,67 @@ esp_err_t db_delete_schedule_by_details(const char* course_code, int64_t start_t
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
     if (!course_code) return ESP_ERR_INVALID_ARG;
 
+    /* Strip spaces from incoming code in C (avoids SQLite REPLACE() parser stack overflow) */
+    char clean_code[64] = {0};
+    int j = 0;
+    for (int i = 0; course_code[i] && j < (int)sizeof(clean_code) - 1; i++) {
+        if (course_code[i] != ' ') clean_code[j++] = course_code[i];
+    }
+
     DB_LOCK();
+
+    /* Step 1: resolve course_id by iterating courses and comparing in C */
+    int course_id = 0;
+    sqlite3_stmt *find_stmt;
+    if (sqlite3_prepare_v2(s_db, "SELECT id, code FROM courses", -1, &find_stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(find_stmt) == SQLITE_ROW) {
+            int cid = sqlite3_column_int(find_stmt, 0);
+            const char *stored = (const char*)sqlite3_column_text(find_stmt, 1);
+            if (!stored) continue;
+            /* Strip spaces from stored code */
+            char stored_clean[64] = {0};
+            int k = 0;
+            for (int m = 0; stored[m] && k < (int)sizeof(stored_clean) - 1; m++) {
+                if (stored[m] != ' ') stored_clean[k++] = stored[m];
+            }
+            if (strcmp(stored, course_code) == 0 || strcmp(stored_clean, clean_code) == 0) {
+                course_id = cid;
+                break;
+            }
+        }
+        sqlite3_finalize(find_stmt);
+    }
+
+    if (course_id == 0) {
+        ESP_LOGW(TAG, "Delete schedule: course '%s' not found in DB", course_code);
+        DB_UNLOCK();
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    /* Step 2: simple DELETE by course_id — no SQLite functions needed */
     sqlite3_stmt *stmt;
-    /*
-     * Normalize spaces so "MTE534" matches "MTE 534" and vice-versa.
-     * REPLACE(code,' ','') strips all spaces in the stored code;
-     * REPLACE(?,' ','') does the same to the incoming code from the cloud.
-     * We keep the exact match as the first OR branch for performance.
-     */
-    const char *sql =
-        "DELETE FROM schedule "
-        "WHERE start_time = ? AND end_time = ? "
-        "AND course_id IN ("
-        "    SELECT id FROM courses "
-        "    WHERE code = ? "
-        "       OR REPLACE(code,' ','') = REPLACE(?,' ','')"
-        ")";
+    const char *sql = "DELETE FROM schedule WHERE course_id = ? AND start_time = ? AND end_time = ?";
     int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
-        ESP_LOGE(TAG, "Prepare delete schedule by details failed: %s", sqlite3_errmsg(s_db));
+        ESP_LOGE(TAG, "Prepare delete schedule failed: %s", sqlite3_errmsg(s_db));
         DB_UNLOCK();
         return ESP_FAIL;
     }
-    sqlite3_bind_int64(stmt, 1, start_time);
-    sqlite3_bind_int64(stmt, 2, end_time);
-    sqlite3_bind_text(stmt, 3, course_code, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 4, course_code, -1, SQLITE_STATIC);  /* for REPLACE(?) branch */
+    sqlite3_bind_int(stmt, 1, course_id);
+    sqlite3_bind_int64(stmt, 2, start_time);
+    sqlite3_bind_int64(stmt, 3, end_time);
     rc = sqlite3_step(stmt);
     int rows_deleted = sqlite3_changes(s_db);
     sqlite3_finalize(stmt);
     DB_UNLOCK();
+
     if (rc != SQLITE_DONE) {
         ESP_LOGE(TAG, "Failed to delete schedule for %s (%lld - %lld): %s",
                  course_code, (long long)start_time, (long long)end_time, sqlite3_errmsg(s_db));
         return ESP_FAIL;
     }
     if (rows_deleted == 0) {
-        ESP_LOGW(TAG, "Delete schedule for %s (%lld - %lld): no matching row found (course code mismatch?)",
+        ESP_LOGW(TAG, "Delete schedule for %s (%lld - %lld): no matching row found",
                  course_code, (long long)start_time, (long long)end_time);
     } else {
         ESP_LOGI(TAG, "Deleted %d schedule row(s) for %s (%lld - %lld)",
@@ -806,67 +872,364 @@ esp_err_t db_factory_reset(void) {
     return ESP_OK;
 }
 
+static void format_custom_timestamp(time_t ts, char* buf, size_t max_len) {
+    struct tm t;
+    if (!localtime_r(&ts, &t)) return;
+    const char* months[] = {
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    };
+    int hour = t.tm_hour;
+    const char* meridiem = "a.m.";
+    if (hour >= 12) {
+        meridiem = "p.m.";
+        if (hour > 12) hour -= 12;
+    }
+    if (hour == 0) hour = 12;
+    
+    snprintf(buf, max_len, "%d %s, %d. %d:%02d %s",
+             t.tm_mday, months[t.tm_mon], t.tm_year + 1900,
+             hour, t.tm_min, meridiem);
+}
+
+static void format_schedule_range(time_t start, time_t end, char* buf, size_t max_len) {
+    struct tm t_start, t_end;
+    if (!localtime_r(&start, &t_start) || !localtime_r(&end, &t_end)) return;
+    const char* months[] = {
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    };
+    
+    int start_hour = t_start.tm_hour;
+    const char* start_meridiem = "a.m.";
+    if (start_hour >= 12) {
+        start_meridiem = "p.m.";
+        if (start_hour > 12) start_hour -= 12;
+    }
+    if (start_hour == 0) start_hour = 12;
+
+    int end_hour = t_end.tm_hour;
+    const char* end_meridiem = "a.m.";
+    if (end_hour >= 12) {
+        end_meridiem = "p.m.";
+        if (end_hour > 12) end_hour -= 12;
+    }
+    if (end_hour == 0) end_hour = 12;
+
+    snprintf(buf, max_len, "%d %s, %d. %d:%02d %s To %d:%02d %s",
+             t_start.tm_mday, months[t_start.tm_mon], t_start.tm_year + 1900,
+             start_hour, t_start.tm_min, start_meridiem,
+             end_hour, t_end.tm_min, end_meridiem);
+}
+
+static void format_cell_time(time_t ts, char* buf, size_t max_len) {
+    struct tm t;
+    if (!localtime_r(&ts, &t)) return;
+    int hour = t.tm_hour;
+    const char* meridiem = "a.m.";
+    if (hour >= 12) {
+        meridiem = "p.m.";
+        if (hour > 12) hour -= 12;
+    }
+    if (hour == 0) hour = 12;
+    snprintf(buf, max_len, "%d:%02d %s", hour, t.tm_min, meridiem);
+}
+
+typedef struct {
+    uint32_t id;
+    char name[64];
+    char student_id[32];
+} student_row_t;
+
+static void add_student_if_unique(student_row_t *students, int *student_count, uint32_t id, const char *name, const char *sid) {
+    for (int i = 0; i < *student_count; i++) {
+        if (students[i].id == id) {
+            return;
+        }
+    }
+    if (*student_count >= 500) return;
+    students[*student_count].id = id;
+    if (name) strncpy(students[*student_count].name, name, sizeof(students[*student_count].name) - 1);
+    else students[*student_count].name[0] = '\0';
+    if (sid) strncpy(students[*student_count].student_id, sid, sizeof(students[*student_count].student_id) - 1);
+    else strcpy(students[*student_count].student_id, "N/A");
+    (*student_count)++;
+}
+
 esp_err_t db_get_attendance_report(char **report_str, int course_id, int date_timestamp) {
     if (!s_initialized || !report_str) return ESP_ERR_INVALID_STATE;
-
-    const char *sql = "SELECT u.student_id, u.name, a.status, time(a.timestamp, 'unixepoch', 'localtime') "
-                      "FROM attendance a "
-                      "JOIN users u ON a.user_id = u.id "
-                      "JOIN schedule s ON a.schedule_id = s.id "
-                      "WHERE (?1 = 0 OR s.course_id = ?1) "
-                      "  AND (?2 = 0 OR (a.timestamp >= ?2 AND a.timestamp < ?2 + 86400)) "
-                      "ORDER BY a.timestamp DESC LIMIT 100;";
-
     DB_LOCK();
-    sqlite3_stmt *stmt;
-    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
-    if (rc != SQLITE_OK) {
-        ESP_LOGE(TAG, "Failed to prepare report query: %s", sqlite3_errmsg(s_db));
-        DB_UNLOCK();
-        return ESP_FAIL;
-    }
 
-    sqlite3_bind_int(stmt, 1, course_id);
-    sqlite3_bind_int(stmt, 2, date_timestamp);
-
-    /* Allocate buffer for the CSV string */
-    size_t buf_size = 4096;
-    *report_str = malloc(buf_size);
-    if (!*report_str) {
-        sqlite3_finalize(stmt);
-        DB_UNLOCK();
-        return ESP_ERR_NO_MEM;
-    }
-
-    strcpy(*report_str, "Student ID,Name,Status,Time\n");
-    size_t len = strlen(*report_str);
-
-    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-        const char *sid = (const char *)sqlite3_column_text(stmt, 0);
-        const char *name = (const char *)sqlite3_column_text(stmt, 1);
-        const char *status = (const char *)sqlite3_column_text(stmt, 2);
-        const char *time_str = (const char *)sqlite3_column_text(stmt, 3);
-
-        char line[128];
-        snprintf(line, sizeof(line), "%s,%s,%s,%s\n", 
-                 sid ? sid : "N/A", 
-                 name ? name : "Unknown", 
-                 status ? status : "N/A", 
-                 time_str ? time_str : "N/A");
-
-        if (len + strlen(line) < buf_size - 1) {
-            strcat(*report_str, line);
-            len += strlen(line);
+    int target_course_id = course_id;
+    if (target_course_id == 0) {
+        sqlite3_stmt *stmt_c;
+        if (sqlite3_prepare_v2(s_db, "SELECT id FROM courses LIMIT 1", -1, &stmt_c, NULL) == SQLITE_OK) {
+            if (sqlite3_step(stmt_c) == SQLITE_ROW) {
+                target_course_id = sqlite3_column_int(stmt_c, 0);
+            }
+            sqlite3_finalize(stmt_c);
         }
     }
 
-    sqlite3_finalize(stmt);
-    DB_UNLOCK();
+    size_t buf_size = 128 * 1024;
+    *report_str = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+    if (!*report_str) {
+        *report_str = malloc(buf_size);
+    }
+    if (!*report_str) {
+        DB_UNLOCK();
+        return ESP_ERR_NO_MEM;
+    }
+    memset(*report_str, 0, buf_size);
+    size_t offset = 0;
 
-    if (len == strlen("Student ID,Name,Status,Time\n")) {
-        strcat(*report_str, "No records found,\n");
+    #define APPEND_REPORT(...) do { \
+        int n = snprintf((*report_str) + offset, buf_size - offset, __VA_ARGS__); \
+        if (n > 0 && offset + n < buf_size) { \
+            offset += n; \
+        } \
+    } while(0)
+
+    if (target_course_id == 0) {
+        APPEND_REPORT("S/N,Student name,Matric number\nNo records found,\n");
+        DB_UNLOCK();
+        return ESP_OK;
     }
 
+    char course_code[64] = "N/A";
+    char course_name[128] = "N/A";
+    sqlite3_stmt *stmt_c;
+    const char *sql_c = "SELECT code, name FROM courses WHERE id = ?";
+    if (sqlite3_prepare_v2(s_db, sql_c, -1, &stmt_c, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt_c, 1, target_course_id);
+        if (sqlite3_step(stmt_c) == SQLITE_ROW) {
+            const char *c = (const char*)sqlite3_column_text(stmt_c, 0);
+            const char *n = (const char*)sqlite3_column_text(stmt_c, 1);
+            if (c) strncpy(course_code, c, sizeof(course_code) - 1);
+            if (n) strncpy(course_name, n, sizeof(course_name) - 1);
+        }
+        sqlite3_finalize(stmt_c);
+    }
+
+    /* Query all scheduled events for this course */
+    typedef struct {
+        uint32_t id;
+        char title[128];
+        time_t start_time;
+        time_t end_time;
+        bool is_test_or_exam;
+    } sched_event_t;
+
+    sched_event_t *events = calloc(100, sizeof(sched_event_t));
+    if (!events) {
+        free(*report_str);
+        *report_str = NULL;
+        DB_UNLOCK();
+        return ESP_ERR_NO_MEM;
+    }
+    int event_count = 0;
+
+    sqlite3_stmt *stmt_s;
+    const char *sql_s = "SELECT id, COALESCE(location, 'Class'), start_time, end_time FROM schedule WHERE course_id = ? ORDER BY start_time ASC;";
+    if (sqlite3_prepare_v2(s_db, sql_s, -1, &stmt_s, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt_s, 1, target_course_id);
+        while (sqlite3_step(stmt_s) == SQLITE_ROW && event_count < 100) {
+            events[event_count].id = sqlite3_column_int(stmt_s, 0);
+            const char *loc = (const char*)sqlite3_column_text(stmt_s, 1);
+            if (loc) {
+                strncpy(events[event_count].title, loc, sizeof(events[event_count].title) - 1);
+            } else {
+                strcpy(events[event_count].title, "Class");
+            }
+            events[event_count].start_time = sqlite3_column_int(stmt_s, 2);
+            events[event_count].end_time = sqlite3_column_int(stmt_s, 3);
+            
+            if (strcasestr(events[event_count].title, "Test") || 
+                strcasestr(events[event_count].title, "Exam")) {
+                events[event_count].is_test_or_exam = true;
+            } else {
+                events[event_count].is_test_or_exam = false;
+            }
+            event_count++;
+        }
+        sqlite3_finalize(stmt_s);
+    }
+
+    student_row_t *students = calloc(500, sizeof(student_row_t));
+    if (!students) {
+        free(events);
+        free(*report_str);
+        *report_str = NULL;
+        DB_UNLOCK();
+        return ESP_ERR_NO_MEM;
+    }
+    int student_count = 0;
+
+    /* Check if any students are enrolled in user_courses for this course.
+     * If there are zero enrollments (e.g. offline testing or local registration),
+     * we fall back to showing all users with role='student' so that they still
+     * appear in the report and are marked Absent/Present correctly. */
+    int enrollment_count = 0;
+    sqlite3_stmt *count_stmt;
+    /* Count only student-role enrollments — lecturer entries from cloud sync
+     * must not suppress the fallback that shows all registered students. */
+    if (sqlite3_prepare_v2(s_db,
+            "SELECT count(*) FROM user_courses uc "
+            "JOIN users u ON uc.user_id = u.id "
+            "WHERE uc.course_id = ? AND u.role = 'student'",
+            -1, &count_stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(count_stmt, 1, target_course_id);
+        if (sqlite3_step(count_stmt) == SQLITE_ROW) {
+            enrollment_count = sqlite3_column_int(count_stmt, 0);
+        }
+        sqlite3_finalize(count_stmt);
+    }
+    ESP_LOGI(TAG, "Attendance report: course_id=%d student_enrollment_count=%d",
+             target_course_id, enrollment_count);
+
+    if (enrollment_count > 0) {
+        // Query 1: explicitly enrolled students (role=student)
+        sqlite3_stmt *stmt1;
+        const char *sql1 =
+            "SELECT u.id, u.name, COALESCE(u.student_id, 'N/A') "
+            "FROM users u "
+            "JOIN user_courses uc ON u.id = uc.user_id "
+            "WHERE uc.course_id = ? AND u.role = 'student';";
+        int rc1 = sqlite3_prepare_v2(s_db, sql1, -1, &stmt1, NULL);
+        if (rc1 == SQLITE_OK) {
+            sqlite3_bind_int(stmt1, 1, target_course_id);
+            while (sqlite3_step(stmt1) == SQLITE_ROW) {
+                uint32_t id = sqlite3_column_int(stmt1, 0);
+                const char *name = (const char*)sqlite3_column_text(stmt1, 1);
+                const char *sid = (const char*)sqlite3_column_text(stmt1, 2);
+                add_student_if_unique(students, &student_count, id, name, sid);
+            }
+            sqlite3_finalize(stmt1);
+        } else {
+            ESP_LOGE(TAG, "Report: enrolled student query prepare FAILED (rc=%d): %s", rc1, sqlite3_errmsg(s_db));
+        }
+
+        // Query 2: anyone who scanned/logged attendance for this course
+        sqlite3_stmt *stmt2;
+        const char *sql2 =
+            "SELECT DISTINCT u.id, u.name, COALESCE(u.student_id, 'N/A') "
+            "FROM users u "
+            "JOIN attendance a ON u.id = a.user_id "
+            "JOIN schedule s ON a.schedule_id = s.id "
+            "WHERE s.course_id = ? AND u.role = 'student';";
+        int rc2 = sqlite3_prepare_v2(s_db, sql2, -1, &stmt2, NULL);
+        if (rc2 == SQLITE_OK) {
+            sqlite3_bind_int(stmt2, 1, target_course_id);
+            while (sqlite3_step(stmt2) == SQLITE_ROW) {
+                uint32_t id = sqlite3_column_int(stmt2, 0);
+                const char *name = (const char*)sqlite3_column_text(stmt2, 1);
+                const char *sid = (const char*)sqlite3_column_text(stmt2, 2);
+                add_student_if_unique(students, &student_count, id, name, sid);
+            }
+            sqlite3_finalize(stmt2);
+        } else {
+            ESP_LOGE(TAG, "Report: attended student query prepare FAILED (rc=%d): %s", rc2, sqlite3_errmsg(s_db));
+        }
+    } else {
+        // No enrolled students in database: show all students registered on the device
+        sqlite3_stmt *stmt3;
+        const char *sql3 =
+            "SELECT u.id, u.name, COALESCE(u.student_id, 'N/A') "
+            "FROM users u "
+            "WHERE u.role = 'student';";
+        int rc3 = sqlite3_prepare_v2(s_db, sql3, -1, &stmt3, NULL);
+        if (rc3 == SQLITE_OK) {
+            while (sqlite3_step(stmt3) == SQLITE_ROW) {
+                uint32_t id = sqlite3_column_int(stmt3, 0);
+                const char *name = (const char*)sqlite3_column_text(stmt3, 1);
+                const char *sid = (const char*)sqlite3_column_text(stmt3, 2);
+                add_student_if_unique(students, &student_count, id, name, sid);
+            }
+            sqlite3_finalize(stmt3);
+        } else {
+            ESP_LOGE(TAG, "Report: all registered student query prepare FAILED (rc=%d): %s", rc3, sqlite3_errmsg(s_db));
+        }
+    }
+
+    // Sort students by name using simple bubble sort
+    for (int i = 0; i < student_count - 1; i++) {
+        for (int j = i + 1; j < student_count; j++) {
+            if (strcmp(students[i].name, students[j].name) > 0) {
+                student_row_t temp = students[i];
+                students[i] = students[j];
+                students[j] = temp;
+            }
+        }
+    }
+
+    for (int i = 0; i < student_count; i++) {
+        ESP_LOGI(TAG, "Report student[%d]: id=%lu name='%s' sid='%s'",
+                 i, (unsigned long)students[i].id, students[i].name, students[i].student_id);
+    }
+
+    ESP_LOGI(TAG, "Report: course_id=%d events=%d students=%d (enrollment_count=%d)",
+             target_course_id, event_count, student_count, enrollment_count);
+
+    /* 1. Print Title Line */
+    char gen_time_str[64] = "";
+    format_custom_timestamp(time(NULL), gen_time_str, sizeof(gen_time_str));
+    APPEND_REPORT("%s %s attendance report as at [%s]\n",
+                  course_code, course_name, gen_time_str);
+
+    /* 2. Print Table Header */
+    APPEND_REPORT("S/N,Student name,Matric number");
+    for (int i = 0; i < event_count; i++) {
+        char range_str[128] = "";
+        format_schedule_range(events[i].start_time, events[i].end_time, range_str, sizeof(range_str));
+        APPEND_REPORT(",\"%s [%s]\"", events[i].title, range_str);
+    }
+    APPEND_REPORT("\n");
+
+    /* 3. Print Student Rows */
+    for (int s_idx = 0; s_idx < student_count; s_idx++) {
+        APPEND_REPORT("%d,\"%s\",\"%s\"", s_idx + 1, students[s_idx].name, students[s_idx].student_id);
+        
+        for (int e_idx = 0; e_idx < event_count; e_idx++) {
+            sqlite3_stmt *stmt_a;
+            const char *sql_a = "SELECT timestamp FROM attendance WHERE user_id = ? AND schedule_id = ? ORDER BY timestamp ASC;";
+            time_t logs[10];
+            int log_count = 0;
+            if (sqlite3_prepare_v2(s_db, sql_a, -1, &stmt_a, NULL) == SQLITE_OK) {
+                sqlite3_bind_int(stmt_a, 1, students[s_idx].id);
+                sqlite3_bind_int(stmt_a, 2, events[e_idx].id);
+                while (sqlite3_step(stmt_a) == SQLITE_ROW && log_count < 10) {
+                    logs[log_count++] = sqlite3_column_int(stmt_a, 0);
+                }
+                sqlite3_finalize(stmt_a);
+            }
+            
+            char cell_val[128] = "";
+            if (log_count == 0) {
+                strcpy(cell_val, "Absent");
+            } else {
+                char check_in[32] = "";
+                format_cell_time(logs[0], check_in, sizeof(check_in));
+                
+                if (events[e_idx].is_test_or_exam) {
+                    if (log_count > 1) {
+                        char check_out[32] = "";
+                        format_cell_time(logs[log_count - 1], check_out, sizeof(check_out));
+                        snprintf(cell_val, sizeof(cell_val), "Present\n%s To %s", check_in, check_out);
+                    } else {
+                        snprintf(cell_val, sizeof(cell_val), "Present\n%s", check_in);
+                    }
+                } else {
+                    snprintf(cell_val, sizeof(cell_val), "Present\n%s", check_in);
+                }
+            }
+            APPEND_REPORT(",\"%s\"", cell_val);
+        }
+        APPEND_REPORT("\n");
+    }
+
+    free(events);
+    free(students);
+    DB_UNLOCK();
     return ESP_OK;
 }
 
@@ -926,6 +1289,47 @@ esp_err_t db_get_all_courses(char*** names, int* count) {
     DB_UNLOCK();
     
     *names = list;
+    *count = c;
+    return ESP_OK;
+}
+
+esp_err_t db_get_all_courses_with_ids(int** ids, char*** names, int* count) {
+    if (!s_initialized || !ids || !names || !count) return ESP_ERR_INVALID_ARG;
+    DB_LOCK();
+
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT id, name FROM courses ORDER BY name ASC;";
+    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        ESP_LOGE(TAG, "Prepare select courses with ids failed: %s", sqlite3_errmsg(s_db));
+        DB_UNLOCK();
+        return ESP_FAIL;
+    }
+
+    int max_courses = 100;
+    int *id_list = (int*)malloc(sizeof(int) * max_courses);
+    char **name_list = (char**)malloc(sizeof(char*) * max_courses);
+    if (!id_list || !name_list) {
+        if (id_list) free(id_list);
+        if (name_list) free(name_list);
+        sqlite3_finalize(stmt);
+        DB_UNLOCK();
+        return ESP_ERR_NO_MEM;
+    }
+
+    int c = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && c < max_courses) {
+        id_list[c] = sqlite3_column_int(stmt, 0);
+        const unsigned char* name = sqlite3_column_text(stmt, 1);
+        name_list[c] = strdup(name ? (const char*)name : "Unknown");
+        c++;
+    }
+
+    sqlite3_finalize(stmt);
+    DB_UNLOCK();
+
+    *ids = id_list;
+    *names = name_list;
     *count = c;
     return ESP_OK;
 }
@@ -1473,6 +1877,80 @@ esp_err_t db_dump_schedules(void) {
     return ESP_OK;
 }
 
+esp_err_t db_debug_dump_tables(void) {
+    if (!s_initialized) return ESP_ERR_INVALID_STATE;
+    DB_LOCK();
+    
+    // Dump users
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(s_db, "SELECT id, name, student_id, role FROM users", -1, &stmt, NULL) == SQLITE_OK) {
+        ESP_LOGI(TAG, "=== DEBUG DUMP USERS ===");
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            ESP_LOGI(TAG, "  User: ID=%d, Name=%s, SID=%s, Role=%s",
+                     sqlite3_column_int(stmt, 0),
+                     sqlite3_column_text(stmt, 1) ? (const char*)sqlite3_column_text(stmt, 1) : "NULL",
+                     sqlite3_column_text(stmt, 2) ? (const char*)sqlite3_column_text(stmt, 2) : "NULL",
+                     sqlite3_column_text(stmt, 3) ? (const char*)sqlite3_column_text(stmt, 3) : "NULL");
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    // Dump courses
+    if (sqlite3_prepare_v2(s_db, "SELECT id, code, name FROM courses", -1, &stmt, NULL) == SQLITE_OK) {
+        ESP_LOGI(TAG, "=== DEBUG DUMP COURSES ===");
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            ESP_LOGI(TAG, "  Course: ID=%d, Code=%s, Name=%s",
+                     sqlite3_column_int(stmt, 0),
+                     sqlite3_column_text(stmt, 1) ? (const char*)sqlite3_column_text(stmt, 1) : "NULL",
+                     sqlite3_column_text(stmt, 2) ? (const char*)sqlite3_column_text(stmt, 2) : "NULL");
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    // Dump user_courses
+    if (sqlite3_prepare_v2(s_db, "SELECT user_id, course_id FROM user_courses", -1, &stmt, NULL) == SQLITE_OK) {
+        ESP_LOGI(TAG, "=== DEBUG DUMP USER_COURSES ===");
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            ESP_LOGI(TAG, "  Enrollment: UserID=%d, CourseID=%d",
+                     sqlite3_column_int(stmt, 0),
+                     sqlite3_column_int(stmt, 1));
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    // Dump attendance logs
+    if (sqlite3_prepare_v2(s_db, "SELECT id, user_id, schedule_id, timestamp, status FROM attendance", -1, &stmt, NULL) == SQLITE_OK) {
+        ESP_LOGI(TAG, "=== DEBUG DUMP ATTENDANCE ===");
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            ESP_LOGI(TAG, "  Log: ID=%d, UserID=%d, SchedID=%d, TS=%d, Status=%s",
+                     sqlite3_column_int(stmt, 0),
+                     sqlite3_column_int(stmt, 1),
+                     sqlite3_column_int(stmt, 2),
+                     sqlite3_column_int(stmt, 3),
+                     sqlite3_column_text(stmt, 4) ? (const char*)sqlite3_column_text(stmt, 4) : "NULL");
+        }
+        sqlite3_finalize(stmt);
+    }
+    
+    DB_UNLOCK();
+    return ESP_OK;
+}
+
+void db_debug_print_report_file(void) {
+    FILE *f = fopen("/sdcard/attendance_report.csv", "r");
+    if (f) {
+        ESP_LOGI("DEBUG_CSV", "=== CONTENT OF /sdcard/attendance_report.csv ===");
+        char line[512];
+        while (fgets(line, sizeof(line), f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            ESP_LOGI("DEBUG_CSV", "%s", line);
+        }
+        fclose(f);
+    } else {
+        ESP_LOGE("DEBUG_CSV", "Failed to open /sdcard/attendance_report.csv (might not have been exported yet)");
+    }
+}
+
 static esp_err_t db_deduplicate_schedules(void) {
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
     DB_LOCK();
@@ -1638,4 +2116,111 @@ esp_err_t db_unlink_lecturer_course_by_uuid(const char* lecturer_uuid, const cha
     ESP_LOGI(TAG, "Unlinked lecturer %s from course %s", lecturer_uuid, course_code);
     return ESP_OK;
 }
-
+
+int db_get_today_attendance_count(void) {
+    if (!s_initialized) return 0;
+    DB_LOCK();
+    int count = 0;
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT COUNT(*) FROM attendance WHERE date(timestamp, 'unixepoch', 'localtime') = date('now', 'localtime')";
+    if (sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            count = sqlite3_column_int(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+    }
+    DB_UNLOCK();
+    return count;
+}
+
+bool db_is_test_or_exam_schedule(uint32_t schedule_id) {
+    if (!s_initialized || schedule_id == 0) return false;
+    DB_LOCK();
+    bool result = false;
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT COALESCE(location, '') FROM schedule WHERE id = ?";
+    if (sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, schedule_id);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *loc = (const char*)sqlite3_column_text(stmt, 0);
+            if (loc && (strcasestr(loc, "Test") || strcasestr(loc, "Exam"))) {
+                result = true;
+            }
+        }
+        sqlite3_finalize(stmt);
+    }
+    DB_UNLOCK();
+    return result;
+}
+
+bool db_attendance_exists_for_schedule(uint32_t user_id, uint32_t schedule_id) {
+    if (!s_initialized || schedule_id == 0) return false;
+    
+    bool is_test_or_exam = db_is_test_or_exam_schedule(schedule_id);
+    
+    DB_LOCK();
+    bool exists = false;
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT COUNT(*) FROM attendance WHERE user_id = ? AND schedule_id = ?";
+    if (sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, (int)user_id);
+        sqlite3_bind_int(stmt, 2, (int)schedule_id);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            int count = sqlite3_column_int(stmt, 0);
+            if (is_test_or_exam) {
+                exists = (count >= 2); /* Allow up to 2 entries for Test/Exam (check-in/check-out) */
+            } else {
+                exists = (count >= 1); /* Standard class check-in only */
+            }
+        }
+        sqlite3_finalize(stmt);
+    }
+    DB_UNLOCK();
+    return exists;
+}
+
+esp_err_t db_get_active_schedule(db_schedule_t *out_schedule) {
+    if (!s_initialized || !out_schedule) return ESP_ERR_INVALID_ARG;
+    DB_LOCK();
+    memset(out_schedule, 0, sizeof(db_schedule_t));
+
+    time_t now = time(NULL);
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT c.code, c.name, u.name, s.start_time, s.end_time "
+                      "FROM schedule s "
+                      "JOIN courses c ON s.course_id = c.id "
+                      "LEFT JOIN lecturer_courses lc ON c.id = lc.course_id "
+                      "LEFT JOIN users u ON lc.lecturer_id = u.id AND u.role = 'lecturer' "
+                      "WHERE s.start_time <= ? AND s.end_time >= ? "
+                      "GROUP BY s.id "
+                      "ORDER BY s.start_time ASC LIMIT 1";
+
+    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        ESP_LOGE(TAG, "db_get_active_schedule prepare failed: %s", sqlite3_errmsg(s_db));
+        DB_UNLOCK();
+        return ESP_FAIL;
+    }
+
+    sqlite3_bind_int(stmt, 1, (int)now);
+    sqlite3_bind_int(stmt, 2, (int)now);
+
+    esp_err_t ret = ESP_ERR_NOT_FOUND;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *code = (const char*)sqlite3_column_text(stmt, 0);
+        if (code) strncpy(out_schedule->course_code, code, sizeof(out_schedule->course_code) - 1);
+        const char *cname = (const char*)sqlite3_column_text(stmt, 1);
+        if (cname) strncpy(out_schedule->course_name, cname, sizeof(out_schedule->course_name) - 1);
+        const char *lname = (const char*)sqlite3_column_text(stmt, 2);
+        if (lname) strncpy(out_schedule->lecturer_name, lname, sizeof(out_schedule->lecturer_name) - 1);
+        else strncpy(out_schedule->lecturer_name, "Staff", sizeof(out_schedule->lecturer_name) - 1);
+        out_schedule->start_time = (uint32_t)sqlite3_column_int(stmt, 3);
+        out_schedule->end_time   = (uint32_t)sqlite3_column_int(stmt, 4);
+        ret = ESP_OK;
+        ESP_LOGI(TAG, "Active schedule: %s - %s", out_schedule->course_code, out_schedule->course_name);
+    }
+
+    sqlite3_finalize(stmt);
+    DB_UNLOCK();
+    return ret;
+}

@@ -34,6 +34,12 @@ void ui_close_enrollment_screen(void);
 /* ─── Student list (left panel) ────────────────────────────────────────── */
 
 /**
+ * @brief Refresh and rebuild the left-panel student cards from the queue.
+ *        Safe to call from any task via ui_acquire()/ui_release().
+ */
+void ui_enrollment_refresh_student_list(void);
+
+/**
  * @brief Append a student card to the left-panel queue list.
  *        Safe to call from any task via ui_acquire()/ui_release().
  * @param name        student full name
@@ -77,6 +83,18 @@ void ui_show_pose_guidance(const char* message);
  * @param student_idx   BLE queue index to remove once animation completes
  */
 void ui_enrollment_show_success(const char* student_name, int student_idx);
+
+/**
+ * @brief Show enrollment quality score modal with rating and stats.
+ *        Displays Redo button ONLY when rating is POOR.
+ * @param rating       "EXCELLENT", "GOOD", "AVERAGE", or "POOR"
+ * @param quality_score Numeric score 0-100
+ * @param accepted     Count of accepted samples
+ * @param rejected     Count of rejected/outlier samples
+ * @param student_name Enrolled student name
+ * @param student_idx  Student queue index
+ */
+void ui_enrollment_show_quality_result(const char* rating, int quality_score, int accepted, int rejected, const char* student_name, int student_idx);
 
 /**
  * @brief Show inline failure text with a retry hint.

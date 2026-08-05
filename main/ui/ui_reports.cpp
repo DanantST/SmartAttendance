@@ -26,6 +26,10 @@ static lv_obj_t* s_day_dd   = NULL;
 static lv_obj_t* s_month_dd = NULL;
 static lv_obj_t* s_year_dd  = NULL;
 
+/* Course ID tracking for dropdown mapping */
+static int* s_course_ids = NULL;
+static int  s_course_count = 0;
+
 /* Forward declarations */
 static void create_reports_screen(void);
 static void generate_btn_event(lv_event_t* e);
@@ -42,6 +46,13 @@ void ui_show_reports_screen(void) {
 
 void ui_close_reports_screen(void) {
     if (!s_reports_screen) return;
+    
+    if (s_course_ids) {
+        free(s_course_ids);
+        s_course_ids = NULL;
+    }
+    s_course_count = 0;
+
     if (lv_scr_act() == s_reports_screen) {
         ui_return_to_main();
         return;
@@ -112,10 +123,7 @@ static void create_reports_screen(void) {
     lv_obj_set_pos(s_course_dropdown, 15, 50);
     lv_dropdown_set_options(s_course_dropdown, "Loading courses...");
 
-    /* ── Date picker card — three dropdowns (Day / Month / Year) ──
-     * A bare lv_calendar was 200 px tall but sat inside a 120 px card,
-     * making it clipped and fully unresponsive to touch. Dropdowns are
-     * always within the card bounds and work reliably on the GT911 touch. */
+    /* ── Date picker card — three dropdowns (Day / Month / Year) ── */
     lv_obj_t* date_card = ui_create_card(content, DISPLAY_WIDTH - 40, 100);
 
     lv_obj_t* date_title = lv_label_create(date_card);
@@ -183,57 +191,57 @@ static void create_reports_screen(void) {
     lv_obj_set_style_text_color(s_report_textarea, ui_theme_get_text_color(), 0);
 
     /* Fetch and populate courses from database */
-    char** course_names = NULL;
-    int course_count = 0;
-    if (db_get_all_courses(&course_names, &course_count) == ESP_OK && course_count > 0) {
-        ui_reports_populate_courses((const char**)course_names, course_count);
-        for (int i = 0; i < course_count; i++) {
-            free(course_names[i]);
+    int* c_ids = NULL;
+    char** c_names = NULL;
+    int c_count = 0;
+    if (db_get_all_courses_with_ids(&c_ids, &c_names, &c_count) == ESP_OK && c_count > 0) {
+        ui_reports_populate_courses(c_ids, (const char**)c_names, c_count);
+        for (int i = 0; i < c_count; i++) {
+            free(c_names[i]);
         }
-        free(course_names);
+        free(c_names);
+        free(c_ids);
     } else {
-        const char* fallback[] = {"No Courses Found"};
-        ui_reports_populate_courses(fallback, 1);
+        const char* fallback[] = {"All Courses"};
+        ui_reports_populate_courses(NULL, fallback, 0);
     }
 }
 
-
-
 static void generate_btn_event(lv_event_t* e) {
-    /* Read selected course index (for future filtered queries) */
-    int selected_course = lv_dropdown_get_selected(s_course_dropdown);
-    (void)selected_course;
+    /* Read selected course */
+    int selected_idx = lv_dropdown_get_selected(s_course_dropdown);
+    int target_course_id = 0; /* 0 = All Courses */
+    if (selected_idx > 0 && s_course_ids && (selected_idx - 1) < s_course_count) {
+        target_course_id = s_course_ids[selected_idx - 1];
+    }
 
     /* Read date from the three dropdowns */
     int day   = (int)lv_dropdown_get_selected(s_day_dd) + 1;   /* 1-31 */
     int month = (int)lv_dropdown_get_selected(s_month_dd) + 1; /* 1-12 */
     int year  = (int)lv_dropdown_get_selected(s_year_dd) + 2025;
-    ESP_LOGI(TAG, "Generate report: %04d-%02d-%02d", year, month, day);
+    ESP_LOGI(TAG, "Generate report: course_id=%d date=%04d-%02d-%02d", target_course_id, year, month, day);
 
-    /* Convert selected date to unix-day boundaries for the DB query.
-     * db_get_attendance_report(buf, start_ts, end_ts) with 0,0 = all records. */
+    /* Convert selected date to unix-day boundary */
     struct tm day_start;
     memset(&day_start, 0, sizeof(day_start));
     day_start.tm_year = year - 1900;
     day_start.tm_mon  = month - 1;
     day_start.tm_mday = day;
     time_t ts_start = mktime(&day_start);
-    time_t ts_end   = ts_start + 86400;
 
     char *report_str = NULL;
     esp_err_t ret = db_get_attendance_report(&report_str,
-                                             (uint32_t)ts_start,
-                                             (uint32_t)ts_end);
+                                             target_course_id,
+                                             (int)ts_start);
     if (ret == ESP_OK && report_str) {
         lv_textarea_set_text(s_report_textarea, report_str);
         lv_obj_clear_flag(s_export_btn, LV_OBJ_FLAG_HIDDEN);
         free(report_str);
     } else {
         lv_textarea_set_text(s_report_textarea,
-            "No records found for the selected date.");
+            "No records found for the selected filter.");
     }
 }
-
 
 static void export_btn_event(lv_event_t* e) {
     /* Generate CSV and save to SD card */
@@ -255,15 +263,37 @@ static void close_btn_event(lv_event_t* e) {
     ui_close_reports_screen();
 }
 
-void ui_reports_populate_courses(const char** courses, int count) {
+void ui_reports_populate_courses(const int* ids, const char** courses, int count) {
     if (!s_course_dropdown) return;
     
-    char options[1024] = {0};
+    if (s_course_ids) {
+        free(s_course_ids);
+        s_course_ids = NULL;
+    }
+    s_course_count = count;
+
+    if (count > 0 && ids) {
+        s_course_ids = (int*)malloc(count * sizeof(int));
+        if (s_course_ids) {
+            memcpy(s_course_ids, ids, count * sizeof(int));
+        }
+    }
+
+    size_t buf_size = 64;
     for (int i = 0; i < count; i++) {
+        buf_size += strlen(courses[i]) + 2;
+    }
+
+    char* options = (char*)malloc(buf_size);
+    if (!options) return;
+
+    strcpy(options, "All Courses");
+    for (int i = 0; i < count; i++) {
+        strcat(options, "\n");
         strcat(options, courses[i]);
-        if (i < count - 1) strcat(options, "\n");
     }
     lv_dropdown_set_options(s_course_dropdown, options);
+    free(options);
 }
 
 void ui_reports_show_data(const char* data, size_t len) {

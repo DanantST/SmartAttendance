@@ -69,6 +69,7 @@ void ui_show_enrollment_screen(void) {
         s_current_student_idx = -1;
         ui_enrollment_set_camera_active(false);
         ui_show_pose_guidance("Tap a student to begin enrollment");
+        ui_enrollment_refresh_student_list();
         lv_scr_load(s_enroll_screen);
         return;
     }
@@ -77,6 +78,7 @@ void ui_show_enrollment_screen(void) {
     s_current_student_idx = -1;
 
     create_enrollment_screen();
+    ui_enrollment_refresh_student_list();
     
     ui_enrollment_set_camera_active(false);
     ui_show_pose_guidance("Tap a student to begin enrollment");
@@ -281,46 +283,54 @@ static void student_card_event_handler(lv_event_t* e) {
 
 /* ─── Student List API ─────────────────────────────────────────────────── */
 
-void ui_enrollment_add_student(const char* name, const char* student_id) {
+void ui_enrollment_refresh_student_list(void) {
     if (!s_student_list) return;
 
-    /* Find first empty slot */
-    int idx = -1;
+    /* Delete existing card widgets */
     for (int i = 0; i < MAX_PENDING_STUDENTS; i++) {
-        if (s_student_cards[i] == NULL) {
-            idx = i;
-            break;
+        if (s_student_cards[i]) {
+            lv_obj_delete(s_student_cards[i]);
+            s_student_cards[i] = NULL;
         }
     }
-    if (idx == -1) return; /* Full */
 
-    lv_obj_t* card = lv_obj_create(s_student_list);
-    lv_obj_set_width(card, 220);
-    lv_obj_set_height(card, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_color(card, ui_theme_get_surface_color(), 0);
-    lv_obj_set_style_border_width(card, 0, 0);
-    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(card, student_card_event_handler, LV_EVENT_CLICKED, (void*)(intptr_t)idx);
+    int count = ble_registration_get_pending_count();
+    for (int i = 0; i < count && i < MAX_PENDING_STUDENTS; i++) {
+        enrollment_data_t entry;
+        if (ble_registration_peek_student(i, &entry)) {
+            lv_obj_t* card = lv_obj_create(s_student_list);
+            lv_obj_set_width(card, 220);
+            lv_obj_set_height(card, LV_SIZE_CONTENT);
+            lv_obj_set_style_bg_color(card, (s_state == ENROLL_SCREEN_CAPTURING && s_current_student_idx == i) ?
+                                             lv_color_hex(0x3A6EA5) : ui_theme_get_surface_color(), 0);
+            lv_obj_set_style_border_width(card, 0, 0);
+            lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(card, student_card_event_handler, LV_EVENT_CLICKED, (void*)(intptr_t)i);
 
-    lv_obj_t* name_lbl = lv_label_create(card);
-    lv_label_set_text(name_lbl, name);
-    lv_obj_set_style_text_color(name_lbl, ui_theme_get_text_color(), 0);
-    lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_16, 0);
+            lv_obj_t* name_lbl = lv_label_create(card);
+            lv_label_set_text(name_lbl, entry.name);
+            lv_obj_set_style_text_color(name_lbl, ui_theme_get_text_color(), 0);
+            lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_16, 0);
 
-    lv_obj_t* id_lbl = lv_label_create(card);
-    lv_label_set_text_fmt(id_lbl, "ID: %s", student_id);
-    lv_obj_set_style_text_color(id_lbl, ui_theme_get_text_muted_color(), 0);
-    lv_obj_align_to(id_lbl, name_lbl, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 5);
+            lv_obj_t* id_lbl = lv_label_create(card);
+            lv_label_set_text_fmt(id_lbl, "ID: %s", entry.student_id);
+            lv_obj_set_style_text_color(id_lbl, ui_theme_get_text_muted_color(), 0);
+            lv_obj_align_to(id_lbl, name_lbl, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 5);
 
-    s_student_cards[idx] = card;
+            s_student_cards[i] = card;
+        }
+    }
+}
+
+void ui_enrollment_add_student(const char* name, const char* student_id) {
+    (void)name;
+    (void)student_id;
+    ui_enrollment_refresh_student_list();
 }
 
 void ui_enrollment_remove_student_by_index(int idx) {
-    if (idx < 0 || idx >= MAX_PENDING_STUDENTS) return;
-    if (s_student_cards[idx]) {
-        lv_obj_delete(s_student_cards[idx]);
-        s_student_cards[idx] = NULL;
-    }
+    (void)idx;
+    ui_enrollment_refresh_student_list();
 }
 
 /* ─── Camera & Feedback API ────────────────────────────────────────────── */
@@ -356,13 +366,30 @@ void ui_show_pose_guidance(const char* message) {
 }
 
 void ui_enrollment_show_success(const char* student_name, int student_idx) {
-    if (!s_success_popup) return;
+    ui_enrollment_show_quality_result("GOOD", 80, 30, 0, student_name, student_idx);
+}
+
+void ui_enrollment_show_quality_result(const char* rating, int quality_score, int accepted, int rejected, const char* student_name, int student_idx) {
+    if (!s_success_popup || !s_right_panel) return;
     s_state = ENROLL_SCREEN_SUCCESS;
     
-    lv_label_set_text_fmt(s_success_label, LV_SYMBOL_OK " %s ENROLLED", student_name);
+    bool is_poor = (strcmp(rating, "POOR") == 0);
+
+    /* Set popup styling & text according to rating */
+    lv_color_t bg_color = lv_color_hex(0x4CAF50); /* Green for Excellent/Good */
+    if (strcmp(rating, "AVERAGE") == 0) {
+        bg_color = lv_color_hex(0xF1C40F); /* Yellow */
+    } else if (is_poor) {
+        bg_color = lv_color_hex(0xE74C3C); /* Red */
+    }
+    
+    lv_obj_set_style_bg_color(s_success_popup, bg_color, 0);
+    lv_label_set_text_fmt(s_success_label, "%s %s (%d/100) — %s",
+                          is_poor ? LV_SYMBOL_WARNING : LV_SYMBOL_OK,
+                          rating, quality_score, student_name);
     lv_obj_clear_flag(s_success_popup, LV_OBJ_FLAG_HIDDEN);
     
-    /* Animation: slide down and fade in */
+    /* Animation: slide down */
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, s_success_popup);
@@ -371,9 +398,86 @@ void ui_enrollment_show_success(const char* student_name, int student_idx) {
     lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_obj_set_y);
     lv_anim_start(&a);
 
-    /* Timer to reset UI — store handle so ui_close_enrollment_screen can cancel it */
-    s_success_timer = lv_timer_create(popup_timer_cb, 2500, (void*)(intptr_t)student_idx);
-    lv_timer_set_repeat_count(s_success_timer, 1); /* one-shot */
+    /* Update status label with frame stats */
+    if (s_status_label) {
+        lv_obj_clear_flag(s_status_label, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text_fmt(s_status_label, "Accepted: %d | Discarded: %d | Score: %d/100",
+                              accepted, rejected, quality_score);
+        lv_obj_set_style_text_color(s_status_label, bg_color, 0);
+    }
+
+    if (is_poor) {
+        /* Show "Redo Enrollment" button ONLY when quality rating is POOR */
+        lv_obj_t* redo_btn = lv_btn_create(s_right_panel);
+        lv_obj_set_size(redo_btn, 180, 45);
+        lv_obj_align(redo_btn, LV_ALIGN_BOTTOM_MID, -95, -20);
+        lv_obj_set_style_bg_color(redo_btn, lv_color_hex(0xE67E22), 0);
+        lv_obj_set_style_radius(redo_btn, 10, 0);
+
+        lv_obj_t* redo_lbl = lv_label_create(redo_btn);
+        lv_label_set_text(redo_lbl, LV_SYMBOL_REFRESH "  Redo Enrollment");
+        lv_obj_set_style_text_color(redo_lbl, lv_color_white(), 0);
+        lv_obj_center(redo_lbl);
+
+        lv_obj_set_user_data(redo_btn, (void*)(intptr_t)student_idx);
+        lv_obj_add_event_cb(redo_btn, [](lv_event_t* ev) {
+            lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(ev);
+            int card_idx  = (int)(intptr_t)lv_obj_get_user_data(btn);
+            
+            /* Remove redo button and sibling keep button if present */
+            lv_obj_t* parent = lv_obj_get_parent(btn);
+            lv_obj_delete(btn);
+
+            if (s_success_popup) lv_obj_add_flag(s_success_popup, LV_OBJ_FLAG_HIDDEN);
+            if (s_status_label)  lv_obj_add_flag(s_status_label,  LV_OBJ_FLAG_HIDDEN);
+
+            s_state = ENROLL_SCREEN_CAPTURING;
+            s_current_student_idx = card_idx;
+            ui_enrollment_set_camera_active(true);
+            if (s_progress_bar) {
+                lv_obj_clear_flag(s_progress_bar, LV_OBJ_FLAG_HIDDEN);
+                lv_bar_set_value(s_progress_bar, 0, LV_ANIM_OFF);
+            }
+            if (s_progress_label) lv_label_set_text(s_progress_label, "0%");
+            ui_show_pose_guidance("Please stand in front of the camera");
+
+            xTaskCreate(start_single_capture_task, "enroll_redo",
+                        16384, (void*)(intptr_t)card_idx, 5, NULL);
+        }, LV_EVENT_CLICKED, NULL);
+
+        /* Also add "Keep Template" button so admin can choose to keep poor template if desired */
+        lv_obj_t* keep_btn = lv_btn_create(s_right_panel);
+        lv_obj_set_size(keep_btn, 160, 45);
+        lv_obj_align(keep_btn, LV_ALIGN_BOTTOM_MID, 95, -20);
+        lv_obj_set_style_bg_color(keep_btn, lv_color_hex(0x7F8C8D), 0);
+        lv_obj_set_style_radius(keep_btn, 10, 0);
+
+        lv_obj_t* keep_lbl = lv_label_create(keep_btn);
+        lv_label_set_text(keep_lbl, LV_SYMBOL_OK "  Keep Anyway");
+        lv_obj_set_style_text_color(keep_lbl, lv_color_white(), 0);
+        lv_obj_center(keep_lbl);
+
+        lv_obj_set_user_data(keep_btn, (void*)(intptr_t)student_idx);
+        lv_obj_add_event_cb(keep_btn, [](lv_event_t* ev) {
+            lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(ev);
+            int card_idx  = (int)(intptr_t)lv_obj_get_user_data(btn);
+            lv_obj_delete(btn);
+
+            if (s_success_popup) lv_obj_add_flag(s_success_popup, LV_OBJ_FLAG_HIDDEN);
+            if (s_status_label)  lv_obj_add_flag(s_status_label,  LV_OBJ_FLAG_HIDDEN);
+            ui_enrollment_remove_student_by_index(card_idx);
+            ui_enrollment_set_camera_active(false);
+            ui_enrollment_set_face_detected(false);
+            ui_show_pose_guidance("Tap a student to begin enrollment");
+            s_state = ENROLL_SCREEN_IDLE;
+            s_current_student_idx = -1;
+        }, LV_EVENT_CLICKED, NULL);
+
+    } else {
+        /* Non-POOR ratings (EXCELLENT, GOOD, AVERAGE) — auto-close popup after 2.5s */
+        s_success_timer = lv_timer_create(popup_timer_cb, 2500, (void*)(intptr_t)student_idx);
+        lv_timer_set_repeat_count(s_success_timer, 1);
+    }
 }
 
 static void popup_timer_cb(lv_timer_t* timer) {

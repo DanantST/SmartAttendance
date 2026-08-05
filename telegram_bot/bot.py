@@ -736,8 +736,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [
                     ["📅 Schedule Class", "📅 My Schedules"],
                     ["📊 Attendance Report", "📚 My Courses"],
-                    ["📲 Share Bot Link", "🛠️ Developer Auth"],
-                    ["❓ Help"]
+                    ["📲 Share Bot Link", "❓ Help"]
                 ],
                 resize_keyboard=True
             )
@@ -783,7 +782,7 @@ async def notify_linked_student(telegram_id, name, role):
                 keyboard = [
                     ["📅 Schedule Class", "📅 My Schedules"],
                     ["📊 Attendance Report", "📚 My Courses"],
-                    ["🛠️ Developer Auth", "❓ Help"]
+                    ["❓ Help"]
                 ]
             else:
                 keyboard = [
@@ -819,8 +818,7 @@ async def welcome_newly_enrolled_user(uuid, telegram_id, name, role):
             keyboard = [
                 ["📅 Schedule Class", "📅 My Schedules"],
                 ["📊 Attendance Report", "📚 My Courses"],
-                ["📲 Share Bot Link", "🛠️ Developer Auth"],
-                ["❓ Help"]
+                ["📲 Share Bot Link", "❓ Help"]
             ]
             role_blurb = (
                 f"As a **{role.capitalize()}**, you can schedule classes, view attendance reports, "
@@ -912,8 +910,7 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [
                     ["📅 Schedule Class", "📅 My Schedules"],
                     ["📊 Attendance Report", "📚 My Courses"],
-                    ["📲 Share Bot Link", "🛠️ Developer Auth"],
-                    ["❓ Help"]
+                    ["📲 Share Bot Link", "❓ Help"]
                 ],
                 resize_keyboard=True
             )
@@ -948,44 +945,6 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "captive portal, your Telegram account will be automatically linked, and you will receive a confirmation message.",
             reply_markup=ReplyKeyboardRemove(),
         )
-
-async def auth_me_dev_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Developer override command to force-register the current user as a lecturer for testing.
-    """
-    user_id = str(update.effective_user.id)
-    first_name = update.effective_user.first_name or "Dev User"
-    
-    # Check if already registered
-    existing_user = db.get_user_by_telegram_id(user_id)
-    if existing_user:
-        await update.message.reply_text(f"You are already registered as a {existing_user['role']}.")
-        return
-
-    uuid = f"dev-uuid-{user_id}"
-    db.upsert_user(
-        uuid=uuid,
-        name=f"Dev Lecturer ({first_name})",
-        student_id="",
-        phone_number="123456789",
-        telegram_id=user_id,
-        role="lecturer"
-    )
-    
-    reply_keyboard = ReplyKeyboardMarkup(
-        [
-            ["📅 Schedule Class", "📅 My Schedules"],
-            ["📊 Attendance Report", "📚 My Courses"],
-            ["🛠️ Developer Auth", "❓ Help"]
-        ],
-        resize_keyboard=True
-    )
-    
-    await update.message.reply_text(
-        "🛠️ Developer Override: You have been registered in the local DB as a **Lecturer**.\n"
-        "You can now schedule test classes and request reports.",
-        reply_markup=reply_keyboard
-    )
 
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -1595,7 +1554,7 @@ async def complete_schedule_edit(message, context, is_callback):
             [
                 ["📅 Schedule Class", "📅 My Schedules"],
                 ["📊 Attendance Report", "📚 My Courses"],
-                ["🛠️ Developer Auth", "❓ Help"]
+                ["❓ Help"]
             ],
             resize_keyboard=True
         )
@@ -1692,7 +1651,7 @@ async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [
                     ["📅 Schedule Class", "📅 My Schedules"],
                     ["📊 Attendance Report", "📚 My Courses"],
-                    ["🛠️ Developer Auth", "❓ Help"]
+                    ["❓ Help"]
                 ],
                 resize_keyboard=True
             )
@@ -2128,7 +2087,7 @@ async def complete_schedule_creation(message, context, is_callback):
             [
                 ["📅 Schedule Class", "📅 My Schedules"],
                 ["📊 Attendance Report", "📚 My Courses"],
-                ["🛠️ Developer Auth", "❓ Help"]
+                ["❓ Help"]
             ],
             resize_keyboard=True
         )
@@ -2166,7 +2125,7 @@ async def schedule_cancel_callback(update: Update, context: ContextTypes.DEFAULT
                 [
                     ["📅 Schedule Class", "📅 My Schedules"],
                     ["📊 Attendance Report", "📚 My Courses"],
-                    ["🛠️ Developer Auth", "❓ Help"]
+                    ["❓ Help"]
                 ],
                 resize_keyboard=True
             )
@@ -2339,7 +2298,7 @@ async def report_select_course(update: Update, context: ContextTypes.DEFAULT_TYP
         [
             ["📅 Schedule Class", "📅 My Schedules"],
             ["📊 Attendance Report", "📚 My Courses"],
-            ["🛠️ Developer Auth", "❓ Help"]
+            ["❓ Help"]
         ],
         resize_keyboard=True
     )
@@ -2417,7 +2376,7 @@ async def unenroll_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [
             ["📅 Schedule Class", "📅 My Schedules"],
             ["📊 Attendance Report", "📚 My Courses"],
-            ["🛠️ Developer Auth", "❓ Help"]
+            ["❓ Help"]
         ],
         resize_keyboard=True
     )
@@ -2462,8 +2421,6 @@ async def button_mapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await my_courses_cmd(update, context)
     elif text == "📲 Share Bot Link":
         await share_cmd(update, context)
-    elif text == "🛠️ Developer Auth":
-        await auth_me_dev_cmd(update, context)
     elif text == "❓ Help":
         await help_cmd(update, context)
     elif text == "📚 Enroll in Course":
@@ -2489,7 +2446,6 @@ async def main():
     
     # Registration & Commands
     bot_app.add_handler(CommandHandler("start", start_cmd))
-    bot_app.add_handler(CommandHandler("auth_me_dev", auth_me_dev_cmd))
     bot_app.add_handler(CommandHandler("status", status_cmd))
     bot_app.add_handler(CommandHandler("report", report_start))
     bot_app.add_handler(CommandHandler("courses", my_courses_cmd))
@@ -2670,7 +2626,7 @@ async def main():
     bot_app.add_handler(add_course_conv)
     
     # Reply Keyboard Button Mapper (general text mapper when not in conversation, registered last to avoid shadowing conversation entry points)
-    button_filter = filters.TEXT & filters.Regex(r"^(📅 Schedule Class|📅 My Schedules|📊 Attendance Report|📚 My Courses|📲 Share Bot Link|🛠️ Developer Auth|❓ Help|📚 Enroll in Course|👤 My Status)$")
+    button_filter = filters.TEXT & filters.Regex(r"^(📅 Schedule Class|📅 My Schedules|📊 Attendance Report|📚 My Courses|📲 Share Bot Link|❓ Help|📚 Enroll in Course|👤 My Status)$")
     bot_app.add_handler(MessageHandler(button_filter, button_mapper))
     
     # Initialize Bot App
