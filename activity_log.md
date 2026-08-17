@@ -2348,3 +2348,47 @@ Restored the correct co-processor and bus target configuration (ESP32-C6 over SD
 
 #### Commit
 85985bc - fix(wifi): restore working ESP32-C6 SDIO configuration in sdkconfig
+
+
+---
+
+## Session - 2026-08-17 - Build Environment Fix: ESP_IDF_VERSION Kconfig Issue
+
+### User Request
+> Continue (build failing on CONFIG_WIFI_RMT_TX_BUFFER_TYPE undeclared)
+> The wifi now initializes and connects to available hotspot source
+
+### Implementation
+
+#### Feature Overview
+Diagnosed and fixed a persistent compile error where CONFIG_WIFI_RMT_TX_BUFFER_TYPE, CONFIG_WIFI_RMT_DYNAMIC_RX_MGMT_BUF, and CONFIG_WIFI_RMT_ESPNOW_MAX_ENCRYPT_NUM were undeclared identifiers, causing all builds to fail.
+
+**Root Cause:** The espressif__esp_wifi_remote component (v1.5.1) uses an environment-variable-driven Kconfig source directive:
+`
+orsource "./Kconfig.idf_v\.in"
+`
+When \ is not set in the environment (i.e., during builds invoked from the IDE/PowerShell without running export.bat first), Kconfig evaluates the path as ./Kconfig.idf_v.in, which does not exist. Kconfig silently ignores the missing orsource target and skips the entire Wi-Fi Remote configuration subtree. This leaves all CONFIG_WIFI_RMT_* symbols undefined, causing compile errors in esp_wifi.h's WIFI_INIT_CONFIG_DEFAULT() macro.
+
+**Fix:** Set ESP_IDF_VERSION=5.4 explicitly in the build environment before invoking idf.py. This ensures Kconfig sources ./Kconfig.idf_v5.4.in, which defines all required WIFI_RMT_* symbols.
+
+**build_workaround.bat** changes:
+- Added set ESP_IDF_VERSION=5.4 and set IDF_VERSION=5.4.2 before the call export.bat line.
+- Added git checkout -- sdkconfig before build to prevent CMake reconfigure from clobbering the working sdkconfig with its blank fallback.
+- Added explanatory comment block documenting why ESP_IDF_VERSION is critical.
+
+**sdkconfig.defaults.esp32p4** changes:
+- Added CONFIG_WIFI_RMT_DYNAMIC_TX_BUFFER=y choice selector (was missing; derived TX_BUFFER_TYPE=1 couldn't be computed without it).
+- Added CONFIG_WIFI_RMT_TX_BUFFER_TYPE=1 explicit value.
+- Added CONFIG_WIFI_RMT_STATIC_RX_MGMT_BUFFER=y choice selector.
+- Added CONFIG_WIFI_RMT_DYNAMIC_RX_MGMT_BUF=0 derived int.
+- Added CONFIG_WIFI_RMT_RX_MGMT_BUF_NUM_DEF=5 default.
+- Added CONFIG_WIFI_RMT_ESPNOW_MAX_ENCRYPT_NUM=7 default.
+
+#### Build Result
+- Build succeeded: SmartAttendance.bin 0x544e70 bytes (12% free in app partition).
+- Flashed to COM5 successfully: 5,525,104 bytes in 70.4 seconds.
+- Device booted, SDIO transport to ESP32-C6 coprocessor initialized.
+- Wi-Fi stack initializes and connects to available hotspot.
+
+#### Commit
+f59e17d - fix(build): set ESP_IDF_VERSION=5.4 so WIFI_RMT_* Kconfig symbols resolve
