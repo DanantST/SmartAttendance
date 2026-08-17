@@ -2324,3 +2324,27 @@ Fixed two bugs: (1) WiFi init crash on boot due to AP netif creation requiring a
 
 #### Commit
 b73953d - fix(wifi): resolve linker errors for ESP32-P4 esp-hosted build
+
+
+---
+
+## Session - 2026-08-17 - Restore ESP32-C6 SDIO Wi-Fi Target Configuration
+
+### User Request
+> Wifi init failed again! But it was working well before any changes were made today
+
+### Implementation
+
+#### Feature Overview
+Restored the correct co-processor and bus target configuration (ESP32-C6 over SDIO) in the main sdkconfig, resolving the Wi-Fi initialization failure caused by today's earlier config migration to ESP32-H2 over SPI.
+
+**sdkconfig** changes:
+- Reverted the target co-processor to ESP32-C6.
+- Restored the SDIO host interface and pin configurations for Wi-Fi and Bluetooth communication.
+- Restored Wi-Fi buffer and optimization configuration keys.
+
+#### Flash Result
+- Rebuilt and flashed the correct binary to COM5. Verified execution.
+
+#### Commit
+85985bc - fix(wifi): restore working ESP32-C6 SDIO configuration in sdkconfig
