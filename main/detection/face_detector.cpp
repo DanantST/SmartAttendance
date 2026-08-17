@@ -59,28 +59,37 @@ esp_err_t face_detector_run(camera_fb_t *fb, detection_result_t *result) {
         
         /* Extract landmarks (if model provides them) */
         if (d.keypoint.size() >= 10) {
-            for (int j = 0; j < 5; j++) {
-                result->faces[result->face_count].landmarks[j*2] = d.keypoint[j*2];
-                result->faces[result->face_count].landmarks[j*2+1] = d.keypoint[j*2+1];
-            }
+            /* Map from model order [Left Eye (0,1), Right Eye (2,3), Nose (4,5), Left Mouth (6,7), Right Mouth (8,9)]
+             * to expected pipeline order [Left Eye, Left Mouth, Nose, Right Eye, Right Mouth] */
+            result->faces[result->face_count].landmarks[0] = d.keypoint[0]; // Left Eye X
+            result->faces[result->face_count].landmarks[1] = d.keypoint[1]; // Left Eye Y
+            result->faces[result->face_count].landmarks[2] = d.keypoint[6]; // Left Mouth X
+            result->faces[result->face_count].landmarks[3] = d.keypoint[7]; // Left Mouth Y
+            result->faces[result->face_count].landmarks[4] = d.keypoint[4]; // Nose X
+            result->faces[result->face_count].landmarks[5] = d.keypoint[5]; // Nose Y
+            result->faces[result->face_count].landmarks[6] = d.keypoint[2]; // Right Eye X
+            result->faces[result->face_count].landmarks[7] = d.keypoint[3]; // Right Eye Y
+            result->faces[result->face_count].landmarks[8] = d.keypoint[8]; // Right Mouth X
+            result->faces[result->face_count].landmarks[9] = d.keypoint[9]; // Right Mouth Y
         } else {
-            /* Fallback: approximate landmarks from bounding box in ESP-DL order */
-            int cx = d.box[0] + d.box[2]/2;
-            int cy = d.box[1] + d.box[3]/2;
-            (void)cy;
-            int eye_y = d.box[1] + d.box[3]*0.3;
-            int nose_y = d.box[1] + d.box[3]*0.6;
-            int mouth_y = d.box[1] + d.box[3]*0.8;
-            result->faces[result->face_count].landmarks[0] = cx - d.box[2]*0.2;  // Left Eye X
-            result->faces[result->face_count].landmarks[1] = eye_y;             // Left Eye Y
-            result->faces[result->face_count].landmarks[2] = cx - d.box[2]*0.15; // Left Mouth Corner X
-            result->faces[result->face_count].landmarks[3] = mouth_y;            // Left Mouth Corner Y
-            result->faces[result->face_count].landmarks[4] = cx;                 // Nose X
-            result->faces[result->face_count].landmarks[5] = nose_y;            // Nose Y
-            result->faces[result->face_count].landmarks[6] = cx + d.box[2]*0.2;  // Right Eye X
-            result->faces[result->face_count].landmarks[7] = eye_y;             // Right Eye Y
-            result->faces[result->face_count].landmarks[8] = cx + d.box[2]*0.15; // Right Mouth Corner X
-            result->faces[result->face_count].landmarks[9] = mouth_y;            // Right Mouth Corner Y
+            /* Fallback: approximate landmarks from bounding box in expected order */
+            int w = d.box[2] - d.box[0];
+            int h = d.box[3] - d.box[1];
+            int cx = d.box[0] + w/2;
+            int eye_y = d.box[1] + (int)(h * 0.3f);
+            int nose_y = d.box[1] + (int)(h * 0.6f);
+            int mouth_y = d.box[1] + (int)(h * 0.8f);
+            
+            result->faces[result->face_count].landmarks[0] = cx - (int)(w * 0.2f);  // Left Eye X
+            result->faces[result->face_count].landmarks[1] = eye_y;                // Left Eye Y
+            result->faces[result->face_count].landmarks[2] = cx - (int)(w * 0.15f); // Left Mouth Corner X
+            result->faces[result->face_count].landmarks[3] = mouth_y;               // Left Mouth Corner Y
+            result->faces[result->face_count].landmarks[4] = cx;                    // Nose X
+            result->faces[result->face_count].landmarks[5] = nose_y;               // Nose Y
+            result->faces[result->face_count].landmarks[6] = cx + (int)(w * 0.2f);  // Right Eye X
+            result->faces[result->face_count].landmarks[7] = eye_y;                // Right Eye Y
+            result->faces[result->face_count].landmarks[8] = cx + (int)(w * 0.15f); // Right Mouth Corner X
+            result->faces[result->face_count].landmarks[9] = mouth_y;               // Right Mouth Corner Y
         }
         
         result->face_count++;

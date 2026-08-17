@@ -973,6 +973,28 @@ void ui_show_keyboard(lv_obj_t* textarea, const char* title) {
     lv_group_add_obj(group, textarea);
     lv_indev_set_group(ui_get_touch(), group);
     lv_group_focus_obj(textarea);
+
+    /* Keyboard lift: scroll the nearest scrollable ancestor so the textarea
+     * stays visible above the keyboard panel (which sits at Y=290 on screen). */
+    {
+        /* Walk up the parent chain to find a scrollable container */
+        lv_obj_t* scrollable = lv_obj_get_parent(textarea);
+        while (scrollable && !lv_obj_has_flag(scrollable, LV_OBJ_FLAG_SCROLLABLE)) {
+            scrollable = lv_obj_get_parent(scrollable);
+        }
+        if (scrollable) {
+            /* Get absolute Y of textarea on screen */
+            lv_area_t ta_coords;
+            lv_obj_get_coords(textarea, &ta_coords);
+            int ta_bottom = ta_coords.y2; /* Bottom of textarea in screen coords */
+            const int keyboard_top = 285; /* Keyboard panel starts at Y=290, give 5px margin */
+            if (ta_bottom > keyboard_top) {
+                /* How many pixels we need to scroll up */
+                int scroll_by = ta_bottom - keyboard_top + 10;
+                lv_obj_scroll_by(scrollable, 0, scroll_by, LV_ANIM_ON);
+            }
+        }
+    }
 }
 
 void ui_hide_keyboard(void) {
@@ -1172,12 +1194,32 @@ void ui_show_keyboard_input(const char* title, const char* initial_text, bool is
     lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 10);
     
     s_kb_input_ta = lv_textarea_create(card);
-    lv_obj_set_size(s_kb_input_ta, 350, 45);
-    lv_obj_align(s_kb_input_ta, LV_ALIGN_CENTER, 0, -40);
+    lv_obj_set_size(s_kb_input_ta, is_password ? 295 : 350, 45);
+    lv_obj_align(s_kb_input_ta, LV_ALIGN_CENTER, is_password ? -27 : 0, -40);
     lv_textarea_set_text(s_kb_input_ta, initial_text);
     lv_textarea_set_password_mode(s_kb_input_ta, is_password);
     lv_textarea_set_one_line(s_kb_input_ta, true);
-    
+
+    /* Show / Hide toggle for password inputs */
+    if (is_password) {
+        lv_obj_t* eye_btn = lv_btn_create(card);
+        lv_obj_set_size(eye_btn, 46, 45);
+        lv_obj_align_to(eye_btn, s_kb_input_ta, LV_ALIGN_OUT_RIGHT_MID, 6, 0);
+        lv_obj_set_style_bg_color(eye_btn, lv_color_hex(0x3A6EA5), 0);
+        lv_obj_set_style_radius(eye_btn, 8, 0);
+        lv_obj_add_event_cb(eye_btn, [](lv_event_t* e) {
+            lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(e);
+            lv_obj_t* ta  = (lv_obj_t*)lv_event_get_user_data(e);
+            bool hidden = lv_textarea_get_password_mode(ta);
+            lv_textarea_set_password_mode(ta, !hidden);
+            lv_obj_t* lbl = lv_obj_get_child(btn, 0);
+            lv_label_set_text(lbl, hidden ? LV_SYMBOL_EYE_CLOSE : LV_SYMBOL_EYE_OPEN);
+        }, LV_EVENT_CLICKED, (void*)s_kb_input_ta);
+        lv_obj_t* eye_lbl = lv_label_create(eye_btn);
+        lv_label_set_text(eye_lbl, LV_SYMBOL_EYE_CLOSE);
+        lv_obj_center(eye_lbl);
+    }
+
     /* Keyboard sits at Y=310 within the overlay, ending at Y=490 (within safe area). */
     lv_obj_t* kb = lv_keyboard_create(s_kb_input_panel);
     lv_obj_set_size(kb, DISPLAY_WIDTH, 180);

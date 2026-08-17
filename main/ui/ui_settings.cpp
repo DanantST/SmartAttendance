@@ -87,6 +87,17 @@ void ui_close_settings_screen(void) {
     s_sync_interval_dropdown = NULL;
 }
 
+static void show_hide_pass_cb(lv_event_t* e) {
+    /* Toggle between: password hidden / shown */
+    lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(e);
+    lv_obj_t* ta  = (lv_obj_t*)lv_event_get_user_data(e);
+    bool is_hidden = lv_textarea_get_password_mode(ta);
+    lv_textarea_set_password_mode(ta, !is_hidden);
+    /* Update eye icon */
+    lv_obj_t* lbl = lv_obj_get_child(btn, 0);
+    lv_label_set_text(lbl, is_hidden ? LV_SYMBOL_EYE_CLOSE : LV_SYMBOL_EYE_OPEN);
+}
+
 static void textarea_click_event_cb(lv_event_t* e) {
     lv_obj_t* ta = (lv_obj_t*)lv_event_get_target(e);
     const char* title = (const char*)lv_event_get_user_data(e);
@@ -194,11 +205,22 @@ static void create_settings_screen(void) {
     lv_obj_set_pos(pass_label, 15, 120);
     
     s_wifi_pass_input = lv_textarea_create(wifi_card);
-    lv_obj_set_size(s_wifi_pass_input, DISPLAY_WIDTH - 100, 40);
+    lv_obj_set_size(s_wifi_pass_input, DISPLAY_WIDTH - 160, 40);
     lv_obj_set_pos(s_wifi_pass_input, 15, 145);
     lv_textarea_set_one_line(s_wifi_pass_input, true);
     lv_textarea_set_password_mode(s_wifi_pass_input, true);
     lv_obj_add_event_cb(s_wifi_pass_input, textarea_click_event_cb, LV_EVENT_CLICKED, (void*)"WiFi Password");
+
+    /* Show / Hide password toggle button */
+    lv_obj_t* pass_eye_btn = lv_btn_create(wifi_card);
+    lv_obj_set_size(pass_eye_btn, 50, 40);
+    lv_obj_set_pos(pass_eye_btn, DISPLAY_WIDTH - 140, 145);
+    lv_obj_set_style_bg_color(pass_eye_btn, lv_color_hex(0x3A6EA5), 0);
+    lv_obj_set_style_radius(pass_eye_btn, 8, 0);
+    lv_obj_add_event_cb(pass_eye_btn, show_hide_pass_cb, LV_EVENT_CLICKED, (void*)s_wifi_pass_input);
+    lv_obj_t* eye_lbl = lv_label_create(pass_eye_btn);
+    lv_label_set_text(eye_lbl, LV_SYMBOL_EYE_CLOSE);
+    lv_obj_center(eye_lbl);
     
     lv_obj_t* connect_btn = ui_create_button(wifi_card, "Connect", 120, 40);
     lv_obj_set_pos(connect_btn, 15, 195);

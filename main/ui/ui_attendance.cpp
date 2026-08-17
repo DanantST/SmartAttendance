@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include <string.h>
+#include "camera/camera_driver.h"
 
 static const char* TAG = "UI_ATTEN";
 
@@ -27,6 +28,25 @@ static lv_draw_buf_t s_camera_img_dsc;
 static uint8_t* s_camera_buffer = NULL;
 
 #include "database/db_manager.h"
+
+static void camera_profile_event_cb(lv_event_t *e) {
+    lv_obj_t *btn = (lv_obj_t*)lv_event_get_target(e);
+    camera_profile_t profile = (camera_profile_t)(intptr_t)lv_obj_get_user_data(btn);
+    camera_set_profile(profile);
+
+    /* Visual feedback: highlight active button, reset others */
+    lv_obj_t *parent = lv_obj_get_parent(btn);
+    uint32_t child_count = lv_obj_get_child_count(parent);
+    for (uint32_t i = 0; i < child_count; i++) {
+        lv_obj_t *child = lv_obj_get_child(parent, i);
+        if (i == 0) continue; /* Skip title label */
+        if (child == btn) {
+            lv_obj_set_style_bg_color(child, lv_color_hex(0x27AE60), 0);
+        } else {
+            lv_obj_set_style_bg_color(child, lv_color_hex(0x2C3E50), 0);
+        }
+    }
+}
 
 extern "C" void ui_show_attendance_screen(void) {
     ESP_LOGI(TAG, "Opening Attendance Scanner");
@@ -132,6 +152,46 @@ extern "C" void ui_show_attendance_screen(void) {
     lv_obj_set_style_text_color(s_feedback_label, lv_color_hex(0x888888), 0);
     lv_obj_set_style_text_font(s_feedback_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(s_feedback_label, LV_TEXT_ALIGN_CENTER, 0);
+
+    /* Camera Profile Panel on the Right */
+    lv_obj_t* profile_panel = lv_obj_create(s_attendance_screen);
+    lv_obj_set_size(profile_panel, 180, 360);
+    lv_obj_set_pos(profile_panel, preview_x + preview_width + 30, preview_y);
+    lv_obj_set_style_bg_color(profile_panel, ui_theme_get_surface_color(), 0);
+    lv_obj_set_style_border_width(profile_panel, 1, 0);
+    lv_obj_set_style_border_color(profile_panel, lv_color_hex(0x333333), 0);
+    lv_obj_set_style_radius(profile_panel, 8, 0);
+    lv_obj_set_style_pad_all(profile_panel, 10, 0);
+    lv_obj_set_flex_flow(profile_panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(profile_panel, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t* p_title = lv_label_create(profile_panel);
+    lv_label_set_text(p_title, "Camera Profile");
+    lv_obj_set_style_text_font(p_title, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(p_title, ui_theme_get_text_color(), 0);
+
+    const char* labels[] = {"Auto", "Outdoor", "Indoor", "Bright", "Low Light"};
+    camera_profile_t profiles[] = {CAMERA_PROFILE_AUTO, CAMERA_PROFILE_OUTDOOR, CAMERA_PROFILE_INDOOR, CAMERA_PROFILE_BRIGHT, CAMERA_PROFILE_DARK};
+    camera_profile_t active_profile = camera_get_profile();
+
+    for (int i = 0; i < 5; i++) {
+        lv_obj_t* btn = lv_button_create(profile_panel);
+        lv_obj_set_size(btn, 140, 42);
+        lv_obj_set_user_data(btn, (void*)(intptr_t)profiles[i]);
+        
+        if (profiles[i] == active_profile) {
+            lv_obj_set_style_bg_color(btn, lv_color_hex(0x27AE60), 0);
+        } else {
+            lv_obj_set_style_bg_color(btn, lv_color_hex(0x2C3E50), 0);
+        }
+        lv_obj_set_style_radius(btn, 6, 0);
+        lv_obj_add_event_cb(btn, camera_profile_event_cb, LV_EVENT_CLICKED, NULL);
+
+        lv_obj_t* lbl = lv_label_create(btn);
+        lv_label_set_text(lbl, labels[i]);
+        lv_obj_center(lbl);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+    }
 
     /* Load screen directly (keep main screen in memory) */
     lv_scr_load(s_attendance_screen);

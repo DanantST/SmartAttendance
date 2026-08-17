@@ -84,6 +84,7 @@ idf_component_register(SRCS
     esp_hw_support
     esp_https_ota
     app_update
+    esp_hosted
 )
 
 # SPIFFS partition image removed 2026-06-11 (audio subsystem stripped).

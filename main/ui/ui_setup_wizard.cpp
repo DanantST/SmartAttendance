@@ -112,13 +112,31 @@ static lv_obj_t* create_wifi_page(lv_obj_t* parent) {
     }, LV_EVENT_CLICKED, NULL);
     
     s_wifi_pass_ta = lv_textarea_create(parent);
-    lv_obj_set_size(s_wifi_pass_ta, 300, 40);
-    lv_obj_align(s_wifi_pass_ta, LV_ALIGN_CENTER, 0, 70);
+    lv_obj_set_size(s_wifi_pass_ta, 252, 40);
+    lv_obj_align(s_wifi_pass_ta, LV_ALIGN_CENTER, -24, 70);
     lv_textarea_set_placeholder_text(s_wifi_pass_ta, "Password");
     lv_textarea_set_password_mode(s_wifi_pass_ta, true);
     lv_obj_add_event_cb(s_wifi_pass_ta, [](lv_event_t* e) {
         ui_show_keyboard(s_wifi_pass_ta, "Password");
     }, LV_EVENT_CLICKED, NULL);
+
+    /* Show / Hide password toggle */
+    lv_obj_t* wiz_eye_btn = lv_btn_create(parent);
+    lv_obj_set_size(wiz_eye_btn, 40, 40);
+    lv_obj_align_to(wiz_eye_btn, s_wifi_pass_ta, LV_ALIGN_OUT_RIGHT_MID, 6, 0);
+    lv_obj_set_style_bg_color(wiz_eye_btn, lv_color_hex(0x3A6EA5), 0);
+    lv_obj_set_style_radius(wiz_eye_btn, 8, 0);
+    lv_obj_add_event_cb(wiz_eye_btn, [](lv_event_t* e) {
+        lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(e);
+        lv_obj_t* ta  = (lv_obj_t*)lv_event_get_user_data(e);
+        bool hidden = lv_textarea_get_password_mode(ta);
+        lv_textarea_set_password_mode(ta, !hidden);
+        lv_obj_t* lbl = lv_obj_get_child(btn, 0);
+        lv_label_set_text(lbl, hidden ? LV_SYMBOL_EYE_CLOSE : LV_SYMBOL_EYE_OPEN);
+    }, LV_EVENT_CLICKED, (void*)s_wifi_pass_ta);
+    lv_obj_t* wiz_eye_lbl = lv_label_create(wiz_eye_btn);
+    lv_label_set_text(wiz_eye_lbl, LV_SYMBOL_EYE_CLOSE);
+    lv_obj_center(wiz_eye_lbl);
     
     lv_obj_t* next_btn = ui_create_button(parent, "Connect & Next", 180, 50);
     lv_obj_align(next_btn, LV_ALIGN_BOTTOM_MID, 100, -40);

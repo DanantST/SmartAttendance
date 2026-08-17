@@ -92,6 +92,27 @@ void camera_continuous_autofocus(bool enable);
 SemaphoreHandle_t camera_get_frame_sem(void);
 
 
+typedef enum {
+    CAMERA_PROFILE_AUTO = 0,
+    CAMERA_PROFILE_OUTDOOR,
+    CAMERA_PROFILE_INDOOR,
+    CAMERA_PROFILE_BRIGHT,
+    CAMERA_PROFILE_DARK,
+    CAMERA_PROFILE_MAX
+} camera_profile_t;
+
+/**
+ * @brief Set the active camera environment profile
+ * @param profile Environment profile selection
+ */
+void camera_set_profile(camera_profile_t profile);
+
+/**
+ * @brief Get the active camera environment profile
+ * @return Current camera_profile_t
+ */
+camera_profile_t camera_get_profile(void);
+
 #ifdef __cplusplus
 }
 #endif

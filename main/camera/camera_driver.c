@@ -68,6 +68,12 @@ static uint16_t s_out_height = 360;
 static volatile uint32_t s_latest_luminance = 120;
 static volatile bool s_ae_stats_ready = false;
 
+/* Camera environment profile + AE loop state (module-level so
+ * camera_set_profile() can reset them when switching profiles) */
+static camera_profile_t s_camera_profile = CAMERA_PROFILE_AUTO;
+static uint32_t         s_ae_exp_val     = 280;  /* current exposure (shutter lines) */
+static uint32_t         s_ae_gain        = 15;   /* current gain index */
+
 /* ------------------------------------------------------------------ */
 /* CSI callbacks (IRAM-safe)                                           */
 /* ------------------------------------------------------------------ */
@@ -465,52 +471,97 @@ camera_fb_t *camera_capture_frame(void)
             s_ae_stats_ready = false;
             uint32_t lum = s_latest_luminance;
 
-            static uint32_t s_exp_val  = 280;
-            static uint32_t s_gain     = 15;
+            /* Use module-level AE state so camera_set_profile() can reset them */
+            uint32_t s_exp_val = s_ae_exp_val;
+            uint32_t s_gain    = s_ae_gain;
 
-            const uint32_t TARGET_LUM = 145;
+            uint32_t target_lum = 145;
+            uint32_t exp_min = 4;
+            uint32_t exp_max = 720;
+            uint32_t gain_min = 0;
+            uint32_t gain_max = 140;
+
+            switch (s_camera_profile) {
+                case CAMERA_PROFILE_OUTDOOR:
+                    target_lum = 110;
+                    exp_min = 4;
+                    exp_max = 200;
+                    gain_min = 0;
+                    gain_max = 20;
+                    break;
+                case CAMERA_PROFILE_BRIGHT:
+                    target_lum = 130;
+                    exp_min = 4;
+                    exp_max = 350;
+                    gain_min = 0;
+                    gain_max = 50;
+                    break;
+                case CAMERA_PROFILE_DARK:
+                    target_lum = 180;
+                    exp_min = 150;
+                    exp_max = 720;
+                    gain_min = 30;
+                    gain_max = 140;
+                    break;
+                case CAMERA_PROFILE_INDOOR:
+                case CAMERA_PROFILE_AUTO:
+                default:
+                    target_lum = 145;
+                    exp_min = 4;
+                    exp_max = 720;
+                    gain_min = 0;
+                    gain_max = 140;
+                    break;
+            }
+
             const uint32_t DEADBAND   = 12;   /* ±12 counts before reacting */
-            const uint32_t EXP_MIN    = 4;
-            const uint32_t EXP_MAX    = 720;
-            const uint32_t GAIN_MIN   = 0;
-            const uint32_t GAIN_MAX   = 140;
 
-            if (lum < TARGET_LUM - DEADBAND) {
+            /* Apply clamping bounds immediately when switching profiles */
+            if (s_exp_val < exp_min) s_exp_val = exp_min;
+            if (s_exp_val > exp_max) s_exp_val = exp_max;
+            if (s_gain < gain_min) s_gain = gain_min;
+            if (s_gain > gain_max) s_gain = gain_max;
+
+            if (lum < target_lum - DEADBAND) {
                 /* --- Too dark: brighten (increase exposure first, then gain) --- */
-                uint32_t err = (TARGET_LUM - DEADBAND) - lum;
+                uint32_t err = (target_lum - DEADBAND) - lum;
                 uint32_t step = (err > 60) ? 30 : (err > 20) ? 15 : 4;
 
-                if (s_exp_val < EXP_MAX) {
-                    s_exp_val = (s_exp_val + step * 3 > EXP_MAX) ? EXP_MAX : s_exp_val + step * 3;
+                if (s_exp_val < exp_max) {
+                    s_exp_val = (s_exp_val + step * 3 > exp_max) ? exp_max : s_exp_val + step * 3;
                     esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_EXPOSURE_VAL,
-                                                  &s_exp_val, sizeof(uint32_t));
-                } else if (s_gain < GAIN_MAX) {
-                    s_gain = (s_gain + step > GAIN_MAX) ? GAIN_MAX : s_gain + step;
+                                                   &s_exp_val, sizeof(uint32_t));
+                } else if (s_gain < gain_max) {
+                    s_gain = (s_gain + step > gain_max) ? gain_max : s_gain + step;
                     esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_GAIN,
-                                                  &s_gain, sizeof(uint32_t));
+                                                   &s_gain, sizeof(uint32_t));
                 }
                 ESP_LOGI(TAG, "AE dark  lum=%lu err=%lu exp=%lu gain=%lu",
                          (unsigned long)lum, (unsigned long)err,
                          (unsigned long)s_exp_val, (unsigned long)s_gain);
 
-            } else if (lum > TARGET_LUM + DEADBAND) {
+            } else if (lum > target_lum + DEADBAND) {
                 /* --- Too bright: darken (decrease gain first, then exposure) --- */
-                uint32_t err = lum - (TARGET_LUM + DEADBAND);
+                uint32_t err = lum - (target_lum + DEADBAND);
                 uint32_t step = (err > 60) ? 30 : (err > 20) ? 15 : 4;
 
-                if (s_gain > GAIN_MIN) {
-                    s_gain = (s_gain < GAIN_MIN + step) ? GAIN_MIN : s_gain - step;
+                if (s_gain > gain_min) {
+                    s_gain = (s_gain < gain_min + step) ? gain_min : s_gain - step;
                     esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_GAIN,
-                                                  &s_gain, sizeof(uint32_t));
-                } else if (s_exp_val > EXP_MIN) {
-                    s_exp_val = (s_exp_val < EXP_MIN + step * 3) ? EXP_MIN : s_exp_val - step * 3;
+                                                   &s_gain, sizeof(uint32_t));
+                } else if (s_exp_val > exp_min) {
+                    s_exp_val = (s_exp_val < exp_min + step * 3) ? exp_min : s_exp_val - step * 3;
                     esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_EXPOSURE_VAL,
-                                                  &s_exp_val, sizeof(uint32_t));
+                                                   &s_exp_val, sizeof(uint32_t));
                 }
                 ESP_LOGI(TAG, "AE bright lum=%lu err=%lu exp=%lu gain=%lu",
                          (unsigned long)lum, (unsigned long)err,
                          (unsigned long)s_exp_val, (unsigned long)s_gain);
             }
+
+            /* Write back updated state to module-level vars */
+            s_ae_exp_val = s_exp_val;
+            s_ae_gain    = s_gain;
         }
         
         uint16_t req_w = (s_current_framesize == FRAMESIZE_QVGA) ? 320 : 640;
@@ -558,4 +609,50 @@ void camera_continuous_autofocus(bool enable)    { (void)enable; }
 SemaphoreHandle_t camera_get_frame_sem(void)
 {
     return s_frame_sem;
+}
+
+void camera_set_profile(camera_profile_t profile)
+{
+    if (profile >= CAMERA_PROFILE_MAX) {
+        ESP_LOGW(TAG, "Invalid camera profile %d, ignoring", (int)profile);
+        return;
+    }
+    s_camera_profile = profile;
+    ESP_LOGI(TAG, "Camera profile set to %d", (int)profile);
+
+    /* Immediately apply a representative starting point AND update the
+     * module-level AE state variables so the AE loop continues from
+     * the new baseline instead of overriding us on the very next frame. */
+    uint32_t exp_val;
+    uint32_t gain;
+    switch (profile) {
+        case CAMERA_PROFILE_OUTDOOR:
+            exp_val = 120;  gain = 2;   break;
+        case CAMERA_PROFILE_BRIGHT:
+            exp_val = 200;  gain = 5;   break;
+        case CAMERA_PROFILE_DARK:
+            exp_val = 600;  gain = 80;  break;
+        case CAMERA_PROFILE_INDOOR:
+            exp_val = 320;  gain = 20;  break;
+        case CAMERA_PROFILE_AUTO:
+        default:
+            exp_val = 280;  gain = 15;  break;
+    }
+
+    /* Update AE state first so the loop reads the new baseline */
+    s_ae_exp_val = exp_val;
+    s_ae_gain    = gain;
+
+    /* Then push to sensor hardware */
+    if (s_cam_dev) {
+        esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_EXPOSURE_VAL, &exp_val, sizeof(uint32_t));
+        esp_cam_sensor_set_para_value(s_cam_dev, ESP_CAM_SENSOR_GAIN,         &gain,    sizeof(uint32_t));
+        ESP_LOGI(TAG, "Profile %d: exp=%"PRIu32" gain=%"PRIu32" (AE refines from here)",
+                 (int)profile, exp_val, gain);
+    }
+}
+
+camera_profile_t camera_get_profile(void)
+{
+    return s_camera_profile;
 }

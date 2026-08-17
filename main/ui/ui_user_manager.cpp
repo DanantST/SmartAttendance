@@ -12,6 +12,8 @@
 #include "esp_log.h"
 #include "config.h"
 #include <string.h>
+#include "ble/ble_registration.h"
+#include "ui_enrollment.h"
 
 static const char* TAG = "UI_USER";
 
@@ -20,6 +22,7 @@ static lv_obj_t* s_user_list = NULL;
 
 static void create_user_manager_screen(void);
 static void delete_user_event_handler(lv_event_t* e);
+static void reenroll_user_event_handler(lv_event_t* e);
 static void close_btn_event_handler(lv_event_t* e);
 
 void ui_show_user_manager(void) {
@@ -188,8 +191,31 @@ static void create_user_manager_screen(void) {
             lv_obj_set_style_text_font(course_lbl, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(course_lbl, lv_color_hex(0x3B82F6), 0);
             
+            // Actions container on the right
+            lv_obj_t* actions_row = lv_obj_create(item);
+            lv_obj_set_size(actions_row, 100, 45);
+            lv_obj_set_style_bg_opa(actions_row, 0, 0);
+            lv_obj_set_style_border_width(actions_row, 0, 0);
+            lv_obj_set_style_pad_all(actions_row, 0, 0);
+            lv_obj_set_flex_flow(actions_row, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(actions_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_clear_flag(actions_row, LV_OBJ_FLAG_SCROLLABLE);
+
+            // Re-enroll button (only show for student and lecturer roles)
+            if (strcmp(users[i].role, "admin") != 0) {
+                lv_obj_t* reen_btn = lv_btn_create(actions_row);
+                lv_obj_set_size(reen_btn, 45, 45);
+                lv_obj_set_style_bg_color(reen_btn, lv_color_hex(0xFF9900), 0); // Orange
+                lv_obj_set_user_data(reen_btn, (void*)(uintptr_t)users[i].id);
+                lv_obj_add_event_cb(reen_btn, reenroll_user_event_handler, LV_EVENT_CLICKED, NULL);
+                
+                lv_obj_t* reen_icon = lv_label_create(reen_btn);
+                lv_label_set_text(reen_icon, LV_SYMBOL_REFRESH);
+                lv_obj_center(reen_icon);
+            }
+
             // Delete button on the right
-            lv_obj_t* del_btn = lv_btn_create(item);
+            lv_obj_t* del_btn = lv_btn_create(actions_row);
             lv_obj_set_size(del_btn, 45, 45);
             lv_obj_set_style_bg_color(del_btn, lv_color_hex(0xCC3333), 0);
             lv_obj_set_user_data(del_btn, (void*)(uintptr_t)users[i].id);
@@ -220,8 +246,8 @@ static void delete_user_event_handler(lv_event_t* e) {
         recognizer_load_cache();
         ui_show_notification(NOTIFY_SUCCESS, "User Management", "User deleted successfully", 2000);
         
-        /* Refresh list */
-        lv_obj_delete_async(lv_obj_get_parent(btn));
+        /* Refresh list by deleting the grandparent (item card) of the button */
+        lv_obj_delete_async(lv_obj_get_parent(lv_obj_get_parent(btn)));
         if (lv_obj_get_child_count(s_user_list) == 0) {
             lv_obj_t* empty_label = lv_label_create(s_user_list);
             lv_label_set_text(empty_label, "No users enrolled.");
@@ -229,6 +255,39 @@ static void delete_user_event_handler(lv_event_t* e) {
         }
     } else {
         ui_show_notification(NOTIFY_ERROR, "User Management", "Failed to delete user", 2000);
+    }
+}
+
+static void reenroll_user_event_handler(lv_event_t* e) {
+    lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(e);
+    uint32_t user_id = (uint32_t)(uintptr_t)lv_obj_get_user_data(btn);
+    
+    ESP_LOGI(TAG, "Re-enrolling user ID: %u", (unsigned int)user_id);
+    
+    user_t user;
+    if (db_get_user_by_id(user_id, &user) == ESP_OK) {
+        // 1. Delete user from database
+        if (db_delete_user(user_id) == ESP_OK) {
+            // 2. Refresh recognizer cache
+            recognizer_load_cache();
+            
+            // 3. Add to pending queue so it appears on the enrollment screen
+            ble_registration_add_pending_student(user.name, user.student_id, user.phone_number, user.role);
+            
+            // 4. Show success notification
+            ui_show_notification(NOTIFY_SUCCESS, "Re-enrollment", "Student queued. Opening Enrollment screen...", 2500);
+            
+            // 5. Delete this card from list
+            lv_obj_delete_async(lv_obj_get_parent(lv_obj_get_parent(btn)));
+            
+            // 6. Direct UI to Enrollment screen
+            ui_close_user_manager();
+            ui_show_enrollment_screen();
+        } else {
+            ui_show_notification(NOTIFY_ERROR, "Re-enrollment", "Failed to delete existing user", 2000);
+        }
+    } else {
+        ui_show_notification(NOTIFY_ERROR, "Re-enrollment", "Failed to load user details", 2000);
     }
 }
 
