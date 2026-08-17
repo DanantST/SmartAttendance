@@ -9,6 +9,12 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
+#if CONFIG_ESP_WIFI_REMOTE_ENABLED
+#include "esp_wifi_remote.h"
+#endif
+#if CONFIG_IDF_TARGET_ESP32P4
+#include "esp_hosted.h"
+#endif
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
@@ -83,11 +89,24 @@ esp_err_t wifi_manager_init(void) {
         ESP_LOGE(TAG, "esp_event_loop_create_default failed: %d", ret);
         return ret;
     }
-    
-    /* Create default Wi-Fi station and AP interfaces */
+
+    /* Create default Wi-Fi station interface.
+     * NOTE: AP netif is NOT created here — it is created on-demand by
+     * wifi_ap_portal when the captive portal is launched. Creating the AP
+     * netif here requires CONFIG_WIFI_RMT_SOFTAP_SUPPORT / CONFIG_ESP_WIFI_SOFTAP_SUPPORT
+     * which are not enabled, and would crash the init on P4. */
     esp_netif_create_default_wifi_sta();
-    esp_netif_create_default_wifi_ap();
     
+#if CONFIG_IDF_TARGET_ESP32P4
+    ESP_LOGI(TAG, "Connecting to ESP-Hosted slave co-processor...");
+    int rc = esp_hosted_connect_to_slave();
+    if (rc != 0) {
+        ESP_LOGE(TAG, "Failed to connect to ESP-Hosted slave co-processor: %d", rc);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "Connected to ESP-Hosted slave co-processor successfully.");
+#endif
+
     /* Initialize Wi-Fi stack */
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ret = esp_wifi_init(&cfg);

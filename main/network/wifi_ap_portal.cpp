@@ -7,6 +7,9 @@
 #include "sdkconfig.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
+#if CONFIG_ESP_WIFI_REMOTE_ENABLED
+#include "esp_wifi_remote.h"
+#endif
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_http_server.h"
@@ -747,12 +750,14 @@ esp_err_t wifi_ap_portal_start(void) {
     // 2. Initialize default AP netif if not already done
     if (!s_ap_netif) {
         s_ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+#ifdef CONFIG_ESP_WIFI_SOFTAP_SUPPORT
         if (!s_ap_netif) {
             s_ap_netif = esp_netif_create_default_wifi_ap();
         }
+#endif
         if (!s_ap_netif) {
-            ESP_LOGE(TAG, "Failed to create default Wi-Fi AP interface");
-            return ESP_ERR_NO_MEM;
+            ESP_LOGE(TAG, "SoftAP netif unavailable (CONFIG_ESP_WIFI_SOFTAP_SUPPORT not set) — captive portal disabled");
+            return ESP_ERR_NOT_SUPPORTED;
         }
     }
 
