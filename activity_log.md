@@ -1917,12 +1917,12 @@ The `LV_LABEL_LONG_MODE_CLIP` mode silently clips text that overflows the label'
   - `telegram_bot/bot.py` (modified)
   - `telegram_proxy_vercel/vercel.json` (new)
   - `telegram_proxy_vercel/api/index.js` (new)
-- **Status:** Complete & Verified — Bot fully responsive on Telegram
+- **Status:** Complete & Verified ï¿½ Bot fully responsive on Telegram
 
 #### Background
 `@MyUniAttendance_Bot` hosted on the Hugging Face Space `DanantST/smart-attendance-bot` (`https://danantst-smart-attendance-bot.hf.space`) stopped responding to all Telegram messages. The Space itself was running (health endpoint returned 200), but webhook delivery was failing.
 
-#### Phase 1 — Diagnostics Infrastructure
+#### Phase 1 ï¿½ Diagnostics Infrastructure
 Added a `GET /api/diagnostics` FastAPI endpoint to `telegram_bot/bot.py`. The endpoint reports from inside the running container:
 - Masked `TELEGRAM_BOT_TOKEN` status
 - `PUBLIC_URL` and `TELEGRAM_API_URL` env vars
@@ -1930,27 +1930,27 @@ Added a `GET /api/diagnostics` FastAPI endpoint to `telegram_bot/bot.py`. The en
 - Live HTTP ping results to: `httpbin.org`, `api.telegram.org`, the configured proxy URL, and `vercel.com`
 - A live `getMe` call to the configured Telegram API URL
 
-#### Phase 2 — Fault-Tolerant Startup
+#### Phase 2 ï¿½ Fault-Tolerant Startup
 Wrapped `set_webhook()` and `delete_webhook()` calls in `try...except` blocks in `bot.py`. The FastAPI web server now boots and serves the REST API / diagnostics even if the Telegram API or proxy is completely unreachable, preventing the entire Space from going offline due to a network error.
 
-#### Phase 3 — IPv4 DNS Override Disabled
+#### Phase 3 ï¿½ IPv4 DNS Override Disabled
 The global `socket.getaddrinfo = getaddrinfo_ipv4` override (previously added to fix HF IPv6 resolution timeouts) was commented out to test if it was causing the TLS handshake failures to Cloudflare Workers:
 ```python
 # socket.getaddrinfo = getaddrinfo_ipv4  # Disabled override
 ```
 Changes committed as `e9558df` and pushed to GitHub, triggering a Hugging Face Space rebuild.
 
-#### Phase 4 — Diagnostics Results (Root Cause Confirmed)
+#### Phase 4 ï¿½ Diagnostics Results (Root Cause Confirmed)
 After redeployment, queried `/api/diagnostics`:
 ```
-httpbin.org         ? SUCCESS (200)  — general internet works
-api.telegram.org    ? FAILED  — _ssl.c:999: The handshake operation timed out
-cloudflare_worker   ? FAILED  — _ssl.c:999: The handshake operation timed out
-vercel.com          ? SUCCESS (200)  — Vercel is NOT blocked
+httpbin.org         ? SUCCESS (200)  ï¿½ general internet works
+api.telegram.org    ? FAILED  ï¿½ _ssl.c:999: The handshake operation timed out
+cloudflare_worker   ? FAILED  ï¿½ _ssl.c:999: The handshake operation timed out
+vercel.com          ? SUCCESS (200)  ï¿½ Vercel is NOT blocked
 ```
 **Root cause confirmed:** Hugging Face Spaces intentionally blocks all outbound TLS connections to `api.telegram.org` and `*.workers.dev` (Cloudflare) at the platform level to prevent bot/API abuse. This is an intentional platform policy, not a code bug. General HTTPS to other domains (httpbin, vercel) works fine.
 
-#### Phase 5 — Vercel Proxy Deployment
+#### Phase 5 ï¿½ Vercel Proxy Deployment
 Since Hugging Face does not block Vercel, deployed a lightweight Node.js serverless proxy on Vercel to act as a transparent relay between Hugging Face and `api.telegram.org`.
 
 **New files created:**
@@ -1975,7 +1975,7 @@ Since Hugging Face does not block Vercel, deployed a lightweight Node.js serverl
 3. Deployed non-interactively: `vercel deploy --yes`
 4. **Proxy live at:** `https://telegram-proxy-gold.vercel.app/bot`
 
-#### Phase 6 — Hugging Face Secret Update & Restart
+#### Phase 6 ï¿½ Hugging Face Secret Update & Restart
 Updated the `TELEGRAM_API_URL` secret in Hugging Face Space Settings from the old Cloudflare Workers URL to:
 ```
 https://telegram-proxy-gold.vercel.app/bot
@@ -2003,7 +2003,7 @@ Triggered a Factory Rebuild of the Space to apply the new secret.
 ```
 
 #### End-to-End Bot Verification
-Tested `@MyUniAttendance_Bot` on Telegram — all commands confirmed working:
+Tested `@MyUniAttendance_Bot` on Telegram ï¿½ all commands confirmed working:
 - ? Developer Auth ? registered as Lecturer
 - ? My Courses ? lists enrolled courses
 - ? Schedule Class ? full multi-step conversation flow
@@ -2015,11 +2015,11 @@ Tested `@MyUniAttendance_Bot` on Telegram — all commands confirmed working:
 ### [2026-07-11] - Event Type Specification and Improved Sync Messaging Updates
 - **Category:** User Interface / Backend Upgrades
 - **Altered Files:**
-  - `telegram_bot/db.py` (modified — schedules table migration, read/write event types)
-  - `telegram_bot/bot.py` (modified — conversation flow, prompts, dynamic notifications, and student sync templates)
-- **Status:** Complete & Verified — Bot running with updated schema and commands on Hugging Face Spaces
+  - `telegram_bot/db.py` (modified ï¿½ schedules table migration, read/write event types)
+  - `telegram_bot/bot.py` (modified ï¿½ conversation flow, prompts, dynamic notifications, and student sync templates)
+- **Status:** Complete & Verified ï¿½ Bot running with updated schema and commands on Hugging Face Spaces
 
-#### Feature 1 — Event Type Selection during Scheduling
+#### Feature 1 ï¿½ Event Type Selection during Scheduling
 Added support for specifying event types (Lecture, Test, Exam) during class scheduling.
 - **Database Migration**: An automatic SQLite migration is executed at startup (`ALTER TABLE schedules ADD COLUMN event_type TEXT DEFAULT 'lecture'`) to keep the DB schema clean.
 - **State Flow**: Declared `SELECT_EVENT_TYPE = 26` and registered it in the scheduling `ConversationHandler`.
@@ -2027,11 +2027,11 @@ Added support for specifying event types (Lecture, Test, Exam) during class sche
 - **Summary**: All subsequent date, time, and confirmation messages display the chosen event type (e.g. `Event Type: Exam`).
 - **Listed view**: Updated `/schedules` (and schedules list buttons) to display the event type of each scheduled item.
 
-#### Feature 2 — Dynamic Notifications for Scheduled Events
+#### Feature 2 ï¿½ Dynamic Notifications for Scheduled Events
 Enrolled students are notified asynchronously using dynamic templates based on the event type:
 - e.g. `?? New Test Scheduled!` or `?? New Exam Scheduled!` advising them to "be prepared and punctual".
 
-#### Feature 3 — Synced & Subscription Enrollment Messages
+#### Feature 3 ï¿½ Synced & Subscription Enrollment Messages
 Updated all templates to inform students that their registration details have been successfully synced and prompt them to subscribe to available courses for event updates.
 - **Device Sync (`notify_linked_student` & `prompt_student_course_registration`)**: Sends welcome prompts informing them that their profile is synced, advising them to subscribe to available courses immediately to receive event updates (lectures, tests, exams) and attendance notifications.
 - **Pairing Flow (`contact_handler`)**: Welcomes paired contacts by letting them know their Telegram account has been linked and synced, prompting them to subscribe to courses.
@@ -2043,7 +2043,7 @@ Updated all templates to inform students that their registration details have be
 
 ---
 
-## Session – 2026-07-11 (Evening) — Bidirectional Schedule / Course / Lecturer Sync
+## Session ï¿½ 2026-07-11 (Evening) ï¿½ Bidirectional Schedule / Course / Lecturer Sync
 
 ### User Request
 > "The device is syncing but it is not including the device schedules. I want the device and the cloud to be able to compare information in their databases and update one another during syncing"
@@ -2068,28 +2068,28 @@ Device  ------------------------------------------?  Cloud Bot
 
 #### Files Changed
 
-**	elegram_bot/db.py** — 6 new bidirectional sync helpers:
-- upsert_course_from_device(code, name) — INSERT OR IGNORE into cloud courses
-- upsert_schedule_from_device(...) — INSERT into cloud schedules using 'device' as placeholder 	elegram_id, deduplicated on (course_code, start_time, end_time)
-- upsert_lecturer_course_from_device(lecturer_uuid, course_code) — resolves UUID?telegram_id, inserts into lecturer_courses
-- get_cloud_schedules_not_known_by_device(known_keys) — returns cloud schedules not in device's known set
-- get_cloud_courses_not_known_by_device(known_codes) — returns cloud courses not in device's known set
-- get_cloud_lecturer_assignments_not_known_by_device(known_pairs) — returns cloud lecturer?course links not in device's known set
+**	elegram_bot/db.py** ï¿½ 6 new bidirectional sync helpers:
+- upsert_course_from_device(code, name) ï¿½ INSERT OR IGNORE into cloud courses
+- upsert_schedule_from_device(...) ï¿½ INSERT into cloud schedules using 'device' as placeholder 	elegram_id, deduplicated on (course_code, start_time, end_time)
+- upsert_lecturer_course_from_device(lecturer_uuid, course_code) ï¿½ resolves UUID?telegram_id, inserts into lecturer_courses
+- get_cloud_schedules_not_known_by_device(known_keys) ï¿½ returns cloud schedules not in device's known set
+- get_cloud_courses_not_known_by_device(known_codes) ï¿½ returns cloud courses not in device's known set
+- get_cloud_lecturer_assignments_not_known_by_device(known_pairs) ï¿½ returns cloud lecturer?course links not in device's known set
 
-**	elegram_bot/bot.py** — New endpoint POST /api/sync_schedules:
+**	elegram_bot/bot.py** ï¿½ New endpoint POST /api/sync_schedules:
 - Accepts { schedules[], courses[], lecturers[] } from device
 - Upserts all device data (courses first, then lecturers, then schedules)
 - Computes diff and returns { new_schedules[], new_courses[], new_lecturers[] }
 
-**main/database/db_manager.h** — New types and declarations:
+**main/database/db_manager.h** ï¿½ New types and declarations:
 - db_course_t struct { code[32], name[64] }
 - db_lecturer_assignment_t struct { lecturer_uuid[37], course_code[32] }
-- db_get_all_courses_full() — returns both code and name per course
-- db_get_all_lecturer_assignments() — returns flat lecturer?course pairs via JOIN
+- db_get_all_courses_full() ï¿½ returns both code and name per course
+- db_get_all_lecturer_assignments() ï¿½ returns flat lecturer?course pairs via JOIN
 
-**main/database/db_manager.c** — Implemented both new functions above.
+**main/database/db_manager.c** ï¿½ Implemented both new functions above.
 
-**main/network/cloud_sync.c** — Major changes:
+**main/network/cloud_sync.c** ï¿½ Major changes:
 - **sync_schedule() completely rewritten** to:
   - Step A: Collect local schedules (db_get_future_schedules), courses (db_get_all_courses_full), lecturer links (db_get_all_lecturer_assignments)
   - Step B: Serialize into JSON payload
@@ -2098,7 +2098,7 @@ Device  ------------------------------------------?  Cloud Bot
 - **cloud_sync_task() reordered**: sync_users() now runs **before** sync_schedule() so lecturer UUIDs are known on both sides when the bidirectional endpoint resolves them
 
 #### Commit
-73dd66d — feat: bidirectional sync for schedules, courses, and lecturer assignments
+73dd66d ï¿½ feat: bidirectional sync for schedules, courses, and lecturer assignments
 
 ---
 
@@ -2118,9 +2118,9 @@ When a user was enrolled on the attendance device their record was synced to the
 #### Solution: welcomed_at stamp + catch-up sweep
 
 **	elegram_bot/db.py** changes:
-- init_db() — Added ALTER TABLE users ADD COLUMN welcomed_at INTEGER DEFAULT NULL migration (safe no-op on re-run if column already exists).
-- New function mark_user_welcomed(uuid) — Stamps welcomed_at = now for a given user.
-- New function get_unwelcomed_linked_users() — Returns all users with a non-empty 	elegram_id AND welcomed_at IS NULL.
+- init_db() ï¿½ Added ALTER TABLE users ADD COLUMN welcomed_at INTEGER DEFAULT NULL migration (safe no-op on re-run if column already exists).
+- New function mark_user_welcomed(uuid) ï¿½ Stamps welcomed_at = now for a given user.
+- New function get_unwelcomed_linked_users() ï¿½ Returns all users with a non-empty 	elegram_id AND welcomed_at IS NULL.
 
 **	elegram_bot/bot.py** changes:
 - New async function welcome_newly_enrolled_user(uuid, telegram_id, name, role):
@@ -2137,15 +2137,15 @@ otify_linked_student) are immediately stamped with mark_user_welcomed so they sk
 #### Behaviour
 | Scenario | Message sent |
 |---|---|
-| New enroll, no Telegram link | None (no telegram_id yet — nothing changes) |
+| New enroll, no Telegram link | None (no telegram_id yet ï¿½ nothing changes) |
 | New enroll, device sends telegram_id in sync payload | ?? Welcome message on first sync |
 | Returning user, already welcomed | No duplicate (welcomed_at is set) |
 | Phone-link pairing path (existing) | ?? Synced & Linked message (unchanged) |
 | Pre-feature user with linked account | ?? Welcome on next sync (catch-up) |
 
 #### Files Changed
-- 	elegram_bot/db.py — schema migration + 2 new helpers
-- 	elegram_bot/bot.py — welcome_newly_enrolled_user() function + sync_users sweep
+- 	elegram_bot/db.py ï¿½ schema migration + 2 new helpers
+- 	elegram_bot/bot.py ï¿½ welcome_newly_enrolled_user() function + sync_users sweep
 
 #### Status
 Complete. Requires Hugging Face Space restart to pick up changes.
@@ -2236,3 +2236,91 @@ Added an interactive **? Register New Course** option inside the **My Courses** 
 
 #### Commit
 cbaef24 - feat: add ? Register New Course feature to My Courses menu for lecturers
+
+---
+
+## Session - 2026-08-17 - Linker Fix, Password Toggle, Keyboard Lift, Build & Flash
+
+### User Request
+> Continue (build, fix linker errors, flash firmware to device, add agent law for activity log updates)
+
+### Implementation
+
+#### Feature Overview
+Resolved a critical linker failure caused by missing esp_wifi_remote netif functions, and flashed the complete firmware to the device. Additionally completed two UI improvements: password visibility toggle on all password inputs and keyboard scroll-lift so content is not obscured when typing.
+
+**sdkconfig** changes:
+- Enabled CONFIG_ESP_HOST_WIFI_ENABLED=y ï¿½ triggers compilation of esp_wifi_remote_net2.c which provides esp_wifi_remote_create_default_sta and esp_wifi_remote_create_default_ap, resolving the linker undefined-reference errors.
+
+**main/network/wifi_manager.c** changes:
+- Replaced esp_netif_create_default_wifi_sta() with esp_wifi_remote_create_default_sta() for P4 remote-WiFi compatibility.
+
+**main/network/wifi_ap_portal.cpp** changes:
+- Replaced esp_netif_create_default_wifi_ap() with esp_wifi_remote_create_default_ap() for P4 remote-WiFi compatibility.
+
+**main/ui/ui_settings.cpp** changes:
+- Added eye-icon password toggle button to the WiFi password card so users can reveal/hide the password while typing.
+
+**main/ui/ui_setup_wizard.cpp** changes:
+- Added eye-icon password toggle button to the wizard WiFi password screen.
+
+**main/ui/ui_main.cpp** changes:
+- Implemented keyboard scroll-lift: when the on-screen keyboard opens, the focused textarea's parent scroll container is scrolled upward so the input is visible above the keyboard panel (Y=290).
+- Added password toggle button to the generic text input modal when is_password flag is true.
+
+**main/ui/ui_attendance.cpp** changes:
+- Added camera environment profile side-bar toggle panel (Auto / Outdoor / Indoor / Bright / Low Light) to the scan screen.
+
+**main/ui/ui_enrollment.cpp** changes:
+- Added camera environment profile side-bar toggle panel to the enrollment screen.
+
+**main/camera/camera_driver.c** changes:
+- Added s_camera_profile static state variable and implemented camera_set_profile() / camera_get_profile() functions.
+
+**main/detection/face_detector.cpp** changes:
+- Fixed landmark keypoint remapping from model-native BGGR/ESP-DL order to canonical pipeline order: [Left Eye, Left Mouth, Nose, Right Eye, Right Mouth].
+- Fixed fallback bounding box size calculation (replaced ox[2] with width ox[2]-box[0]).
+
+**AGENTS.md** changes:
+- Created new file at workspace root defining the agent law: always update ctivity_log.md after every task run, with required markdown format (Session, User Request, Implementation, Commit sections).
+
+#### Build Result
+- Build succeeded: SmartAttendance.bin ï¿½ 0x579470 bytes (9% free in app partition).
+
+#### Flash Result
+- Flashed successfully to COM5: 5,739,632 bytes written in 72.9 seconds. Device hard-reset via RTS pin. Flash verified.
+
+#### Commit
+0828d0b - feat: implement complete LVGL-based UI architecture and network management module
+
+
+---
+
+## Session - 2026-08-17 - Camera Profile AE Loop Fix + WiFi Init Fix
+
+### User Request
+> Camera profile buttons update highlights but stream doesnt change. WiFi init failed during boot. (Also resolving esp_wifi_remote linker issues on ESP32-P4 with disabled SoftAP config, and flashing to COM5).
+
+### Implementation
+
+#### Feature Overview
+Fixed two bugs: (1) WiFi init crash on boot due to AP netif creation requiring a disabled Kconfig option, and (2) camera profile buttons not visibly affecting the live stream due to the AE loop overriding sensor writes with stale internal state. Also resolved build linker errors for remote WiFi AP/STA netif configurations under non-softap environments, and successfully flashed the binary to the target device.
+
+**main/network/wifi_manager.c** changes:
+- Removed esp_wifi_remote_create_default_ap() call from wifi_manager_init(). The AP netif creation macro requires CONFIG_WIFI_RMT_SOFTAP_SUPPORT which was not enabled, causing a boot crash. AP netif is now only created on-demand by the captive portal.
+- Unconditionally called esp_netif_create_default_wifi_sta() instead of conditional remote sta functions that are missing from the build profile.
+
+**main/network/wifi_ap_portal.cpp** changes:
+- Guarded the esp_netif_create_default_wifi_ap() call behind CONFIG_ESP_WIFI_SOFTAP_SUPPORT to prevent linker errors on remote-wifi platforms where SoftAP isn't compiled. Gracefully returns ESP_ERR_NOT_SUPPORTED.
+
+**main/camera/camera_driver.c** changes:
+- Root cause: AE loop declared s_exp_val and s_gain as function-local statics. When camera_set_profile() wrote preset values to the sensor, the AE loop fired ~33ms later and overwrote them with stale local state, making the profile change invisible.
+- Promoted s_exp_val and s_gain to module-level statics s_ae_exp_val and s_ae_gain.
+- Updated camera_set_profile() to update s_ae_exp_val/s_ae_gain first, then push to sensor hardware so AE loop starts from the new baseline on its next iteration.
+- Added write-back at end of AE loop so module state stays in sync as AE refines values.
+
+#### Flash Result
+- Successfully flashed build to COM5 at 460800 baud. Device reset and verified.
+
+#### Commit
+b73953d - fix(wifi): resolve linker errors for ESP32-P4 esp-hosted build
