@@ -272,7 +272,7 @@ static void reenroll_user_event_handler(lv_event_t* e) {
             recognizer_load_cache();
             
             // 3. Add to pending queue so it appears on the enrollment screen
-            ble_registration_add_pending_student(user.name, user.student_id, user.phone_number, user.role);
+            ble_registration_add_pending_student(user.name, user.student_id, user.role, user.phone_number);
             
             // 4. Show success notification
             ui_show_notification(NOTIFY_SUCCESS, "Re-enrollment", "Student queued. Opening Enrollment screen...", 2500);
