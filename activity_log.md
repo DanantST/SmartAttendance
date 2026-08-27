@@ -2392,3 +2392,136 @@ When \ is not set in the environment (i.e., during builds invoked from the IDE/P
 
 #### Commit
 f59e17d - fix(build): set ESP_IDF_VERSION=5.4 so WIFI_RMT_* Kconfig symbols resolve
+
+
+---
+
+## Session - 2026-08-17 - Re-enrollment Form Arguments Order Fix
+
+### User Request
+> Let's make it safe to use confidently
+
+### Implementation
+
+#### Feature Overview
+Fixed a critical bug in the user re-enrollment flow. When a user was queued for re-enrollment, the arguments ole and phone_number were passed to le_registration_add_pending_student() in reverse order. This corrupted the user data in the enrollment queue, assigning the phone number as their role (which broke enrollment validation) and setting their phone number to the role string ("student", "admin", "lecturer").
+
+**main/ui/ui_user_manager.cpp** changes:
+- Swapped user.phone_number and user.role in the call to le_registration_add_pending_student to correctly align with its declaration: (name, student_id, role, phone_number).
+
+**flash_workaround.bat** changes:
+- Updated the target flash COM port to COM5 to match the verified hardware port.
+
+#### Build & Flash Result
+- Re-built successfully using .\build_workaround.bat.
+- Flashed successfully to COM5 at 460800 baud using .\flash_workaround.bat.
+- Hard reset and booted successfully. Re-enrollment flow verified safe.
+
+#### Commit
+95f5e8e - fix(ui): correct parameter order in ble_registration_add_pending_student call inside user manager
+
+---
+
+## Session - 2026-08-24 - Fix Load Access Fault in User Manager Screen
+
+### User Request
+> The device crashed immediately after displaying the loading ring in the users app after authentication. Watch for my agent quota — do only what is entirely necessary to diagnose and resolve this crash.
+
+### Implementation
+
+#### Feature Overview
+Diagnosed and fixed a `Load access fault` at `lv_obj_draw.c:313` that crashed the device every time the User Management screen was opened.
+
+**Root Cause:** `pin_keypad_event_cb` in `ui_main.cpp` fired the screen-transition callback (`ui_show_user_manager()`) synchronously — still inside the LVGL event dispatch. `ui_close_pin_prompt()` only *scheduled* an async deletion of the PIN panel via `lv_obj_delete_async()`. Calling `lv_scr_load()` immediately after (while the async-delete was still pending) caused LVGL's render pass to race between drawing the new user-manager screen and processing the deferred panel cleanup, corrupting widget draw descriptors and producing the Load access fault.
+
+**Fix:** Replaced the direct `cb(success)` call with `lv_async_call(pin_async_dispatch, &s_pin_async_ctx)`. This defers the callback to the next LVGL tick — after the current event dispatch returns and after `lv_obj_delete_async` has completed — so `lv_scr_load` is always called from a clean LVGL state.
+
+**Secondary changes (from earlier in this session):**
+- `sdkconfig`: Switched `CONFIG_LV_USE_BUILTIN_MALLOC=n` / `CONFIG_LV_USE_CLIB_MALLOC=y` — frees LVGL from the 64 KB static heap limit; allocations now come from the 16 MB PSRAM via clib malloc.
+- `ui_user_manager.cpp`: Increased `user_mgr_populate_task` stack from 6144 → 8192 bytes for SQLite headroom.
+
+**`main/ui/ui_main.cpp`** changes:
+- Added `PinAsyncCtx` struct and static `s_pin_async_ctx` instance to hold callback + result across the async boundary.
+- Added `pin_async_dispatch()` function called by `lv_async_call`.
+- Modified `pin_keypad_event_cb()`: replaced `if (cb) cb(success)` with `lv_async_call(pin_async_dispatch, &s_pin_async_ctx)`.
+
+**`sdkconfig`** changes:
+- `CONFIG_LV_USE_BUILTIN_MALLOC=n`
+- `CONFIG_LV_USE_CLIB_MALLOC=y`
+
+**`main/ui/ui_user_manager.cpp`** changes:
+- `user_mgr_populate_task` stack size: 6144 → 8192 bytes.
+
+#### Commit
+pending build & flash
+
+---
+
+## Session - 2026-08-25 - Fix SNTP Time Sync Regression & Build Env Mismatch
+
+### User Request
+> SNTP time synchronization is no longer updating on the device. Also hit "python env mismatch" build error.
+
+### Implementation
+
+#### Feature Overview
+Fixed two SNTP bugs and the Python env mismatch blocking builds.
+
+**SNTP Bug 1 — `sntp_sync_is_synchronized()` always returned false:**
+`sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED` is unreliable in ESP-IDF v5.x because the status resets to `SNTP_SYNC_STATUS_RESET` immediately after a successful sync in smooth/immediate mode. This meant every cloud-sync cycle in `main.c` treated time as unsynced and called `sntp_sync_init()` again — triggering the second bug.
+Fix: replaced status check with a persistent `s_time_synced` flag set inside the notification callback (only accepted if epoch > 2024-01-01). Added epoch-plausibility fallback for RTC-backed scenarios.
+
+**SNTP Bug 2 — Destructive double-init race:**
+`sntp_sync_init()` always called `esp_netif_sntp_deinit()` + re-init, which killed the background sync already started by `sntp_sync_on_connected_task` in `wifi_manager.c`. This reset the 10 s timeout window, often causing the sync to time out before completing.
+Fix: added `esp_netif_sntp_enabled()` guard — if SNTP is already running, skip re-init entirely.
+
+**Build issue — Python env mismatch:**
+Running `idf.py` directly without ESP-IDF export caused CMake to find `idf5.4_py3.11_env` instead of `py3.13`. Fix: must use `build_workaround.bat` (calls `export.bat`). Updated bat to run `idf.py fullclean` first, then restore sdkconfig from git, then build.
+
+**`main/network/sntp_sync.c`** changes:
+- Added `static volatile bool s_time_synced` flag.
+- `sntp_sync_notification_cb`: sets `s_time_synced = true` when epoch is plausible (>2024).
+- `sntp_sync_init`: added `esp_netif_sntp_enabled()` guard; removed unconditional `esp_netif_sntp_deinit()`.
+- `sntp_sync_is_synchronized`: uses `s_time_synced` flag + epoch fallback instead of `SNTP_SYNC_STATUS_COMPLETED`.
+
+**`build_workaround.bat`** changes:
+- Moved `git checkout -- sdkconfig` to after `idf.py fullclean`.
+- Added `idf.py fullclean` step to clear stale CMake cache.
+
+**`flash_workaround.bat`** changes:
+- Added `ESP_IDF_VERSION=5.4` env var (mirrors build bat).
+- Changed `idf.py -p COM5 flash` → `idf.py -p COM5 flash monitor`.
+
+#### Commit
+Build & flash completed successfully on COM4.
+
+---
+
+## Session - 2026-08-27 - Fix User Manager Screen Stale Pointer Crash and Sync Time Display Notifications
+
+### User Request
+> the flash is complete. let's run the monitor session
+
+### Implementation
+
+#### Feature Overview
+1. Fixed User Manager crash (Load access fault) by ensuring the screen state is fully cleaned up on exit and guarded against stale pointers.
+2. Improved Sync display notifications to distinguish between Wi-Fi connection errors and SNTP sync timeouts.
+
+**main/ui/ui_user_manager.cpp** changes:
+- Correctly nullified `s_user_screen` and `s_user_list` in `ui_close_user_manager` regardless of whether the screen is active or not.
+- Changed object deletion to `lv_obj_delete_async` (LVGL v9 API) for thread-safety.
+- Added `lv_obj_is_valid(s_user_screen)` checks in `ui_show_user_manager` to prevent loading a stale screen pointer.
+- Offloaded DB querying to `user_mgr_populate_task` to prevent blocking the UI thread.
+
+**main/main.c** changes:
+- In `network_sync_task`, added separate notifications to report Wi-Fi connection failures, SNTP time sync timeouts, and successful sync cycles.
+- Increased SNTP wait timeout to 30 seconds to allow DNS and round-trip completion.
+
+#### Build & Flash Result
+- Built successfully using `build_workaround.bat` (2140 steps).
+- Flashed successfully to COM4 using `flash_workaround.bat`.
+- Booted successfully and verified connection to AP, HTTP time sync, and SQLite data loading without crashes.
+
+#### Commit
+Build & flash completed successfully on COM4.

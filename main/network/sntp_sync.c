@@ -16,14 +16,24 @@
 static const char *TAG = "SNTP";
 static SemaphoreHandle_t s_sntp_mutex = NULL;
 
+/* Persistent flag: set true once the sync callback fires with a sane epoch.
+ * Using sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED is unreliable
+ * because the status resets to SNTP_SYNC_STATUS_RESET immediately after the
+ * sync completes in smooth/immediate mode, so the check always returns false
+ * on subsequent calls even though time is correctly set. */
+static volatile bool s_time_synced = false;
+
 static void sntp_sync_notification_cb(struct timeval *tv) {
-    ESP_LOGI(TAG, "Notification of a time synchronization event");
-    
+    /* Only accept plausible timestamps (after 2024-01-01 00:00:00 UTC) */
+    if (tv->tv_sec > 1704067200) {
+        s_time_synced = true;
+    }
+
     char strftime_buf[64];
     struct tm timeinfo;
     localtime_r(&tv->tv_sec, &timeinfo);
     strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-    ESP_LOGI(TAG, "The current date/time is: %s", strftime_buf);
+    ESP_LOGI(TAG, "Time synchronized: %s", strftime_buf);
 }
 
 esp_err_t sntp_sync_init(void) {
@@ -36,14 +46,20 @@ esp_err_t sntp_sync_init(void) {
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* If SNTP is already initialized and running, don't tear it down — doing
+     * so would kill an in-progress sync (e.g. from sntp_sync_on_connected_task
+     * in wifi_manager.c) and force a restart with a fresh 10 s timeout. */
+    if (esp_sntp_enabled()) {
+        ESP_LOGI(TAG, "SNTP already running, skipping re-init");
+        if (s_sntp_mutex) xSemaphoreGive(s_sntp_mutex);
+        return ESP_OK;
+    }
+
     ESP_LOGI(TAG, "Initializing SNTP");
     
     /* Set timezone to WAT (West Africa Time) - GMT+1, no DST */
     setenv("TZ", "WAT-1", 1);
     tzset();
-    
-    /* Clean up any existing SNTP instance to force a fresh sync on reconnection */
-    esp_netif_sntp_deinit();
     
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("time.google.com");
     config.sync_cb = sntp_sync_notification_cb;
@@ -60,8 +76,15 @@ esp_err_t sntp_sync_init(void) {
 }
 
 bool sntp_sync_is_synchronized(void) {
-    sntp_sync_status_t status = sntp_get_sync_status();
-    return (status == SNTP_SYNC_STATUS_COMPLETED);
+    /* Use the persistent callback-set flag rather than sntp_get_sync_status(),
+     * which resets to SNTP_SYNC_STATUS_RESET after every successful sync. */
+    if (s_time_synced) return true;
+
+    /* Fallback: if the RTC has a plausible epoch (set externally / RTC-backed),
+     * consider it synchronized even without a fresh SNTP round-trip. */
+    time_t now = 0;
+    time(&now);
+    return (now > 1704067200); /* 2024-01-01 00:00:00 UTC */
 }
 
 esp_err_t sntp_sync_wait_for_sync(uint32_t timeout_ms) {

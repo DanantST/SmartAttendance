@@ -1538,6 +1538,7 @@ static void network_sync_task(void *pvParameters) {
             /* 1. Connect Wi-Fi using saved credentials if not already connected */
             bool already_connected = (wifi_manager_get_status() == WIFI_STATUS_CONNECTED);
             bool connect_ok = false;
+            bool sync_ok = false;
             
             if (already_connected) {
                 connect_ok = true;
@@ -1559,21 +1560,23 @@ static void network_sync_task(void *pvParameters) {
             
             if (connect_ok) {
                 /* 2. Sync Time (SNTP) if not already synchronized */
-                bool sync_ok = false;
+                sync_ok = false;
                 if (sntp_sync_is_synchronized()) {
                     sync_ok = true;
                 } else {
                     esp_err_t init_err = sntp_sync_init();
                     if (init_err == ESP_OK || init_err == ESP_ERR_INVALID_STATE) {
-                        if (sntp_sync_wait_for_sync(10000) == ESP_OK) {
+                        /* Use a 30-second timeout on boot to allow DNS + NTP round-trip */
+                        if (sntp_sync_wait_for_sync(30000) == ESP_OK) {
                             sync_ok = true;
+                            ESP_LOGI(TAG, "SNTP time synchronized successfully");
                         } else {
-                            ESP_LOGW(TAG, "SNTP time sync timed out, proceeding with cloud sync anyway");
-                            sync_ok = true;
+                            ESP_LOGW(TAG, "SNTP time sync timed out — skipping cloud sync this cycle");
+                            sync_ok = false;
                         }
                     } else {
-                        ESP_LOGW(TAG, "SNTP initialization failed, proceeding with cloud sync anyway");
-                        sync_ok = true;
+                        ESP_LOGW(TAG, "SNTP initialization failed (%d) — skipping cloud sync this cycle", init_err);
+                        sync_ok = false;
                     }
                 }
 
@@ -1599,13 +1602,20 @@ static void network_sync_task(void *pvParameters) {
             
             if (ui_acquire()) {
                 ui_set_sync_status(false);
-                /* Show synchronization successful banner */
-                ui_show_notification(NOTIFY_SUCCESS, "Cloud Sync", "Synchronization Successful!", 4000);
+                if (sync_ok) {
+                    /* Show synchronization successful banner */
+                    ui_show_notification(NOTIFY_SUCCESS, "Cloud Sync", "Synchronization Successful!", 4000);
+                } else if (!connect_ok) {
+                    ui_show_notification(NOTIFY_ERROR, "Cloud Sync", "Sync failed: Wi-Fi connection error.", 4000);
+                } else {
+                    ui_show_notification(NOTIFY_WARNING, "Cloud Sync", "Sync skipped: time not synchronized.", 4000);
+                }
                 ui_release();
             }
             set_system_state(SYSTEM_STATE_NORMAL);
 
             ESP_LOGI(TAG, "Sync cycle completed and disconnected");
+
         }
     }
 }

@@ -1045,17 +1045,47 @@ lv_obj_t* ui_create_card(lv_obj_t* parent, int width, int height) {
 
 extern "C" bool verify_admin_pin(const char *pin); /* Forward from main.c */
 
+/* Deferred pin-callback context — used by lv_async_call so the screen
+ * transition happens AFTER the current event dispatch completes and after
+ * lv_obj_delete_async has cleaned up the pin panel. */
+struct PinAsyncCtx {
+    void (*cb)(bool);
+    bool success;
+};
+static PinAsyncCtx s_pin_async_ctx;
+
+static void pin_async_dispatch(void * user_data) {
+    PinAsyncCtx * ctx = (PinAsyncCtx *)user_data;
+    if (ctx->cb) ctx->cb(ctx->success);
+}
+
 static void pin_keypad_event_cb(lv_event_t * e) {
     lv_event_code_t code = lv_event_get_code(e);
     if(code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
+        /* 1. Read the PIN text BEFORE closing (closing nulls s_pin_textarea) */
+        bool success = false;
         if (code == LV_EVENT_READY) {
             const char * pin = lv_textarea_get_text(s_pin_textarea);
-            bool success = verify_admin_pin(pin);
-            if (s_pin_callback) s_pin_callback(success);
-        } else {
-            if (s_pin_callback) s_pin_callback(false);
+            success = verify_admin_pin(pin);
         }
+
+        /* 2. Cache the callback, then clear it to prevent re-entry. */
+        void (*cb)(bool) = s_pin_callback;
+        s_pin_callback = NULL;
+
+        /* 3. Close the prompt – schedules async deletion of the pin panel. */
         ui_close_pin_prompt();
+
+        /* 4. Defer the screen-transition callback via lv_async_call so it
+         *    executes on the NEXT LVGL tick, after the current event dispatch
+         *    has returned and after lv_obj_delete_async has freed the pin
+         *    panel.  Calling lv_scr_load() directly here while an async-delete
+         *    is pending causes a Load access fault in lv_obj_draw. */
+        if (cb) {
+            s_pin_async_ctx.cb      = cb;
+            s_pin_async_ctx.success = success;
+            lv_async_call(pin_async_dispatch, &s_pin_async_ctx);
+        }
     }
 }
 
