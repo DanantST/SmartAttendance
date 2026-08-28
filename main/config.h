@@ -27,7 +27,7 @@ extern "C" {
 #define TASK_CAMERA_PRIORITY        7    /* Below LVGL(10) so rendering is never starved */
 #define TASK_CAMERA_STACK_SIZE      8192
 #define TASK_DETECTION_PRIORITY     8
-#define TASK_DETECTION_STACK_SIZE   16384
+#define TASK_DETECTION_STACK_SIZE   32768
 #define TASK_UI_PRIORITY            7
 #define TASK_UI_STACK_SIZE          8192
 /* TASK_BLE_* removed — BLE subsystem stripped 2026-06-12 */
@@ -47,7 +47,7 @@ extern "C" {
 #define CAMERA_XCLK_FREQ            20000000         // 20 MHz
 
 /* For enrollment high-quality capture */
-#define CAMERA_ENROLL_FRAME_SIZE    FRAMESIZE_VGA    // 640x480
+#define CAMERA_ENROLL_FRAME_SIZE    FRAMESIZE_QVGA   // 320x240 for esp-dl HumanFaceDetect
 
 /* Autofocus timing */
 #define AF_TRIGGER_TIMEOUT_MS       500
@@ -56,20 +56,20 @@ extern "C" {
 /* ==================== Face Recognition Configuration ==================== */
 #define FACE_ALIGN_SIZE             112              // 112x112 aligned face
 #define EMBEDDING_DIM               128              // 128-dimensional embedding
-#define RECOGNITION_THRESHOLD       0.65f            // Cosine similarity threshold
+#define RECOGNITION_THRESHOLD       0.65f            // Cosine similarity threshold (prevents false positives)
 #define EMBEDDING_CACHE_SIZE        500              // Max cached users
 
 /* Face detection thresholds */
 #define FACE_DETECT_CONFIDENCE_MIN  0.6f             // Minimum detection confidence
-#define FACE_MIN_SIZE_PX            50               // Minimum face bounding box size in pixels
+#define FACE_MIN_SIZE_PX            30               // Minimum face bounding box size in pixels
 
 /* Multi-frame enrollment */
 #define ENROLL_FRAMES_TOTAL         30               // Total frames to capture
 #define ENROLL_FRAMES_KEEP          15               // Top quality frames to keep
-#define ENROLL_SHARPNESS_MIN        50.0f            // Minimum Laplacian variance
-#define ENROLL_BRIGHTNESS_MIN       40               // 0-255, min average luminance
-#define ENROLL_BRIGHTNESS_MAX       200              // Max average luminance
-#define ENROLL_YAW_MAX_DEG          25.0f            // Max head yaw angle
+#define ENROLL_SHARPNESS_MIN        15.0f            // Minimum Laplacian variance
+#define ENROLL_BRIGHTNESS_MIN       30               // 0-255, min average luminance
+#define ENROLL_BRIGHTNESS_MAX       220              // Max average luminance
+#define ENROLL_YAW_MAX_DEG          30.0f            // Max head yaw angle
 
 /* ==================== Audio Configuration ==================== */
 /* Audio subsystem removed 2026-06-11. All defines below are retained as

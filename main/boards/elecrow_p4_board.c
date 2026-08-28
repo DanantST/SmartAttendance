@@ -12,6 +12,7 @@
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "esp_log.h"
+#include "display/backlight.h"   /* AR-3: mark guard after board LEDC init */
 
 static const char *TAG = "BOARD";
 
@@ -32,6 +33,10 @@ esp_err_t board_init(void) {
     ret = board_backlight_init();
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Backlight PWM init failed: %s", esp_err_to_name(ret));
+    } else {
+        /* AR-3: Set the guard in backlight.c so the subsequent backlight_init()
+         * call from ui_main.cpp is a no-op and doesn't re-configure GPIO31 LEDC. */
+        backlight_mark_initialized();
     }
 
     ESP_LOGI(TAG, "Board initialization complete");

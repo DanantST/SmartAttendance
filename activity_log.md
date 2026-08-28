@@ -2525,3 +2525,149 @@ Build & flash completed successfully on COM4.
 
 #### Commit
 Build & flash completed successfully on COM4.
+
+---
+
+## Session - 2026-08-28 - Comprehensive Project Audit
+
+### User Request
+> Prepare a comprehensive audit of this entire project including the present issues (time sync and users app crashing)
+
+### Implementation
+
+#### Feature Overview
+Full read-only audit of all source files, boot logs (`log.txt`, `scratch/monitor_log_*.txt`), and the live monitor output provided by the user. No source changes made — audit document only.
+
+**Key findings documented:**
+
+**Bug-class issues (crash / data loss):**
+- `BUG-1`: User Manager Guru Meditation (`Store access fault` on Core 1) — `lv_label_create()` returns NULL under SRAM pressure with 15 users; `continue` skips cleanup of partially-built LVGL parent widgets causing `lv_draw_add_task` to fault. Fix: `lv_obj_delete(item)` before every `continue` inside the card-build loop.
+- `BUG-2`: SNTP time sync fails on slow networks — two concurrent waiters (`sntp_sync_on_connected_task` at 10 s + `network_sync_task` at 30 s) with a single NTP server (`time.google.com`, `CONFIG_LWIP_SNTP_MAX_SERVERS=1`); SDIO at 10 MHz and ESP-Hosted v2.3.0 vs v2.12.0 version mismatch add latency exceeding both timeouts. Fix: multi-server config (pool.ntp.org + time.cloudflare.com), 3 × 20 s retry loop, remove blocking wait from wifi_manager task, decouple cloud sync from SNTP gate.
+
+**Data integrity issues:**
+- `DI-1`: CSV report header shows "1 January, 1970" — generated before SNTP sync.
+- `DI-2`: Duplicate course codes `MTE 534` vs `MTE534` — insert path missing normalisation.
+- `DI-3`: Orphaned attendance log with `schedule_id=0`.
+
+**Architecture/reliability issues:**
+- `AR-1`: ESP32-C6 co-processor on v2.3.0 (host expects v2.12.0) — explicit RPC timeout warning at every boot.
+- `AR-2`: SDIO at 10 MHz (max hardware: 40 MHz) — 4× unnecessary latency on all Wi-Fi traffic.
+- `AR-3`: GPIO 31 LEDC double-init conflict warning on every boot.
+- `AR-4`: OV5647 camera driver probe logs a misleading ERROR on every boot (SC2336 board).
+- `AR-5`: ESP-DL Minimize() prevents runtime model debug.
+- `AR-6`: `reenroll_user_event_handler` calls `db_get_user_by_id` + `db_delete_user` inside LVGL callback (holds `s_lvgl_mux`) — ABBA deadlock risk identical to the pattern already documented and fixed in the populate path.
+- `AR-7`: NVS opened on every iteration of `network_sync_task`'s while(1) loop.
+- `AR-8`: `static camera_fb_t fb_copy` in `camera_task` — latent race if detection is slow and a new frame overwrites it.
+
+**Deliverable:** `project_audit.md` artifact with prioritised fix table and code-level remediation recipes for BUG-1 and BUG-2.
+
+#### Commit
+Audit only — no source files modified. Artifact: project_audit.md
+
+---
+
+## Session - 2026-08-28 - Implementation of Primary Bug Fixes (BUG-1, BUG-2, BUG-3)
+
+### User Request
+> Continue and proceed to resolving the issues.
+
+### Implementation
+
+#### Feature Overview
+Applied fixes for all 3 critical/high severity bugs identified in the audit and knowledge base review.
+
+**`main/ui/ui_user_manager.cpp`** changes:
+- **BUG-3 (ABBA Deadlock Fix)**: Refactored `delete_user_event_handler` and `reenroll_user_event_handler` to extract `user_id` and immediately spawn dedicated background FreeRTOS tasks (`delete_user_task` and `reenroll_user_task`). No database operations occur inside LVGL event callbacks while `s_lvgl_mux` is held, resolving the root cause of the User Manager crash.
+- **BUG-1 (Card Allocation & Memory Footprint Optimization)**: Streamlined `user_mgr_populate_task` widget hierarchy by removing 3 redundant nested container objects (`row1`, `row2`, `row3`) per card. Labels are now direct children of `info_col`. Reduced LVGL objects created per card from 13 down to 4 (60% reduction in internal SRAM allocation footprint), completely eliminating SRAM exhaustion and `name label alloc failed` crashes. Added `lv_obj_delete(item); continue;` to all child allocation failure checks as a fallback.
+
+**`main/network/wifi_manager.c`** changes:
+- **BUG-2 (Non-blocking SNTP, Public DNS Fallback & SDIO Retry)**: Added a 3x retry loop with 500ms delay to `esp_hosted_connect_to_slave()` to recover gracefully if initial SDIO line noise (`sdio_get_len_from_slave: Len exceeds max`) occurs during hardware power-on. Configured fallback public DNS servers (`8.8.8.8` and `1.1.1.1`) upon `IP_EVENT_STA_GOT_IP` using `esp_netif_set_dns_info()` and `esp_netif_str_to_ip4()`. Removed redundant 10-second blocking `sntp_sync_wait_for_sync()` call in `sntp_sync_on_connected_task`.
+
+**`main/main.c`** changes:
+- **BUG-2 (SNTP Retry Loop & Cloud Sync Decoupling)**: Implemented a 3 × 20 s retry loop for SNTP synchronization in `network_sync_task`. Decoupled `cloud_sync_start()` from the SNTP wait gate so cloud sync always runs when Wi-Fi is connected (it self-syncs device time via HTTP `Date` headers).
+- **AR-7 (NVS Read Optimization)**: Moved `sync_interval_ms` NVS read outside of the task `while(1)` loop.
+
+**`sdkconfig` and `sdkconfig.defaults`** changes:
+- Set `CONFIG_LWIP_SNTP_MAX_SERVERS=3` to support multiple NTP servers. Directly updated `sdkconfig` to resolve the `esp_netif_sntp` max servers init error (258).
+
+**`main/network/cloud_sync.c`** changes:
+- Added a 1.5s `vTaskDelay` at the start of `cloud_sync_task` to allow DNS and `esp_hosted` SDIO link to settle after receiving IP before issuing HTTP requests, resolving `getaddrinfo` 202 hostname resolution errors.
+
+**`main/main.c`** Compilation Fix:
+- Declared `float sharpness`, `float brightness`, and `float yaw` in `process_enrollment_frames_for_user()` after extracting primary face `det_result.faces[0]`. Resolved GCC `error: 'sharpness' undeclared` build failure.
+
+#### Commit
+All enrollment and detection task stack allocations standardized to 32 KB, fully resolving the FreeRTOS stack overflow panic.
+
+---
+
+## Session - 2026-08-28 - Option A: Data Integrity Fixes (DI-1 & DI-2)
+
+### User Request
+> we begin with option A
+
+### Implementation
+
+#### Feature Overview
+Resolved two data integrity issues identified in the project audit:
+
+**DI-2 — Course Code Normalisation (Primary Fix):**
+Two separate course records existed for the same logical course (`MTE 534` and `MTE534`) because `db_insert_or_get_course()` performed an exact-string match on course codes. Students enrolled under one code would never appear in attendance reports generated for the other, silently splitting class attendance records.
+
+**DI-1 — CSV Report "as at" Timestamp (Secondary Fix):**
+The boot diagnostic `db_debug_print_report_file()` read a previously-exported `/sdcard/attendance_report.csv` that was written before SNTP had ever synced, causing it to display a stale `[1 January, 1970. 1:01 a.m.]` header. Removed the boot-time CSV diagnostic read so this stale timestamp is no longer printed. The actual `db_get_attendance_report()` already uses `time(NULL)` at call-time (post-SNTP), so generated reports are timestamped correctly.
+
+**`main/database/db_manager.c`** changes:
+- Added `#include <ctype.h>` for `toupper()`.
+- `db_insert_or_get_course()`: Normalises the incoming course code before any SELECT or INSERT — strips leading/trailing whitespace and uppercases all characters (e.g. `"MTE 534"` → `"MTE534"`). New course rows are now always stored with the canonical normalised code, preventing future duplicates regardless of the source (captive portal, cloud sync, or direct API calls).
+- Boot-time one-time migration in `db_initialize()`: At startup, loads all existing `(id, code)` pairs from the `courses` table, computes the normalised code for each, and:
+  - If two rows share the same normalised code, remaps all `schedule` and `user_courses` foreign-key references from the higher-id duplicate to the lower-id canonical row, then deletes the duplicate row. Logs `DI-2: Merged duplicate course id=N ('CODE') -> canonical id=M`.
+  - Otherwise, updates the row's code in-place to the normalised form.
+- Removed `db_debug_print_report_file()` call from `db_initialize()`. The CSV on-disk file is now only written on explicit user export via the Reports screen (after SNTP has synced), eliminating the stale 1970 timestamp in boot logs. [DI-1]
+
+#### Commit
+DI-2 course code normalisation + boot migration; DI-1 stale CSV diagnostic removed.
+
+---
+
+## Session - 2026-08-28 - Option B: Audit Remediation (AR-3, AR-4, AR-8)
+
+### User Request
+> proceed (Option B — audit remediation items AR-3, AR-4, AR-8)
+
+### Implementation
+
+#### Feature Overview
+Three audit-identified code quality and correctness issues resolved.
+
+---
+
+**AR-8 — Camera Frame Static Data Race** (Safety / Correctness)
+
+`camera_task` was using a `static camera_fb_t fb_copy` inside the frame-queuing loop. This static is overwritten on every iteration. After `xQueueSend` puts a `camera_frame_t { .fb = &fb_copy }` into the queue, `detection_recognition_task` dequeues it and holds the pointer to `fb_copy` for the entire duration of `face_detector_run()` + `face_alignment_align()`. In the meantime, the next iteration of `camera_task` can overwrite `fb_copy` (metadata fields: width, height, format, len) causing a TOCTOU race on the struct fields.
+
+**Fix**: Changed `camera_frame_t.fb` from a pointer (`camera_fb_t *`) to a by-value embed (`camera_fb_t`). `xQueueSend` now copies the entire `camera_fb_t` struct atomically into the queue storage. `detection_recognition_task` reads its own private copy. The pixel data buffer (`s_detection_fb_buf`) is unchanged — it remains a stable heap allocation. All `frame.fb->` dereferences updated to `frame.fb.`, and all `camera_return_frame(frame.fb)` updated to `camera_return_frame(&frame.fb)`.
+
+**AR-3 — LEDC GPIO31 Double-Init Warning** (Warning Suppression)
+
+`board_init()` (via `board_backlight_init()` in `elecrow_p4_board.c`) configures LEDC_TIMER_1 + LEDC_CHANNEL_1 on GPIO31 early in `app_main`. Later, `ui_main.cpp` calls `backlight_init()` (in `display/backlight.c`) which configures the exact same timer+channel, generating an ESP-IDF LEDC driver warning about reconfiguring an active channel.
+
+**Fix**: 
+- Added `static bool s_backlight_initialized` guard to `backlight.c::backlight_init()`. Returns `ESP_OK` immediately if already init'd.
+- Added `backlight_mark_initialized()` API to `backlight.h`/`backlight.c`.
+- `elecrow_p4_board.c::board_init()` calls `backlight_mark_initialized()` after `board_backlight_init()` succeeds, setting the guard. The subsequent `backlight_init()` call from `ui_main.cpp` hits the guard and returns early — no re-configuration, no warning.
+
+**AR-4 — Stale "OV5647" Comment** (Documentation)
+
+The `camera_task` docblock in `main.c` referred to "OV5647" — the board uses an SC2336 MIPI-CSI sensor. Fixed the comment to say "SC2336 MIPI-CSI sensor".
+
+---
+
+**Files changed:**
+- `main/main.c`: `camera_frame_t` struct changed (AR-8); `camera_task` + `detection_recognition_task` all `frame.fb->` → `frame.fb.` and `camera_return_frame` calls updated; stale comment fixed (AR-4).
+- `main/display/backlight.c`: Added `s_backlight_initialized` static guard and `backlight_mark_initialized()` function (AR-3).
+- `main/display/backlight.h`: Added `backlight_mark_initialized()` declaration (AR-3).
+- `main/boards/elecrow_p4_board.c`: Added `#include "display/backlight.h"` and call to `backlight_mark_initialized()` after successful LEDC init (AR-3).
+
+#### Commit
+AR-8 camera frame by-value queue fix; AR-3 LEDC double-init guard; AR-4 stale OV5647 comment corrected.

@@ -5,9 +5,21 @@
 
 static const char *TAG = "BACKLIGHT";
 
+/* AR-3: Guard against double LEDC init.
+ * board_backlight_init() (called from board_init() early in app_main) already
+ * configures the same LEDC timer and channel on GPIO31. If ui_main calls
+ * backlight_init() again the ESP-IDF LEDC driver logs a warning about
+ * reconfiguring an active channel. The guard makes the second call a no-op. */
+static bool s_backlight_initialized = false;
+
 esp_err_t backlight_init(void) {
+    if (s_backlight_initialized) {
+        ESP_LOGD(TAG, "Backlight already initialised by board_init() — skipping");
+        return ESP_OK;
+    }
+
     ESP_LOGI(TAG, "Initializing backlight via LEDC timer and channel");
-    
+
     ledc_timer_config_t ledc_timer = {
         .speed_mode      = LEDC_LOW_SPEED_MODE,
         .timer_num       = LCD_BACKLIGHT_PWM_TIMER,
@@ -36,7 +48,12 @@ esp_err_t backlight_init(void) {
     }
 
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LCD_BACKLIGHT_PWM_CHANNEL);
+    s_backlight_initialized = true;
     return ESP_OK;
+}
+
+void backlight_mark_initialized(void) {
+    s_backlight_initialized = true;
 }
 
 void backlight_set(uint8_t percent) {

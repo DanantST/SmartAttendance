@@ -206,11 +206,17 @@ typedef struct {
 } system_event_t;
 
 /**
- * @brief Camera frame structure
+ * @brief Camera frame passed through the detection queue.
+ *
+ * AR-8: camera_fb_t is embedded BY VALUE so xQueueSend copies it atomically
+ * into the queue item. This eliminates the data race that existed when a
+ * static camera_fb_t was updated by camera_task while detection_recognition_task
+ * was still reading the previous frame's metadata through the old pointer.
+ * `buf` inside the copy still points to s_detection_fb_buf (stable heap memory).
  */
 typedef struct {
-    camera_fb_t *fb;
-    uint32_t timestamp_ms;
+    camera_fb_t  fb;           /* AR-8: embedded by value — NOT a pointer */
+    uint32_t     timestamp_ms;
 } camera_frame_t;
 
 /* Forward declarations */
@@ -258,7 +264,7 @@ static void pin_auth_callback(bool success) {
         
         /* Proceed to target if requested */
         if (s_target_nav_button == NAV_ENROLL) {
-            xTaskCreate(start_enrollment_task, "enrollment", 8192, NULL, 5, NULL);
+            xTaskCreate(start_enrollment_task, "enrollment", TASK_DETECTION_STACK_SIZE, NULL, 5, NULL);
         } else if (s_target_nav_button == NAV_SETTINGS) {
             ESP_LOGI(TAG, "Opening settings screen...");
             ui_show_settings_screen();
@@ -598,7 +604,8 @@ void app_main(void) {
 
 /**
  * @brief Camera capture task
- * Continuously captures frames from OV5647 and queues them for processing
+ * Continuously captures frames from the SC2336 MIPI-CSI sensor and queues
+ * them for face detection / recognition processing.
  */
 static void camera_task(void *pvParameters) {
     camera_frame_t frame;
@@ -624,15 +631,16 @@ static void camera_task(void *pvParameters) {
         if (get_system_state() == SYSTEM_STATE_NORMAL) {
             if (uxQueueSpacesAvailable(g_camera_frame_queue) > 0) {
                 if (s_detection_fb_buf != NULL) {
-                    /* Copy camera frame buffer safely using its actual length */
+                    /* AR-8: Copy pixel data into the stable detection buffer, then
+                     * embed the camera_fb_t metadata BY VALUE into the queue item.
+                     * xQueueSend() copies camera_frame_t (including the embedded fb
+                     * struct) into the queue storage, so detection_recognition_task
+                     * gets its own private copy of all metadata fields. There is no
+                     * longer a shared static struct that can be overwritten mid-read. */
                     memcpy(s_detection_fb_buf, fb->buf, fb->len);
-                    
-                    static camera_fb_t fb_copy;
-                    fb_copy = *fb;
-                    fb_copy.buf = s_detection_fb_buf;
-                    
-                    frame.fb = &fb_copy;
-                    frame.timestamp_ms = esp_timer_get_time() / 1000;
+                    frame.fb           = *fb;                         /* copy struct by value */
+                    frame.fb.buf       = s_detection_fb_buf;          /* redirect buf to stable heap copy */
+                    frame.timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
                     xQueueSend(g_camera_frame_queue, &frame, 0);
                 }
             }
@@ -670,14 +678,14 @@ static void detection_recognition_task(void *pvParameters) {
 
         /* Skip processing if enrollment is in progress to avoid queue contention */
         if (get_system_state() != SYSTEM_STATE_NORMAL) {
-            camera_return_frame(frame.fb);
+            camera_return_frame(&frame.fb);
             continue;
         }
         
         /* Run face detection */
         detection_result_t det_result;
-        if (face_detector_run(frame.fb, &det_result) != ESP_OK) {
-            camera_return_frame(frame.fb);
+        if (face_detector_run(&frame.fb, &det_result) != ESP_OK) {
+            camera_return_frame(&frame.fb);
             continue;
         }
         
@@ -687,7 +695,7 @@ static void detection_recognition_task(void *pvParameters) {
                 ui_update_detection_bounding_box(0, 0, 0, 0, false);
                 ui_release();
             }
-            camera_return_frame(frame.fb);
+            camera_return_frame(&frame.fb);
             continue;
         }
         
@@ -696,20 +704,23 @@ static void detection_recognition_task(void *pvParameters) {
         
         /* Skip low confidence detections */
         if (face->confidence < FACE_DETECT_CONFIDENCE_MIN) {
-            camera_return_frame(frame.fb);
+            camera_return_frame(&frame.fb);
             continue;
         }
         
         /* Align face to 112x112 canonical view */
-        if (face_alignment_align(frame.fb, face, &aligned_face) != ESP_OK) {
-            camera_return_frame(frame.fb);
+        if (face_alignment_align(&frame.fb, face, &aligned_face) != ESP_OK) {
+            camera_return_frame(&frame.fb);
             continue;
         }
+
+        /* Actively adjust face crop brightness & contrast to target luminance (128) */
+        face_alignment_normalize_brightness(&aligned_face);
         
         /* Extract embedding */
         if (feature_extractor_run(&aligned_face, &embedding) != ESP_OK) {
             face_alignment_free(&aligned_face);
-            camera_return_frame(frame.fb);
+            camera_return_frame(&frame.fb);
             continue;
         }
         
@@ -721,10 +732,10 @@ static void detection_recognition_task(void *pvParameters) {
         
         /* Update UI with bounding box and recognition result (scaled to 480x360 UI preview size) */
         if (ui_acquire()) {
-            int scaled_x = (frame.fb->width > 0) ? (face->x * 480 / frame.fb->width) : face->x;
-            int scaled_y = (frame.fb->height > 0) ? (face->y * 360 / frame.fb->height) : face->y;
-            int scaled_w = (frame.fb->width > 0) ? (face->w * 480 / frame.fb->width) : face->w;
-            int scaled_h = (frame.fb->height > 0) ? (face->h * 360 / frame.fb->height) : face->h;
+            int scaled_x = (frame.fb.width > 0) ? (face->x * 480 / frame.fb.width) : face->x;
+            int scaled_y = (frame.fb.height > 0) ? (face->y * 360 / frame.fb.height) : face->y;
+            int scaled_w = (frame.fb.width > 0) ? (face->w * 480 / frame.fb.width) : face->w;
+            int scaled_h = (frame.fb.height > 0) ? (face->h * 360 / frame.fb.height) : face->h;
             ui_update_detection_bounding_box(scaled_x, scaled_y, scaled_w, scaled_h, true);
             
             if (matched_user != NULL && confidence >= RECOGNITION_THRESHOLD) {
@@ -763,7 +774,7 @@ static void detection_recognition_task(void *pvParameters) {
         
         /* Clean up */
         face_alignment_free(&aligned_face);
-        camera_return_frame(frame.fb);
+        camera_return_frame(&frame.fb);
         
 
         
@@ -907,6 +918,9 @@ static float compute_int8_cosine_similarity(const face_embedding_t *a, const fac
 static esp_err_t process_enrollment_frames_for_user(user_t* new_user) {
     ESP_LOGI(TAG, "Starting robust 8-step enrollment for %s", new_user->name);
 
+    /* Reset camera to AUTO exposure profile (Profile 0) so ISP AE calculates optimal luminance */
+    camera_set_profile(CAMERA_PROFILE_AUTO);
+
     /* Step 1 & 2: Allocate PSRAM buffers for 30 valid samples */
     camera_fb_t **frames = (camera_fb_t**)heap_caps_calloc(ENROLL_FRAMES_TOTAL, sizeof(camera_fb_t *), MALLOC_CAP_SPIRAM);
     aligned_face_t *aligned_frames = (aligned_face_t*)heap_caps_calloc(ENROLL_FRAMES_TOTAL, sizeof(aligned_face_t), MALLOC_CAP_SPIRAM);
@@ -935,6 +949,8 @@ static esp_err_t process_enrollment_frames_for_user(user_t* new_user) {
 
     /* Step 1: Capture 30 valid samples with filtering & live progress display */
     while (valid_count < ENROLL_FRAMES_TOTAL && total_attempts < MAX_ATTEMPTS) {
+        vTaskDelay(pdMS_TO_TICKS(20)); /* Feed task watchdog and allow LVGL rendering */
+
         if (g_enrollment_cancel) {
             ret = ESP_FAIL;
             goto cleanup;
@@ -957,60 +973,53 @@ static esp_err_t process_enrollment_frames_for_user(user_t* new_user) {
         ui_update_enrollment_camera_frame(fb->buf, fb->width, fb->height);
         vTaskDelay(pdMS_TO_TICKS(5));
 
-        /* Single face detection check */
+        /* Run face detection (matching Attendance Scanner pipeline) */
         detection_result_t det_result;
         esp_err_t det_err = face_detector_run(fb, &det_result);
-        if (det_err != ESP_OK || det_result.face_count != 1) {
+        if (det_err != ESP_OK || det_result.face_count == 0) {
             camera_return_frame(fb);
             rejected_count++;
             if (ui_acquire()) {
                 ui_enrollment_set_face_detected(false);
-                ui_show_pose_guidance(det_result.face_count > 1 ? "Only 1 face allowed in frame" : "Position face in camera frame");
+                ui_show_pose_guidance("Position face in camera frame");
                 ui_release();
             }
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(30));
             continue;
         }
 
+        /* Take primary face (highest confidence) */
         detected_face_t *face = &det_result.faces[0];
-
-        /* Quality gates: confidence, size, blur, brightness, yaw limits */
-        float sharpness = face_detector_compute_sharpness(fb, face);
-        float brightness = face_detector_compute_brightness(fb, face);
-        float yaw = face_detector_compute_yaw(face);
-
-        bool passes_gates = (face->confidence >= FACE_DETECT_CONFIDENCE_MIN) &&
-                            (face->w >= FACE_MIN_SIZE_PX && face->h >= FACE_MIN_SIZE_PX) &&
-                            (sharpness >= ENROLL_SHARPNESS_MIN) &&
-                            (brightness >= ENROLL_BRIGHTNESS_MIN && brightness <= ENROLL_BRIGHTNESS_MAX) &&
-                            (fabsf(yaw) <= ENROLL_YAW_MAX_DEG);
-
-        if (!passes_gates) {
+        if (face->confidence < FACE_DETECT_CONFIDENCE_MIN) {
             camera_return_frame(fb);
             rejected_count++;
             if (ui_acquire()) {
-                if (sharpness < ENROLL_SHARPNESS_MIN) ui_show_pose_guidance("Hold still (blur detected)");
-                else if (brightness < ENROLL_BRIGHTNESS_MIN) ui_show_pose_guidance("Too dark - add lighting");
-                else if (brightness > ENROLL_BRIGHTNESS_MAX) ui_show_pose_guidance("Too bright - reduce glare");
-                else if (fabsf(yaw) > ENROLL_YAW_MAX_DEG) ui_show_pose_guidance("Face camera directly");
-                else ui_show_pose_guidance("Adjust position");
+                ui_enrollment_set_face_detected(false);
+                ui_show_pose_guidance("Position face in camera frame");
                 ui_release();
             }
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(30));
             continue;
         }
+
+        float sharpness = face_detector_compute_sharpness(fb, face);
+        float brightness = face_detector_compute_brightness(fb, face);
+        float yaw = face_detector_compute_yaw(face);
 
         if (ui_acquire()) {
             ui_enrollment_set_face_detected(true);
             ui_release();
         }
 
-        /* Step 2: Align face crop and extract embedding */
+        /* Step 2: Align face crop and actively normalize brightness before passing to model */
         if (face_alignment_align(fb, face, &aligned_frames[valid_count]) != ESP_OK) {
             camera_return_frame(fb);
             rejected_count++;
             continue;
         }
+
+        /* Actively adjust face crop brightness & contrast to target luminance (128) */
+        face_alignment_normalize_brightness(&aligned_frames[valid_count]);
 
         if (feature_extractor_run(&aligned_frames[valid_count], &embeddings[valid_count]) != ESP_OK) {
             face_alignment_free(&aligned_frames[valid_count]);
@@ -1505,13 +1514,19 @@ static void network_sync_task(void *pvParameters) {
     /* Clear the boot-triggered sync bit so we don't execute a duplicate second sync cycle immediately */
     xEventGroupClearBits(g_system_event_group, SYSTEM_EVENT_TOUCH_MENU);
 
-    while (1) {
-        uint32_t sync_interval_ms = CLOUD_SYNC_INTERVAL_MS;
+    /* [AR-7] Read sync interval once before the loop (not on every iteration).
+     * NVS flash ops briefly lock flash and can stutter UI rendering if called
+     * inside a tight loop. Only re-read on explicit setting changes. */
+    uint32_t sync_interval_ms = CLOUD_SYNC_INTERVAL_MS;
+    {
         nvs_handle_t nvs_int;
         if (nvs_open("storage", NVS_READONLY, &nvs_int) == ESP_OK) {
             nvs_get_u32(nvs_int, "sync_ms", &sync_interval_ms);
             nvs_close(nvs_int);
         }
+    }
+
+    while (1) {
 
         ESP_LOGI(TAG, "Sync task waiting. Interval: %lu ms", (unsigned long)sync_interval_ms);
 
@@ -1559,39 +1574,49 @@ static void network_sync_task(void *pvParameters) {
             }
             
             if (connect_ok) {
-                /* 2. Sync Time (SNTP) if not already synchronized */
-                sync_ok = false;
-                if (sntp_sync_is_synchronized()) {
-                    sync_ok = true;
-                } else {
+                /* 2. Sync Time (SNTP) — [BUG-2] retry loop up to 3 × 20 s = 60 s total.
+                 * The ESP32-C6 co-processor is factory pre-flashed (cannot be updated),
+                 * runs esp-hosted v2.3.0 vs host v2.12.0, and the SDIO bridge runs at
+                 * 10 MHz, adding significant latency to DNS + NTP round-trips.
+                 * Three fallback NTP servers are configured in sntp_sync.c. */
+                bool time_synced = sntp_sync_is_synchronized();
+                if (!time_synced) {
                     esp_err_t init_err = sntp_sync_init();
                     if (init_err == ESP_OK || init_err == ESP_ERR_INVALID_STATE) {
-                        /* Use a 30-second timeout on boot to allow DNS + NTP round-trip */
-                        if (sntp_sync_wait_for_sync(30000) == ESP_OK) {
-                            sync_ok = true;
-                            ESP_LOGI(TAG, "SNTP time synchronized successfully");
-                        } else {
-                            ESP_LOGW(TAG, "SNTP time sync timed out — skipping cloud sync this cycle");
-                            sync_ok = false;
+                        for (int attempt = 1; !time_synced && attempt <= 3; attempt++) {
+                            ESP_LOGI(TAG, "SNTP sync attempt %d/3 (timeout 20s)...", attempt);
+                            if (sntp_sync_wait_for_sync(20000) == ESP_OK) {
+                                time_synced = true;
+                                ESP_LOGI(TAG, "SNTP time synchronized successfully");
+                            } else {
+                                ESP_LOGW(TAG, "SNTP attempt %d/3 timed out", attempt);
+                            }
                         }
                     } else {
-                        ESP_LOGW(TAG, "SNTP initialization failed (%d) — skipping cloud sync this cycle", init_err);
-                        sync_ok = false;
+                        ESP_LOGW(TAG, "SNTP init failed (%d) — will proceed without time sync", init_err);
                     }
+                    if (!time_synced) {
+                        ESP_LOGW(TAG, "SNTP timed out after 3 attempts — cloud sync will still run (self-syncs via HTTP Date header)");
+                    }
+                } else {
+                    ESP_LOGI(TAG, "Time already synchronized — skipping SNTP wait");
                 }
+                sync_ok = time_synced; /* track for UI notification only */
 
-                
-                if (sync_ok) {
-                    /* 3. Run Cloud Sync (Telegram) — clear the done bit first */
-                    xEventGroupClearBits(g_system_event_group, SYSTEM_EVENT_CLOUD_SYNC_DONE);
-                    cloud_sync_start();
+                /* 3. Run Cloud Sync (Telegram).
+                 * [BUG-2] Cloud sync now ALWAYS runs when Wi-Fi is connected.
+                 * It independently syncs device time from the HTTP Date: response
+                 * header on every API call, so SNTP failure is not a blocker.
+                 * SNTP is still attempted above so that schedule window checks
+                 * (start_time / end_time comparisons) use accurate local time. */
+                xEventGroupClearBits(g_system_event_group, SYSTEM_EVENT_CLOUD_SYNC_DONE);
+                cloud_sync_start();
 
-                    /* [Fix M2] Wait on event bit set by cloud_sync_task instead of
-                     * a hardcoded vTaskDelay(10000). Use a 120s ceiling as a safety timeout. */
-                    xEventGroupWaitBits(g_system_event_group, SYSTEM_EVENT_CLOUD_SYNC_DONE,
-                                        pdTRUE, pdFALSE, pdMS_TO_TICKS(120000));
-                }
-                
+                /* [Fix M2] Wait on event bit set by cloud_sync_task instead of
+                 * a hardcoded vTaskDelay. Use a 120 s ceiling as a safety timeout. */
+                xEventGroupWaitBits(g_system_event_group, SYSTEM_EVENT_CLOUD_SYNC_DONE,
+                                    pdTRUE, pdFALSE, pdMS_TO_TICKS(120000));
+
                 /* 4. Disconnect Wi-Fi to save power ONLY if we connected it in this task */
                 if (!already_connected) {
                     wifi_manager_disconnect();

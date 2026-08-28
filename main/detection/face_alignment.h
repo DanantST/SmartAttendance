@@ -41,6 +41,12 @@ esp_err_t face_alignment_align(camera_fb_t *fb, detected_face_t *face, aligned_f
  */
 void face_alignment_free(aligned_face_t *aligned);
 
+/**
+ * @brief Actively normalize brightness and contrast of aligned RGB565 face crop to target luminance
+ * @param aligned pointer to aligned face structure
+ */
+void face_alignment_normalize_brightness(aligned_face_t *aligned);
+
 
 #ifdef __cplusplus
 }

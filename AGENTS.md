@@ -12,7 +12,7 @@ All agents operating in this workspace must adhere to the following laws:
   > [User's original prompt or intent]
 
   ### Implementation
-
+  > [details on how it was done]
   #### Feature Overview
   [Brief overview of what was implemented/fixed]
 
@@ -23,3 +23,7 @@ All agents operating in this workspace must adhere to the following laws:
   [Commit hash or message]
   ```
 - **Filing**: Ensure changes are appended at the end of the `activity_log.md` file, separated by a `---` horizontal rule.
+
+## 2. GitHub push
+- After every task run, the agent must push the changes to the GitHub repository.
+- The commit message should be concise and descriptive, following the conventional commits specification

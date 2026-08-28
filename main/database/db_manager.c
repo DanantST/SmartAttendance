@@ -10,6 +10,7 @@
 #include "sqlite3.h"
 #include "recognition/feature_extractor.h"
 #include <time.h>
+#include <ctype.h>
 #include <string.h>
 #include "storage/sdcard_mount.h"
 #include <inttypes.h>
@@ -190,13 +191,79 @@ esp_err_t db_manager_init(void) {
     db_deduplicate_schedules();
     db_dump_schedules();
 
+    /* DI-2: One-time migration — normalise all existing course codes to UPPERCASE + no leading/trailing
+     * whitespace. Merges duplicates created by variants like "MTE 534" vs "MTE534":
+     *   1. Compute the normalised code for every row.
+     *   2. For rows whose code already equals the normalised form, do nothing.
+     *   3. If a canonical row already exists, remap schedule and user_courses FK references
+     *      from the variant row to the canonical row, then delete the variant row.
+     *   4. Otherwise, update the row in place with the normalised code. */
+    {
+        sqlite3_stmt *mig_stmt;
+        const char *mig_sql = "SELECT id, code FROM courses";
+        if (sqlite3_prepare_v2(s_db, mig_sql, -1, &mig_stmt, NULL) == SQLITE_OK) {
+            /* Collect all (id, code) pairs into a temp list */
+            typedef struct { int id; char code[32]; } course_row_t;
+            course_row_t rows[64];
+            int row_count = 0;
+            while (sqlite3_step(mig_stmt) == SQLITE_ROW && row_count < 64) {
+                rows[row_count].id = sqlite3_column_int(mig_stmt, 0);
+                const char *raw = (const char*)sqlite3_column_text(mig_stmt, 1);
+                if (!raw) { row_count++; continue; }
+                /* Compute normalised code */
+                const char *p = raw;
+                while (*p == ' ' || *p == '\t') p++;
+                const char *e = raw + strlen(raw) - 1;
+                while (e > p && (*e == ' ' || *e == '\t')) e--;
+                int len = (int)(e - p + 1);
+                if (len >= 32) len = 31;
+                for (int k = 0; k < len; k++)
+                    rows[row_count].code[k] = (char)toupper((unsigned char)p[k]);
+                rows[row_count].code[len] = '\0';
+                row_count++;
+            }
+            sqlite3_finalize(mig_stmt);
+
+            for (int i = 0; i < row_count; i++) {
+                /* Find canonical row (lowest id with the same normalised code) */
+                int canonical_id = rows[i].id;
+                for (int j = 0; j < row_count; j++) {
+                    if (j != i && strcmp(rows[j].code, rows[i].code) == 0 && rows[j].id < canonical_id)
+                        canonical_id = rows[j].id;
+                }
+                if (canonical_id != rows[i].id) {
+                    /* This row is a duplicate — remap FKs to canonical, then delete */
+                    char remap_sql[256];
+                    snprintf(remap_sql, sizeof(remap_sql),
+                             "UPDATE schedule SET course_id=%d WHERE course_id=%d", canonical_id, rows[i].id);
+                    sqlite3_exec(s_db, remap_sql, NULL, NULL, NULL);
+                    snprintf(remap_sql, sizeof(remap_sql),
+                             "UPDATE user_courses SET course_id=%d WHERE course_id=%d", canonical_id, rows[i].id);
+                    sqlite3_exec(s_db, remap_sql, NULL, NULL, NULL);
+                    snprintf(remap_sql, sizeof(remap_sql),
+                             "DELETE FROM courses WHERE id=%d", rows[i].id);
+                    sqlite3_exec(s_db, remap_sql, NULL, NULL, NULL);
+                    ESP_LOGI(TAG, "DI-2: Merged duplicate course id=%d ('%s') -> canonical id=%d",
+                             rows[i].id, rows[i].code, canonical_id);
+                } else {
+                    /* No duplicate — normalise code in place */
+                    char upd_sql[128];
+                    snprintf(upd_sql, sizeof(upd_sql),
+                             "UPDATE courses SET code='%s' WHERE id=%d", rows[i].code, rows[i].id);
+                    sqlite3_exec(s_db, upd_sql, NULL, NULL, NULL);
+                }
+            }
+        }
+        ESP_LOGI(TAG, "DI-2: Course code normalisation migration complete");
+    }
+
     /* Dump debug information about users, courses, enrollments, and attendance logs */
     extern esp_err_t db_debug_dump_tables(void);
     db_debug_dump_tables();
 
-    /* Print the saved CSV report file from the SD card to the console for verification */
-    extern void db_debug_print_report_file(void);
-    db_debug_print_report_file();
+    /* NOTE: The /sdcard/attendance_report.csv on-disk file is only written on user demand via the
+     * Reports screen "Export CSV" button (after SNTP has synced), so we no longer read it at boot
+     * to avoid printing a stale "1 January 1970" header to the monitor. [DI-1] */
 
     ESP_LOGI(TAG, "Database initialized");
     return ESP_OK;
@@ -1513,14 +1580,31 @@ esp_err_t db_link_lecturer_course_by_uuid(const char* lecturer_uuid, int course_
 
 esp_err_t db_insert_or_get_course(const char* code, const char* name, int* out_id) {
     if (!s_initialized || !code || !name || !out_id) return ESP_ERR_INVALID_ARG;
+
+    /* DI-2: Normalise course code — strip leading/trailing whitespace and convert to uppercase.
+     * This prevents split attendance records caused by variants such as "MTE 534" vs "MTE534". */
+    char norm_code[32] = {0};
+    {
+        const char *p = code;
+        while (*p == ' ' || *p == '\t') p++;       /* skip leading whitespace */
+        const char *end = code + strlen(code) - 1;
+        while (end > p && (*end == ' ' || *end == '\t')) end--;
+        int len = (int)(end - p + 1);
+        if (len >= (int)sizeof(norm_code)) len = (int)sizeof(norm_code) - 1;
+        for (int i = 0; i < len; i++) {
+            norm_code[i] = (char)toupper((unsigned char)p[i]);
+        }
+        norm_code[len] = '\0';
+    }
+
     DB_LOCK();
-    
-    // First try to select the course
+
+    /* First try to select the course by normalised code */
     sqlite3_stmt *stmt;
     const char *sel_sql = "SELECT id FROM courses WHERE code = ?";
     int rc = sqlite3_prepare_v2(s_db, sel_sql, -1, &stmt, NULL);
     if (rc == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, code, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 1, norm_code, -1, SQLITE_STATIC);
         if (sqlite3_step(stmt) == SQLITE_ROW) {
             *out_id = sqlite3_column_int(stmt, 0);
             sqlite3_finalize(stmt);
@@ -1529,8 +1613,8 @@ esp_err_t db_insert_or_get_course(const char* code, const char* name, int* out_i
         }
         sqlite3_finalize(stmt);
     }
-    
-    // Course doesn't exist, insert it
+
+    /* Course doesn't exist — insert with normalised code */
     const char *ins_sql = "INSERT INTO courses (uuid, name, code) VALUES (lower(hex(randomblob(16))), ?, ?)";
     rc = sqlite3_prepare_v2(s_db, ins_sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
@@ -1538,15 +1622,16 @@ esp_err_t db_insert_or_get_course(const char* code, const char* name, int* out_i
         DB_UNLOCK();
         return ESP_FAIL;
     }
-    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, code, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 1, name,      -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, norm_code, -1, SQLITE_STATIC);
     rc = sqlite3_step(stmt);
     if (rc == SQLITE_DONE) {
         *out_id = (int)sqlite3_last_insert_rowid(s_db);
+        ESP_LOGI(TAG, "Inserted course '%s' (normalised from '%s') id=%d", norm_code, code, *out_id);
     }
     sqlite3_finalize(stmt);
     DB_UNLOCK();
-    
+
     if (rc != SQLITE_DONE) {
         ESP_LOGE(TAG, "Insert course failed: %s", sqlite3_errmsg(s_db));
         return ESP_FAIL;

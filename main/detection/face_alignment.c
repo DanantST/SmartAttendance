@@ -192,3 +192,45 @@ void face_alignment_free(aligned_face_t *aligned) {
         aligned->data = NULL;
     }
 }
+
+void face_alignment_normalize_brightness(aligned_face_t *aligned) {
+    if (!aligned || !aligned->data || aligned->width <= 0 || aligned->height <= 0) return;
+
+    uint16_t *buf = (uint16_t *)aligned->data;
+    int num_pixels = aligned->width * aligned->height;
+
+    /* Calculate mean green channel (luminance proxy for RGB565) */
+    uint32_t sum_g = 0;
+    for (int i = 0; i < num_pixels; i++) {
+        uint8_t g = (buf[i] >> 5) & 0x3F;
+        sum_g += g;
+    }
+    float avg_g = (float)sum_g / (float)num_pixels;
+    if (avg_g < 2.0f) avg_g = 2.0f;
+
+    /* Target green luminance: 32 (maps to ~128 mid-gray in 8-bit scale) */
+    float target_g = 32.0f;
+    float gain = target_g / avg_g;
+
+    /* Clamp gain to prevent extreme noise amplification (0.4x to 3.5x) */
+    if (gain < 0.4f) gain = 0.4f;
+    if (gain > 3.5f) gain = 3.5f;
+
+    /* Actively scale R, G, B channels of aligned face crop */
+    for (int i = 0; i < num_pixels; i++) {
+        uint16_t p = buf[i];
+        uint8_t r = (p >> 11) & 0x1F;
+        uint8_t g = (p >> 5) & 0x3F;
+        uint8_t b = p & 0x1F;
+
+        uint8_t new_r = (uint8_t)(r * gain);
+        uint8_t new_g = (uint8_t)(g * gain);
+        uint8_t new_b = (uint8_t)(b * gain);
+
+        if (new_r > 31) new_r = 31;
+        if (new_g > 63) new_g = 63;
+        if (new_b > 31) new_b = 31;
+
+        buf[i] = ((uint16_t)new_r << 11) | ((uint16_t)new_g << 5) | new_b;
+    }
+}
