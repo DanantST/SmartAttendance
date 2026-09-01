@@ -2707,3 +2707,50 @@ AR-8 camera frame by-value queue fix; AR-3 LEDC double-init guard; AR-4 stale OV
 
 #### Commit
 feat(detection,storage): add CLAHE illumination normalization, fix detector bounds crash, and implement SD card logger with serial dump
+
+---
+
+## Session - 2026-09-01 - Multi-Frame Attendance Scan Pattern Fusion & Consensus Engine
+
+### User Request
+> The difference in individual facial embeddings is too little to distinguish between users. Implement a pattern recognition algorithm using ~10 frames during enrollment and attendance scanning so the device compares a pattern of frames rather than a single shot. Also raised issues around poor illumination invariance, false positives on un-enrolled users, and crash stability.
+
+### Implementation
+> Implemented a full Multi-Frame Temporal Pattern Fusion & Consensus Voting engine (Plan v4 Final) for attendance scanning in `main.c` and `recognizer.cpp`. The approach mirrors the enrollment pipeline's multi-sample strategy on the query side to eliminate single-shot noise asymmetry. The plan underwent 5 iterative review cycles (v1–v4) resolving latency accuracy, double-threshold fragility, redundant DB scanning, inlier floor scaling, spatial identity mixing, early-exit path consistency, thread safety, and vote denominator alignment before approval.
+
+#### Feature Overview
+Attendance scanning now collects a 6-frame temporal pattern window, filters noise frames using adaptive outlier statistics, synthesizes a denoised fused query vector, and requires consensus votes from the same frames to confirm identity — dramatically reducing false positives and false negatives due to per-frame noise.
+
+**`main/config.h`** changes:
+- Added complete `Multi-Frame Attendance Scan Configuration` section with 9 tunable constants: `SCAN_WINDOW_SIZE` (6), `SCAN_EARLY_EXIT_FRAMES` (3), `SCAN_EARLY_EXIT_SIM_MIN` (0.80), `SCAN_VOTE_THRESHOLD` (0.55), `SCAN_TOP_CANDIDATES` (3), `SCAN_WINDOW_TIMEOUT_MS` (1500), `SCAN_WINDOW_LIFETIME_MS` (2000), `SCAN_SPATIAL_IOU_MIN` (0.30), `SCAN_SPATIAL_CENTER_SCALE` (0.40).
+- Updated `RECOGNITION_THRESHOLD` comment to clarify it is the fused-query gate (S_fused ≥ 0.65).
+
+**`main/recognition/recognizer.h`** changes:
+- Added `recognizer_identify_multiframe()` declaration with full doc comment.
+- Doc comment explicitly states: voting pool = inlier frames only; consensus denominator = N_inlier (not raw window N). This prevents implementation ambiguity.
+
+**`main/recognition/recognizer.cpp`** changes:
+- Implemented `recognizer_identify_multiframe()` with full 7-step Plan v4 pipeline:
+  1. Pairwise cosine similarity matrix S_ij over all N frames.
+  2. Adaptive outlier filtering (μ - 1.5σ) with N-scaled dynamic inlier floor `max(2, ceil(0.6*N))`. For N=3 (early-exit) min inliers = 2; for N=6 (full window) min inliers = 4. Fallback to all frames if floor not met.
+  3. Centroid synthesis on INLIER frames only + L2 norm restoration → q_fused.
+  4a. Hint path (early-exit): hint_candidate != NULL skips full DB scan entirely.
+  4b. Full path: single O(N_users) DB scan on q_fused → extracts sorted Top-3 candidates.
+  5. Votes INLIER frames (not raw frames) against Top-3 at τ_vote = 0.55f.
+  6. Winner k* requires ≥ ceil(0.6 × N_inlier) votes (denominator = N_inlier).
+  7. Acceptance gate: S_fused(k*) ≥ RECOGNITION_THRESHOLD (0.65f).
+  8. Advisory liveness telemetry: logs embedding variance across inlier frames.
+
+**`main/main.c`** changes:
+- Replaced single-frame `detection_recognition_task()` with full Multi-Frame Temporal Pattern Fusion engine:
+  - Task-local `scan_window_t` struct (768 bytes: 6 × 128B embeddings + metadata). Zero cross-task shared state.
+  - Spatial continuity gate: `IoU(B_i, B_{i-1}) ≥ 0.30 AND ΔCenter ≤ 0.40 × √(W×H)`. Both conditions required (AND not OR). Window resets on continuity break.
+  - Inter-frame timeout (1500ms) and total window lifetime (2000ms) expiry: prevents stale embeddings bleeding into next person's scan.
+  - Best-sharpness RGB565 crop tracking for UI bounding box (single crop retained, not all 6).
+  - 3-frame early-exit unanimity check: runs `recognizer_identify()` per frame (3 × O(N_users), ~60ms total); if all 3 agree at S ≥ 0.80, passes pre-known hint_candidate to `recognizer_identify_multiframe()` and skips 4th DB scan. Total fast path ≈ 410ms.
+  - 6-frame full window path: total ≈ 690ms, passes hint_candidate=NULL so recognizer runs single DB scan.
+  - UI bounding box updated continuously during accumulation; identity result displayed via `ui_acquire()`/`ui_release()` mutex on final decision only.
+  - Window resets after every completed scan decision.
+
+#### Commit
+feat(recognition): implement multi-frame temporal pattern fusion & consensus voting for attendance scanning

@@ -56,7 +56,7 @@ extern "C" {
 /* ==================== Face Recognition Configuration ==================== */
 #define FACE_ALIGN_SIZE             112              // 112x112 aligned face
 #define EMBEDDING_DIM               128              // 128-dimensional embedding
-#define RECOGNITION_THRESHOLD       0.65f            // Cosine similarity threshold (prevents false positives)
+#define RECOGNITION_THRESHOLD       0.65f            // Cosine similarity threshold for fused query (S_fused gate)
 #define EMBEDDING_CACHE_SIZE        500              // Max cached users
 
 /* Face detection thresholds */
@@ -70,6 +70,18 @@ extern "C" {
 #define ENROLL_BRIGHTNESS_MIN       30               // 0-255, min average luminance
 #define ENROLL_BRIGHTNESS_MAX       220              // Max average luminance
 #define ENROLL_YAW_MAX_DEG          30.0f            // Max head yaw angle
+
+/* ==================== Multi-Frame Attendance Scan Configuration ==================== */
+/* Temporal Pattern Fusion & Consensus Voting — Plan v4 Final                        */
+#define SCAN_WINDOW_SIZE            6                // Max embedding frames per scan window
+#define SCAN_EARLY_EXIT_FRAMES      3                // Frames required for early-exit (3-frame unanimous path)
+#define SCAN_EARLY_EXIT_SIM_MIN     0.80f            // Per-frame raw similarity to trigger early exit
+#define SCAN_VOTE_THRESHOLD         0.55f            // Per-frame vote threshold (relaxed vs S_fused gate)
+#define SCAN_TOP_CANDIDATES         3                // Number of top DB candidates for fast voting
+#define SCAN_WINDOW_TIMEOUT_MS      1500             // Max ms between valid frames before window reset
+#define SCAN_WINDOW_LIFETIME_MS     2000             // Max total ms a window can live before forced reset
+#define SCAN_SPATIAL_IOU_MIN        0.30f            // Min IoU for bounding box continuity check
+#define SCAN_SPATIAL_CENTER_SCALE   0.40f            // Center displacement limit = scale * sqrt(W*H)
 
 /* ==================== Audio Configuration ==================== */
 /* Audio subsystem removed 2026-06-11. All defines below are retained as

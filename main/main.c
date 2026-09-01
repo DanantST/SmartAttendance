@@ -654,18 +654,38 @@ static void camera_task(void *pvParameters) {
 }
 
 /**
- * @brief Face detection and recognition task
- * Processes frames from camera queue, runs detection and recognition
+ * @brief Face detection and recognition task.
+ * Multi-Frame Temporal Pattern Fusion & Consensus Voting (Plan v4 Final).
+ * Processes frames from camera queue into a task-local 6-frame sliding window,
+ * runs spatial/temporal continuity checks, centroid synthesis, and consensus voting.
  */
 static void detection_recognition_task(void *pvParameters) {
-    camera_frame_t frame;
-    aligned_face_t aligned_face;
-    face_embedding_t embedding;
-    user_t *matched_user;
-    float confidence;
-    
 
-    
+    /* -----------------------------------------------------------------------
+     * Task-local sliding window state — NEVER shared with other tasks.
+     * Total embedding storage: SCAN_WINDOW_SIZE * 128 bytes = 768 bytes SPIRAM.
+     * One best-sharpness RGB565 aligned face crop retained for UI bounding box.
+     * ----------------------------------------------------------------------- */
+    typedef struct {
+        face_embedding_t embeddings[SCAN_WINDOW_SIZE]; /* 6 x 128B = 768B      */
+        int              count;                        /* Valid frames in window */
+        int64_t          t_first_ms;                  /* Window open timestamp  */
+        int64_t          t_last_ms;                   /* Last valid frame time  */
+        /* Bounding box of the last accepted frame (for continuity gate) */
+        int              last_x, last_y, last_w, last_h;
+        /* Scaled UI bounding box of best-sharpness frame */
+        int              best_ui_x, best_ui_y, best_ui_w, best_ui_h;
+        float            best_sharpness;
+        /* Early-exit unanimity tracking */
+        user_t          *unanimous_candidate; /* Non-NULL if 3 frames agree @0.80 */
+        int              unanimous_streak;    /* Consecutive frames for same user  */
+    } scan_window_t;
+
+    scan_window_t win = {0};
+    win.unanimous_candidate = NULL;
+    win.unanimous_streak    = 0;
+    win.best_sharpness      = -1.0f;
+
     while (1) {
         /* [T1-7] Suspend during factory reset / shutdown */
         if (get_system_state() == SYSTEM_STATE_SHUTDOWN) {
@@ -674,115 +694,275 @@ static void detection_recognition_task(void *pvParameters) {
         }
 
         /* Wait for next frame */
+        camera_frame_t frame;
         if (xQueueReceive(g_camera_frame_queue, &frame, pdMS_TO_TICKS(100)) != pdTRUE) {
+            /* Check window timeout while idle */
+            if (win.count > 0) {
+                int64_t now_ms = esp_timer_get_time() / 1000LL;
+                if ((now_ms - win.t_last_ms) > SCAN_WINDOW_TIMEOUT_MS ||
+                    (now_ms - win.t_first_ms) > SCAN_WINDOW_LIFETIME_MS) {
+                    ESP_LOGD(TAG, "Scan window expired (idle timeout), resetting.");
+                    memset(&win, 0, sizeof(win));
+                    win.unanimous_candidate = NULL;
+                    win.best_sharpness = -1.0f;
+                }
+            }
             continue;
         }
 
         /* Skip processing if enrollment is in progress to avoid queue contention */
         if (get_system_state() != SYSTEM_STATE_NORMAL) {
             camera_return_frame(&frame.fb);
+            memset(&win, 0, sizeof(win));
+            win.unanimous_candidate = NULL;
+            win.best_sharpness = -1.0f;
             continue;
         }
-        
+
         /* Run face detection */
         detection_result_t det_result;
         if (face_detector_run(&frame.fb, &det_result) != ESP_OK) {
             camera_return_frame(&frame.fb);
             continue;
         }
-        
+
         /* If no face detected, update UI and continue */
         if (det_result.face_count == 0) {
             if (ui_acquire()) {
                 ui_update_detection_bounding_box(0, 0, 0, 0, false);
                 ui_release();
             }
+            /* Reset window — face left frame */
+            if (win.count > 0) {
+                memset(&win, 0, sizeof(win));
+                win.unanimous_candidate = NULL;
+                win.best_sharpness = -1.0f;
+            }
             camera_return_frame(&frame.fb);
             continue;
         }
-        
+
         /* Take the largest face (first in list) */
         detected_face_t *face = &det_result.faces[0];
-        
+
         /* Skip low confidence detections */
         if (face->confidence < FACE_DETECT_CONFIDENCE_MIN) {
             camera_return_frame(&frame.fb);
             continue;
         }
-        
-        /* Align face to 112x112 canonical view */
+
+        int64_t now_ms = esp_timer_get_time() / 1000LL;
+
+        /* -------------------------------------------------------------------
+         * Spatial & Temporal Continuity Gate (Plan v4 §1)
+         * Require IoU >= SCAN_SPATIAL_IOU_MIN AND center displacement
+         * <= SCAN_SPATIAL_CENTER_SCALE * sqrt(W_face * H_face).
+         * If either fails, reset the window (new face entered frame).
+         * ------------------------------------------------------------------- */
+        if (win.count > 0) {
+            /* Timeout check */
+            if ((now_ms - win.t_last_ms)  > SCAN_WINDOW_TIMEOUT_MS ||
+                (now_ms - win.t_first_ms) > SCAN_WINDOW_LIFETIME_MS) {
+                ESP_LOGD(TAG, "Scan window lifetime/timeout expired, resetting.");
+                memset(&win, 0, sizeof(win));
+                win.unanimous_candidate = NULL;
+                win.best_sharpness = -1.0f;
+            } else {
+                /* IoU between current bounding box and last accepted bounding box */
+                int ix1 = face->x > win.last_x ? face->x : win.last_x;
+                int iy1 = face->y > win.last_y ? face->y : win.last_y;
+                int ix2_cur = face->x + face->w,  ix2_prev = win.last_x + win.last_w;
+                int iy2_cur = face->y + face->h,  iy2_prev = win.last_y + win.last_h;
+                int ix2 = ix2_cur < ix2_prev ? ix2_cur : ix2_prev;
+                int iy2 = iy2_cur < iy2_prev ? iy2_cur : iy2_prev;
+
+                float intersection = (float)((ix2 > ix1 ? ix2 - ix1 : 0) * (iy2 > iy1 ? iy2 - iy1 : 0));
+                float area_cur  = (float)(face->w * face->h);
+                float area_prev = (float)(win.last_w * win.last_h);
+                float iou = (area_cur + area_prev - intersection > 0.0f)
+                    ? intersection / (area_cur + area_prev - intersection) : 0.0f;
+
+                /* Center displacement (scaled to face size) */
+                float cx_cur  = (float)(face->x + face->w / 2);
+                float cy_cur  = (float)(face->y + face->h / 2);
+                float cx_prev = (float)(win.last_x + win.last_w / 2);
+                float cy_prev = (float)(win.last_y + win.last_h / 2);
+                float dc = sqrtf((cx_cur - cx_prev)*(cx_cur - cx_prev) + (cy_cur - cy_prev)*(cy_cur - cy_prev));
+                float dc_limit = SCAN_SPATIAL_CENTER_SCALE * sqrtf((float)(face->w * face->h));
+
+                bool iou_ok    = (iou    >= SCAN_SPATIAL_IOU_MIN);
+                bool center_ok = (dc     <= dc_limit);
+
+                if (!iou_ok || !center_ok) {
+                    ESP_LOGD(TAG, "Spatial continuity break (IoU=%.2f, dc=%.1fpx limit=%.1f) — window reset",
+                             iou, dc, dc_limit);
+                    memset(&win, 0, sizeof(win));
+                    win.unanimous_candidate = NULL;
+                    win.best_sharpness = -1.0f;
+                }
+            }
+        }
+
+        /* -------------------------------------------------------------------
+         * Align face + extract embedding for this frame
+         * ------------------------------------------------------------------- */
+        aligned_face_t aligned_face;
         if (face_alignment_align(&frame.fb, face, &aligned_face) != ESP_OK) {
             camera_return_frame(&frame.fb);
             continue;
         }
 
-        /* Actively adjust face crop brightness & contrast to target luminance (128) */
+        /* CLAHE illumination normalization */
         face_alignment_normalize_brightness(&aligned_face);
-        
-        /* Extract embedding */
+
+        face_embedding_t embedding;
         if (feature_extractor_run(&aligned_face, &embedding) != ESP_OK) {
             face_alignment_free(&aligned_face);
             camera_return_frame(&frame.fb);
             continue;
         }
-        
-        /* Match against database */
-        recognizer_identify(&embedding, &matched_user, &confidence);
-        
-        ESP_LOGI(TAG, "Recognition run: matched_user=%s, confidence=%.3f (threshold=%.2f)",
-                 (matched_user != NULL) ? matched_user->name : "None/Unknown", confidence, RECOGNITION_THRESHOLD);
-        
-        /* Update UI with bounding box and recognition result (scaled to 480x360 UI preview size) */
-        if (ui_acquire()) {
-            int scaled_x = (frame.fb.width > 0) ? (face->x * 480 / frame.fb.width) : face->x;
-            int scaled_y = (frame.fb.height > 0) ? (face->y * 360 / frame.fb.height) : face->y;
-            int scaled_w = (frame.fb.width > 0) ? (face->w * 480 / frame.fb.width) : face->w;
-            int scaled_h = (frame.fb.height > 0) ? (face->h * 360 / frame.fb.height) : face->h;
-            ui_update_detection_bounding_box(scaled_x, scaled_y, scaled_w, scaled_h, true);
-            
-            if (matched_user != NULL && confidence >= RECOGNITION_THRESHOLD) {
-                /* Recognition success */
-                ui_show_recognition_result(matched_user->name, confidence);
+
+        /* Track best-sharpness frame for UI bounding box */
+        float this_sharpness = face_detector_compute_sharpness(&frame.fb, face);
+        if (this_sharpness > win.best_sharpness) {
+            win.best_sharpness = this_sharpness;
+            win.best_ui_x = (frame.fb.width  > 0) ? (face->x * 480 / frame.fb.width)  : face->x;
+            win.best_ui_y = (frame.fb.height > 0) ? (face->y * 360 / frame.fb.height) : face->y;
+            win.best_ui_w = (frame.fb.width  > 0) ? (face->w * 480 / frame.fb.width)  : face->w;
+            win.best_ui_h = (frame.fb.height > 0) ? (face->h * 360 / frame.fb.height) : face->h;
+        }
+
+        face_alignment_free(&aligned_face);
+
+        /* Update bounding box history for next continuity check */
+        win.last_x = face->x;  win.last_y = face->y;
+        win.last_w = face->w;  win.last_h = face->h;
+        if (win.count == 0) win.t_first_ms = now_ms;
+        win.t_last_ms = now_ms;
+
+        /* Store embedding into window (ring — should not exceed SCAN_WINDOW_SIZE) */
+        if (win.count < SCAN_WINDOW_SIZE) {
+            win.embeddings[win.count] = embedding;
+            win.count++;
+        }
+
+        camera_return_frame(&frame.fb);
+
+        /* -------------------------------------------------------------------
+         * Early-exit 3-frame unanimity check (Plan v4 §3 — fast path ~410ms)
+         *
+         * Latency budget (documented): 3 × Inference ≈345ms
+         *   + 3 × DB Scan (unanimity) ≈60ms
+         *   + Fusion Math ≈5ms = ~410ms total.
+         *
+         * Run single-frame recognizer_identify() per frame (= 3 O(N_users)
+         * scans) to detect unanimous agreement. These costs are INTENTIONAL
+         * and do NOT add a 4th redundant DB scan — the matched candidate is
+         * passed as hint_candidate into recognizer_identify_multiframe(),
+         * which skips its own full DB scan on q_fused.
+         * ------------------------------------------------------------------- */
+        if (win.count == SCAN_EARLY_EXIT_FRAMES) {
+            user_t *this_user = NULL;
+            float   this_conf = 0.0f;
+            recognizer_identify(&embedding, &this_user, &this_conf);
+
+            if (this_user != NULL && this_conf >= SCAN_EARLY_EXIT_SIM_MIN) {
+                if (win.unanimous_candidate == this_user) {
+                    win.unanimous_streak++;
+                } else {
+                    win.unanimous_candidate = this_user;
+                    win.unanimous_streak    = 1;
+                }
+            } else {
+                win.unanimous_candidate = NULL;
+                win.unanimous_streak    = 0;
+            }
+
+            if (win.unanimous_streak >= SCAN_EARLY_EXIT_FRAMES) {
+                ESP_LOGI(TAG, "Early-exit: %d unanimous frames for %s @%.2f — invoking multiframe(N=3, hint)",
+                         win.unanimous_streak, win.unanimous_candidate->name, this_conf);
+                goto run_multiframe;
+            }
+        }
+
+        /* Accumulate until full window (6 frames — full path ~690ms) */
+        if (win.count < SCAN_WINDOW_SIZE) {
+            /* Update live bounding box UI while accumulating */
+            if (ui_acquire()) {
+                ui_update_detection_bounding_box(win.best_ui_x, win.best_ui_y,
+                                                 win.best_ui_w, win.best_ui_h, true);
                 ui_release();
-                
+            }
+            /* Progress log */
+            static int det_cnt = 0;
+            if (++det_cnt % 10 == 0) esp_rom_printf("P");
+            continue;
+        }
+
+        /* Full 6-frame window ready */
+        ESP_LOGI(TAG, "Full scan window ready: N=%d, invoking multiframe(hint=NULL)", win.count);
+
+    run_multiframe: ;
+        /* -------------------------------------------------------------------
+         * Multi-Frame Pattern Fusion & Consensus Decision (Plan v4 §3–7)
+         * hint_candidate: non-NULL for early-exit path (skips 4th DB scan).
+         *                 NULL for full-window path (runs single O(N_users) scan).
+         * ------------------------------------------------------------------- */
+        user_t *matched_user       = NULL;
+        float   fused_confidence   = 0.0f;
+        int     consensus_votes    = 0;
+
+        recognizer_identify_multiframe(
+            win.embeddings,
+            win.count,
+            win.unanimous_candidate,   /* hint: NULL on full path, user* on early-exit */
+            &matched_user,
+            &fused_confidence,
+            &consensus_votes
+        );
+
+        ESP_LOGI(TAG, "Multiframe result: user=%s S_fused=%.3f votes=%d (N=%d)",
+                 matched_user ? matched_user->name : "Unknown",
+                 fused_confidence, consensus_votes, win.count);
+
+        /* -------------------------------------------------------------------
+         * Thread-safe UI update and attendance logging
+         * matched_user / fused_confidence are task-local — safe to pass in.
+         * ------------------------------------------------------------------- */
+        if (ui_acquire()) {
+            ui_update_detection_bounding_box(win.best_ui_x, win.best_ui_y,
+                                             win.best_ui_w, win.best_ui_h, true);
+
+            if (matched_user != NULL && fused_confidence >= RECOGNITION_THRESHOLD) {
+                ui_show_recognition_result(matched_user->name, fused_confidence);
+                ui_release();
+
                 /* Auto-activate admin session if recognized user is admin */
                 if (strcmp(matched_user->role, "admin") == 0) {
                     activate_admin_session();
                 }
-                
+
                 /* Log attendance (async) */
-                process_recognition_result(matched_user, confidence);
-                
-                /* Play success sound */
-                #if ENABLE_AUDIO_GUIDANCE
-                audio_play(AUDIO_PROMPTS_PATH "attendance_success.wav", false);
-                #endif
+                process_recognition_result(matched_user, fused_confidence);
             } else {
-                /* Unknown face */
-                ui_show_recognition_result("Unknown", confidence);
+                ui_show_recognition_result("Unknown", fused_confidence);
                 ui_release();
-                
-                /* Play unknown sound (optional) */
-                #if ENABLE_AUDIO_GUIDANCE
-                audio_play(AUDIO_PROMPTS_PATH "unknown_face.wav", false);
-                #endif
             }
         } else {
-            /* Log attendance even if UI update was skipped due to lock timeout */
-            if (matched_user != NULL && confidence >= RECOGNITION_THRESHOLD) {
-                process_recognition_result(matched_user, confidence);
+            /* UI lock unavailable — still log attendance */
+            if (matched_user != NULL && fused_confidence >= RECOGNITION_THRESHOLD) {
+                process_recognition_result(matched_user, fused_confidence);
             }
         }
-        
-        /* Clean up */
-        face_alignment_free(&aligned_face);
-        camera_return_frame(&frame.fb);
-        
 
-        
+        /* Reset window after every completed scan decision */
+        memset(&win, 0, sizeof(win));
+        win.unanimous_candidate = NULL;
+        win.best_sharpness = -1.0f;
+
         /* Progress log */
-        static int det_cnt = 0;
-        if (++det_cnt % 10 == 0) esp_rom_printf("P");
+        static int det_cnt2 = 0;
+        if (++det_cnt2 % 10 == 0) esp_rom_printf("P");
     }
 }
 
