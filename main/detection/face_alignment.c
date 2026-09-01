@@ -199,38 +199,81 @@ void face_alignment_normalize_brightness(aligned_face_t *aligned) {
     uint16_t *buf = (uint16_t *)aligned->data;
     int num_pixels = aligned->width * aligned->height;
 
-    /* Calculate mean green channel (luminance proxy for RGB565) */
-    uint32_t sum_g = 0;
-    for (int i = 0; i < num_pixels; i++) {
-        uint8_t g = (buf[i] >> 5) & 0x3F;
-        sum_g += g;
+    /* Allocate temp buffer for 8-bit luminance to protect FreeRTOS task stack */
+    uint8_t *luma = (uint8_t *)heap_caps_malloc(num_pixels, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!luma) {
+        luma = (uint8_t *)malloc(num_pixels);
     }
-    float avg_g = (float)sum_g / (float)num_pixels;
-    if (avg_g < 2.0f) avg_g = 2.0f;
+    if (!luma) return;
 
-    /* Target green luminance: 32 (maps to ~128 mid-gray in 8-bit scale) */
-    float target_g = 32.0f;
-    float gain = target_g / avg_g;
+    int hist[256] = {0};
 
-    /* Clamp gain to prevent extreme noise amplification (0.4x to 3.5x) */
-    if (gain < 0.4f) gain = 0.4f;
-    if (gain > 3.5f) gain = 3.5f;
-
-    /* Actively scale R, G, B channels of aligned face crop */
+    /* 1. Calculate 8-bit Luminance (0..255) for each pixel */
     for (int i = 0; i < num_pixels; i++) {
         uint16_t p = buf[i];
-        uint8_t r = (p >> 11) & 0x1F;
-        uint8_t g = (p >> 5) & 0x3F;
-        uint8_t b = p & 0x1F;
-
-        uint8_t new_r = (uint8_t)(r * gain);
-        uint8_t new_g = (uint8_t)(g * gain);
-        uint8_t new_b = (uint8_t)(b * gain);
-
-        if (new_r > 31) new_r = 31;
-        if (new_g > 63) new_g = 63;
-        if (new_b > 31) new_b = 31;
-
-        buf[i] = ((uint16_t)new_r << 11) | ((uint16_t)new_g << 5) | new_b;
+        uint32_t r8 = ((p >> 11) & 0x1F) * 255 / 31;
+        uint32_t g8 = ((p >> 5) & 0x3F) * 255 / 63;
+        uint32_t b8 = (p & 0x1F) * 255 / 31;
+        /* Standard YUV Luminance: Y = 0.299R + 0.587G + 0.114B */
+        uint8_t y = (uint8_t)((r8 * 299 + g8 * 587 + b8 * 114) / 1000);
+        luma[i] = y;
+        hist[y]++;
     }
+
+    /* 2. Contrast-Limited Histogram Equalization (CLAHE):
+     * Clip histogram peak to 3.0x average bin count to prevent noise amplification */
+    int clip_limit = (int)(3.0f * ((float)num_pixels / 256.0f));
+    if (clip_limit < 4) clip_limit = 4;
+    int excess = 0;
+
+    for (int i = 0; i < 256; i++) {
+        if (hist[i] > clip_limit) {
+            excess += (hist[i] - clip_limit);
+            hist[i] = clip_limit;
+        }
+    }
+
+    /* Evenly redistribute clipped excess counts across all 256 bins */
+    int bonus = excess / 256;
+    for (int i = 0; i < 256; i++) {
+        hist[i] += bonus;
+    }
+
+    /* 3. Compute Cumulative Distribution Function (CDF) mapping [0..255] -> [0..255] */
+    uint8_t map[256];
+    uint32_t cdf = 0;
+    for (int i = 0; i < 256; i++) {
+        cdf += hist[i];
+        uint32_t val = (cdf * 255) / num_pixels;
+        if (val > 255) val = 255;
+        map[i] = (uint8_t)val;
+    }
+
+    /* 4. Scale RGB565 channels by y_new / y_old ratio to preserve natural skin tone */
+    for (int i = 0; i < num_pixels; i++) {
+        uint16_t p = buf[i];
+        uint32_t r5 = (p >> 11) & 0x1F;
+        uint32_t g6 = (p >> 5) & 0x3F;
+        uint32_t b5 = p & 0x1F;
+
+        uint8_t y_old = luma[i];
+        if (y_old == 0) continue;
+
+        uint8_t y_new = map[y_old];
+        float scale = (float)y_new / (float)y_old;
+        if (scale < 0.3f) scale = 0.3f;
+        if (scale > 3.0f) scale = 3.0f;
+
+        uint32_t new_r5 = (uint32_t)(r5 * scale + 0.5f);
+        uint32_t new_g6 = (uint32_t)(g6 * scale + 0.5f);
+        uint32_t new_b5 = (uint32_t)(b5 * scale + 0.5f);
+
+        if (new_r5 > 31) new_r5 = 31;
+        if (new_g6 > 63) new_g6 = 63;
+        if (new_b5 > 31) new_b5 = 31;
+
+        buf[i] = (uint16_t)((new_r5 << 11) | (new_g6 << 5) | new_b5);
+    }
+
+    free(luma);
 }

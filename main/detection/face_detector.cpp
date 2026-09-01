@@ -100,51 +100,64 @@ esp_err_t face_detector_run(camera_fb_t *fb, detection_result_t *result) {
 
 /* Quality functions */
 float face_detector_compute_sharpness(camera_fb_t *fb, detected_face_t *face) {
+    if (!fb || !fb->buf || !face) return 0.0f;
     float mean = 0, variance = 0;
-    int n = face->w * face->h;
-    if (n <= 0) return 0.0f;
+    int valid_pixel_count = 0;
     uint16_t *pixels = (uint16_t *)fb->buf;
+
     for (int y = 0; y < face->h; y++) {
+        int py = face->y + y;
+        if (py < 0 || py >= fb->height) continue;
         for (int x = 0; x < face->w; x++) {
-            int px_idx = (face->y + y) * fb->width + (face->x + x);
-            if (px_idx < fb->width * fb->height) {
-                uint8_t g = (pixels[px_idx] >> 5) & 0x3F;
-                mean += g;
-            }
+            int px = face->x + x;
+            if (px < 0 || px >= fb->width) continue;
+            int px_idx = py * fb->width + px;
+            uint8_t g = (pixels[px_idx] >> 5) & 0x3F;
+            mean += g;
+            valid_pixel_count++;
         }
     }
-    mean /= (float)n;
+    if (valid_pixel_count <= 0) return 0.0f;
+    mean /= (float)valid_pixel_count;
+
     for (int y = 0; y < face->h; y++) {
+        int py = face->y + y;
+        if (py < 0 || py >= fb->height) continue;
         for (int x = 0; x < face->w; x++) {
-            int px_idx = (face->y + y) * fb->width + (face->x + x);
-            if (px_idx < fb->width * fb->height) {
-                uint8_t g = (pixels[px_idx] >> 5) & 0x3F;
-                variance += (g - mean) * (g - mean);
-            }
+            int px = face->x + x;
+            if (px < 0 || px >= fb->width) continue;
+            int px_idx = py * fb->width + px;
+            uint8_t g = (pixels[px_idx] >> 5) & 0x3F;
+            variance += (g - mean) * (g - mean);
         }
     }
-    return variance / (float)n;
+    return variance / (float)valid_pixel_count;
 }
 
 float face_detector_compute_brightness(camera_fb_t *fb, detected_face_t *face) {
+    if (!fb || !fb->buf || !face) return 0.0f;
     float mean = 0;
-    int n = face->w * face->h;
-    if (n <= 0) return 0.0f;
+    int valid_pixel_count = 0;
     uint16_t *pixels = (uint16_t *)fb->buf;
+
     for (int y = 0; y < face->h; y++) {
+        int py = face->y + y;
+        if (py < 0 || py >= fb->height) continue;
         for (int x = 0; x < face->w; x++) {
-            int px_idx = (face->y + y) * fb->width + (face->x + x);
-            if (px_idx < fb->width * fb->height) {
-                uint16_t p = pixels[px_idx];
-                uint8_t r = (p >> 11) & 0x1F;
-                uint8_t g = (p >> 5) & 0x3F;
-                uint8_t b = p & 0x1F;
-                int luma = (r * 8 * 299 + g * 4 * 587 + b * 8 * 114) / 1000;
-                mean += luma;
-            }
+            int px = face->x + x;
+            if (px < 0 || px >= fb->width) continue;
+            int px_idx = py * fb->width + px;
+            uint16_t p = pixels[px_idx];
+            uint8_t r = (p >> 11) & 0x1F;
+            uint8_t g = (p >> 5) & 0x3F;
+            uint8_t b = p & 0x1F;
+            int luma = (r * 8 * 299 + g * 4 * 587 + b * 8 * 114) / 1000;
+            mean += luma;
+            valid_pixel_count++;
         }
     }
-    return mean / (float)n;
+    if (valid_pixel_count <= 0) return 0.0f;
+    return mean / (float)valid_pixel_count;
 }
 
 float face_detector_compute_yaw(detected_face_t *face) {

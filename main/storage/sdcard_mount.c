@@ -1,4 +1,5 @@
 #include "storage/sdcard_mount.h"
+#include "storage/sd_logger.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
@@ -47,6 +48,9 @@ esp_err_t sdcard_mount(void) {
     /* Print card info */
     sdmmc_card_print_info(stdout, s_card);
     ESP_LOGI(TAG, "SD card mounted successfully.");
+
+    /* Initialize SD Card System Logger */
+    sd_logger_init();
 
     /* Diagnostic File Write Test */
     ESP_LOGI(TAG, "Running diagnostic write/read test on SD card...");

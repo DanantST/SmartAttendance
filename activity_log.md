@@ -2671,3 +2671,39 @@ The `camera_task` docblock in `main.c` referred to "OV5647" — the board uses a
 
 #### Commit
 AR-8 camera frame by-value queue fix; AR-3 LEDC double-init guard; AR-4 stale OV5647 comment corrected.
+
+---
+
+## Session - 2026-09-01 - Illumination Normalization (CLAHE), Bounds Safety & SD Card Logging
+
+### User Request
+> we need to implement the best available logic for brightness normalisation during enrollment and scannig. While testing live, it was observed that the device couldnt identify dome users when in a different illumination environment from where they enrolled. It also recognized someone who didnt enroll was one of the enrolled users when the lightening changed. The device also couldnt stay on for longer than a 5 minutes average range during enrollment or scanning before crashing.
+> I would suggest to add an log writing function to the firmware to addd the usage logs to the SD card that can be accessed from the serial monitor at any time.
+
+### Implementation
+
+#### Feature Overview
+1. **Contrast-Limited Adaptive Luminance Histogram Equalization (CLAHE):** Upgraded `face_alignment_normalize_brightness()` in `face_alignment.c` from a primitive global linear gain multiplier to a Contrast-Limited Adaptive Luminance Histogram Equalization algorithm. Converts RGB565 aligned face crops (112x112) to YUV luminance ($Y$), computes a 256-bin histogram, clips contrast peaks at 3.0x to prevent noise amplification, redistributes excess counts evenly, computes the CDF mapping, and scales RGB channels proportionally. Standardizes facial contrast and feature vectors across harsh sunlight, shadows, and low-light environments during both enrollment and scanning. (Kept `RECOGNITION_THRESHOLD` at `0.65f` as explicitly directed by user).
+2. **Out-of-Bounds Memory Access Fix (Stability / Crash Prevention):** Fixed `face_detector_compute_sharpness()` and `face_detector_compute_brightness()` in `face_detector.cpp`. Previously, `int px_idx = (face->y + y) * fb->width + (face->x + x)` calculated pixel offsets without checking for negative coordinates when faces crossed frame edges. `px_idx < width * height` evaluated to true for negative signed numbers, causing out-of-bounds reads into unmapped memory and triggering LoadProhibited panics after ~5 minutes of tracking. Added explicit `px >= 0 && px < width && py >= 0 && py < height` validation.
+3. **Persistent SD Card Logging & Serial Dump Interface:** Implemented `sd_logger.h` / `sd_logger.c` in `main/storage/`. Intercepts system logs (`ESP_LOGI`, `ESP_LOGW`, `ESP_LOGE`) using `esp_log_set_vprintf()`, routes them asynchronously through a FreeRTOS queue to a background logger task, and appends them to `/sdcard/logs/system.log`. Includes thread-safe file rotation (500 KB limit per log file) and `sd_logger_dump()` / `sd_logger_check_serial_trigger()` to dump stored SD card logs directly to standard output / serial monitor on demand when receiving `'D'`/`'d'`.
+
+**`main/detection/face_alignment.c`** changes:
+- Rewrote `face_alignment_normalize_brightness()` with YUV luminance extraction, contrast-limited histogram equalization, CDF mapping, and proportional RGB channel re-projection. Allocated temp luminance buffer dynamically on SPIRAM to protect task stack.
+
+**`main/detection/face_detector.cpp`** changes:
+- Fixed bounds checks in `face_detector_compute_sharpness()` and `face_detector_compute_brightness()` to prevent negative array indexing when faces intersect camera boundaries.
+
+**`main/storage/sd_logger.h` & `main/storage/sd_logger.c`** changes:
+- Created SD card system log writer with `esp_log_set_vprintf()` hook, background queue writer, automatic 500 KB file rotation (`system.log.old`), and console dump functions.
+
+**`main/storage/sdcard_mount.c`** changes:
+- Added `#include "storage/sd_logger.h"` and invoked `sd_logger_init()` immediately after SD card filesystem mount.
+
+**`main/CMakeLists.txt`** changes:
+- Added `storage/sd_logger.c` to CMake build sources.
+
+**`main/main.c`** changes:
+- Added `#include "storage/sd_logger.h"` and `sd_logger_check_serial_trigger()` in the system state machine main loop.
+
+#### Commit
+feat(detection,storage): add CLAHE illumination normalization, fix detector bounds crash, and implement SD card logger with serial dump

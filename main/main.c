@@ -41,6 +41,7 @@
 #include "power/battery_monitor.h"
 #include "utils/queue_manager.h"
 #include "storage/sdcard_mount.h"
+#include "storage/sd_logger.h"
 #include "network/wifi_manager.h"
 #include "network/cloud_sync.h"
 #include "network/sntp_sync.h"
@@ -598,6 +599,7 @@ void app_main(void) {
     /* Main loop - system state machine */
     while (1) {
         system_state_machine();
+        sd_logger_check_serial_trigger();
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }

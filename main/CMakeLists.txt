@@ -18,6 +18,7 @@ idf_component_register(SRCS
     recognition/recognizer.cpp
     database/db_manager.c
     storage/sdcard_mount.c
+    storage/sd_logger.c
     display/lcd_driver.c
     display/touch_driver.c
     display/backlight.c
