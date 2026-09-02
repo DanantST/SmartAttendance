@@ -138,6 +138,10 @@ static void cloud_sync_task(void* param) {
     s_sync_status = SYNC_STATUS_IN_PROGRESS;
     esp_err_t overall_result = ESP_OK;
 
+    /* [Fix] Give network stack and DNS over esp_hosted co-processor 1.5s to settle
+     * after Wi-Fi connection / IP assignment before issuing DNS lookups. */
+    vTaskDelay(pdMS_TO_TICKS(1500));
+
     /* Step 0.3: Download course deletions */
     esp_err_t ret = sync_course_deletions();
     if (ret != ESP_OK) {

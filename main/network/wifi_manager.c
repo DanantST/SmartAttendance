@@ -153,9 +153,12 @@ esp_err_t wifi_manager_init(void) {
 }
 
 static void sntp_sync_on_connected_task(void *pvParameters) {
-    ESP_LOGI("WIFI_MGR", "Wi-Fi connected. Starting SNTP synchronization...");
+    /* [BUG-2] Fire-and-forget: just start SNTP then exit.
+     * network_sync_task owns the authoritative wait with a retry loop.
+     * The previous 10 s blocking wait here was redundant and raced with
+     * network_sync_task's independent 30 s wait at the same priority. */
+    ESP_LOGI("WIFI_MGR", "Wi-Fi connected. Initiating SNTP...");
     sntp_sync_init();
-    sntp_sync_wait_for_sync(10000);
     vTaskDelete(NULL);
 }
 
@@ -187,6 +190,22 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
         
+        /* Configure public DNS servers (8.8.8.8 and 1.1.1.1) to ensure DNS resolution
+         * works reliably even on Windows Mobile Hotspots or routers with bad local DNS proxies */
+        esp_netif_t *netif = event->esp_netif;
+        if (netif) {
+            esp_netif_dns_info_t dns_main = {0};
+            dns_main.ip.type = ESP_IPADDR_TYPE_V4;
+            esp_netif_str_to_ip4("8.8.8.8", &dns_main.ip.u_addr.ip4);
+            esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns_main);
+
+            esp_netif_dns_info_t dns_backup = {0};
+            dns_backup.ip.type = ESP_IPADDR_TYPE_V4;
+            esp_netif_str_to_ip4("1.1.1.1", &dns_backup.ip.u_addr.ip4);
+            esp_netif_set_dns_info(netif, ESP_NETIF_DNS_BACKUP, &dns_backup);
+            ESP_LOGI(TAG, "Set fallback DNS servers: 8.8.8.8 (main), 1.1.1.1 (backup)");
+        }
+
         s_retry_count = 0;
         s_wifi_status = WIFI_STATUS_CONNECTED;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);

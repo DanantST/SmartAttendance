@@ -937,6 +937,9 @@ static void detection_recognition_task(void *pvParameters) {
                 ui_show_recognition_result(matched_user->name, fused_confidence);
                 ui_release();
 
+                sd_logger_write("ATTENDANCE", "Recognized %s (S_fused=%.3f, votes=%d/%d)",
+                                matched_user->name, fused_confidence, consensus_votes, win.count);
+
                 /* Auto-activate admin session if recognized user is admin */
                 if (strcmp(matched_user->role, "admin") == 0) {
                     activate_admin_session();
@@ -947,10 +950,14 @@ static void detection_recognition_task(void *pvParameters) {
             } else {
                 ui_show_recognition_result("Unknown", fused_confidence);
                 ui_release();
+
+                sd_logger_write("RECOG", "Unknown face (best_sim=%.3f)", fused_confidence);
             }
         } else {
             /* UI lock unavailable — still log attendance */
             if (matched_user != NULL && fused_confidence >= RECOGNITION_THRESHOLD) {
+                sd_logger_write("ATTENDANCE", "Recognized %s (S_fused=%.3f, votes=%d/%d) [UI skipped]",
+                                matched_user->name, fused_confidence, consensus_votes, win.count);
                 process_recognition_result(matched_user, fused_confidence);
             }
         }

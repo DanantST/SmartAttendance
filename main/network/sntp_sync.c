@@ -60,8 +60,14 @@ esp_err_t sntp_sync_init(void) {
     /* Set timezone to WAT (West Africa Time) - GMT+1, no DST */
     setenv("TZ", "WAT-1", 1);
     tzset();
-    
-    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("time.google.com");
+
+    /* [BUG-2] Use 3 NTP servers for fallback resilience.
+     * The ESP32-C6 co-processor is factory pre-flashed (cannot be updated) and
+     * runs an older esp-hosted version, adding latency to every DNS/NTP round-trip.
+     * Multiple servers ensure a response even if the primary is slow or unreachable.
+     * Requires CONFIG_LWIP_SNTP_MAX_SERVERS=3 in sdkconfig.defaults. */
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(3,
+        ESP_SNTP_SERVER_LIST("time.google.com", "pool.ntp.org", "time.cloudflare.com"));
     config.sync_cb = sntp_sync_notification_cb;
     
     esp_err_t ret = esp_netif_sntp_init(&config);

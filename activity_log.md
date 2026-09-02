@@ -2754,3 +2754,38 @@ Attendance scanning now collects a 6-frame temporal pattern window, filters nois
 
 #### Commit
 feat(recognition): implement multi-frame temporal pattern fusion & consensus voting for attendance scanning
+
+---
+
+## Session - 2026-09-02 - SDMMC Controller Bus Contention Resolution & Wi-Fi SDIO Stability Fix
+
+### User Request
+> Resolve the reboot loop on startup after flashing multi-frame pattern fusion firmware, and fix the Wi-Fi SDIO co-processor connection timeout.
+
+### Implementation
+> Identified that the newly added SD Card logger was intercepting every low-level ESP-IDF log via `esp_log_set_vprintf()` and continuously executing FAT32 file transactions (`fopen`/`fclose`) on SDMMC Slot 0. This flooded and collided with the SDMMC peripheral while `H_SDIO_DRV` on SDMMC Slot 1 was performing the SDIO handshake with the ESP32-C6 co-processor, causing `sdmmc_send_cmd returned 0x107` timeouts and triggering host resets. Resolved by replacing the global vprintf hook with a dedicated non-blocking `sd_logger_write()` function for explicit usage/attendance events, disabling `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE`, and extending the SDIO reset delay to 3000ms.
+
+#### Feature Overview
+- **SDMMC Bus Contention Fix**: Removed global log interception in `sd_logger.c` which choked the shared SDMMC hardware during Wi-Fi setup. Created `sd_logger_write()` to record structured application events (attendance, system boot, enrollment, cloud sync) without touching low-level driver logs.
+- **Host Power-Cycle Protection**: Set `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=n` in `sdkconfig` and `sdkconfig.defaults.esp32p4` to prevent `H_SDIO_DRV` from calling `esp_restart()` on transport hiccups.
+- **ESP-Hosted SDIO Reset Delay**: Increased `CONFIG_ESP_HOSTED_SDIO_RESET_DELAY_MS` to 3000ms in `sdkconfig` and `sdkconfig.defaults.esp32p4` to grant adequate boot time to the C6 slave.
+- **Simplified Co-processor Handshake**: Cleaned up `wifi_manager_init()` to issue a single `esp_hosted_connect_to_slave()` call without redundant multi-attempt blocking loops.
+
+**`main/storage/sd_logger.h` & `main/storage/sd_logger.c`** changes:
+- Added `sd_logger_write(const char *tag, const char *fmt, ...)` for explicit event logging.
+- Removed `esp_log_set_vprintf()` hook.
+- Added `#include "esp_timer.h"` for millisecond boot timestamps.
+
+**`main/main.c`** changes:
+- Integrated `sd_logger_write()` for attendance recognition and unknown face detection events.
+
+**`main/network/wifi_manager.c`** changes:
+- Simplified `esp_hosted_connect_to_slave()` call logic.
+
+**`sdkconfig` & `sdkconfig.defaults.esp32p4`** changes:
+- Set `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=n`.
+- Set `CONFIG_ESP_HOSTED_SDIO_RESET_DELAY_MS=3000`.
+
+#### Commit
+fix(wifi,storage): eliminate SDMMC bus contention and resolve ESP-Hosted SDIO co-processor reset loop
+

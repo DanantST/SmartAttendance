@@ -1,6 +1,7 @@
 #include "storage/sd_logger.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -22,7 +23,6 @@ typedef struct {
 
 static QueueHandle_t s_log_queue = NULL;
 static SemaphoreHandle_t s_log_mutex = NULL;
-static vprintf_like_t s_prev_vprintf = NULL;
 static bool s_logger_active = false;
 
 static void rotate_logs_if_needed(void) {
@@ -50,6 +50,7 @@ static void sd_logger_task(void *pvParameters) {
                 FILE *f = fopen("/sdcard/logs/system.log", "a");
                 if (f) {
                     fputs(msg.text, f);
+                    fputc('\n', f);
                     fclose(f);
                 }
                 xSemaphoreGive(s_log_mutex);
@@ -58,34 +59,24 @@ static void sd_logger_task(void *pvParameters) {
     }
 }
 
-static int sd_log_vprintf(const char *fmt, va_list args) {
-    /* 1. Forward to standard console output */
-    int ret = 0;
-    if (s_prev_vprintf) {
-        va_list args_copy;
-        va_copy(args_copy, args);
-        ret = s_prev_vprintf(fmt, args_copy);
-        va_end(args_copy);
-    } else {
-        va_list args_copy;
-        va_copy(args_copy, args);
-        ret = vprintf(fmt, args_copy);
-        va_end(args_copy);
-    }
+void sd_logger_write(const char *tag, const char *fmt, ...) {
+    if (!s_logger_active || !s_log_queue) return;
 
-    /* 2. Format into log queue for SD card writer task */
-    if (s_logger_active && s_log_queue) {
-        log_msg_t msg;
-        va_list args_copy2;
-        va_copy(args_copy2, args);
-        vsnprintf(msg.text, sizeof(msg.text), fmt, args_copy2);
-        va_end(args_copy2);
+    log_msg_t msg;
+    int offset = 0;
 
-        /* Send non-blocking so logging never halts caller execution */
-        xQueueSend(s_log_queue, &msg, 0);
-    }
+    /* Add simple timestamp prefix */
+    int64_t now_ms = esp_timer_get_time() / 1000LL;
+    offset = snprintf(msg.text, sizeof(msg.text), "[%lld ms][%s] ", (long long)now_ms, tag ? tag : "APP");
+    if (offset < 0 || offset >= sizeof(msg.text)) return;
 
-    return ret;
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(msg.text + offset, sizeof(msg.text) - offset, fmt, args);
+    va_end(args);
+
+    /* Send non-blocking to avoid stalling caller */
+    xQueueSend(s_log_queue, &msg, 0);
 }
 
 esp_err_t sd_logger_init(void) {
@@ -106,10 +97,8 @@ esp_err_t sd_logger_init(void) {
 
     s_logger_active = true;
 
-    /* Hook into ESP-IDF log framework */
-    s_prev_vprintf = esp_log_set_vprintf(sd_log_vprintf);
-
-    ESP_LOGI(TAG, "SD Card Logger initialized (/sdcard/logs/system.log)");
+    ESP_LOGI(TAG, "SD Card Usage Logger initialized (/sdcard/logs/system.log)");
+    sd_logger_write("SYSTEM", "SD Card Logger initialized");
     return ESP_OK;
 }
 
