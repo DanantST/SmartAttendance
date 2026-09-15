@@ -2789,3 +2789,51 @@ feat(recognition): implement multi-frame temporal pattern fusion & consensus vot
 #### Commit
 fix(wifi,storage): eliminate SDMMC bus contention and resolve ESP-Hosted SDIO co-processor reset loop
 
+---
+
+## Session - 2026-09-15 - Battery Calibration Data Logger
+
+### User Request
+> The battery voltage differs when plugged vs unplugged (4.28V plugged / 4.06V unplugged when full). Implement a calibration data logger that writes raw STC8 telemetry to the SD card during a discharge session. I will periodically plug/unplug the device to capture paired voltage readings at each SoC level for post-processing into a calibration curve.
+
+### Implementation
+> Added a fully independent battery calibration CSV writer to the firmware. It uses a separate FreeRTOS queue and writer task to avoid any interference with the existing system.log infrastructure. Transition events (PLUG_IN, PLUG_OUT) are written immediately on STC8 state change regardless of the normal sampling interval. Normal rows are written every 20 seconds. The feature is compiled out completely when BATTERY_CALIB_LOGGING=0.
+
+#### Feature Overview
+- **Separate CSV file**: Telemetry written to `/sdcard/logs/batt_calib.csv` with automatic 1MB rotation.
+- **CSV columns**: `unix_ts, boot_ms, bat_mv, adc_mv, stc8_pct, stc8_state, charging, event`
+- **20-second NORMAL rows**: `BATTERY_CALIB_INTERVAL_TICKS=2` × 10s `battery_task` interval.
+- **Instant transition rows**: `PLUG_IN` / `PLUG_OUT` written immediately on STC8 `bat_state` change — a 5-second plug-in still produces a paired `PLUG_IN`+`PLUG_OUT` row at the exact SoC level.
+- **SESSION_START / SESSION_END markers**: Written on task start and before critical-battery shutdown.
+- **Zero production overhead**: `BATTERY_CALIB_LOGGING=0` stubs all functions to inline no-ops.
+- **`battery_monitor_read_raw()`**: New function returns all STC8 telemetry fields in one I²C pass, avoiding a duplicate read for calibration vs. UI update.
+
+**`main/config.h`** changes:
+- Added `BATTERY_CALIB_LOGGING` (set to `1` for calibration session) and `BATTERY_CALIB_INTERVAL_TICKS=2`.
+
+**`main/power/battery_monitor.h`** changes:
+- Added `battery_raw_t` struct (`bat_mv`, `adc_mv`, `stc8_pct`, `stc8_state`, `charging`).
+- Added `battery_monitor_read_raw(battery_raw_t *out)` declaration.
+
+**`main/power/battery_monitor.c`** changes:
+- Implemented `battery_monitor_read_raw()`: single `stc8_read_battery()` call, updates shared cache, populates `battery_raw_t`.
+
+**`main/storage/sd_logger.h`** changes:
+- Added `sd_logger_calib_init()` and `sd_logger_write_batt_calib()` declarations guarded by `#if BATTERY_CALIB_LOGGING`.
+- Added inline no-op stubs for the `#else` branch so callers need no `#if` guards.
+
+**`main/storage/sd_logger.c`** changes:
+- Added `batt_calib_writer_task`: independent FreeRTOS task, queue, CSV header injection, 1MB rotation.
+- Added `sd_logger_calib_init()`: creates queue and writer task.
+- Added `sd_logger_write_batt_calib()`: formats CSV row and enqueues non-blocking.
+
+**`main/storage/sdcard_mount.c`** changes:
+- Added `sd_logger_calib_init()` call immediately after `sd_logger_init()`.
+
+**`main/main.c`** changes:
+- Replaced `battery_task()` with updated version using `battery_monitor_read_raw()`.
+- Added calibration tick counter, prev-state transition detection, and `sd_logger_write_batt_calib()` calls.
+- `SESSION_END` row written before critical-battery shutdown event is raised.
+
+#### Commit
+feat(power,storage): add battery calibration CSV data logger with PLUG_IN/PLUG_OUT transition detection

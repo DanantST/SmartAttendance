@@ -1,7 +1,11 @@
 #pragma once
 
 #include "esp_err.h"
+#include "config.h"
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -35,6 +39,51 @@ int sd_logger_dump(void);
  */
 void sd_logger_check_serial_trigger(void);
 
+/* ===========================================================================
+ * Battery Calibration CSV Logger
+ * Available only when BATTERY_CALIB_LOGGING == 1 in config.h.
+ * =========================================================================*/
+
+#if BATTERY_CALIB_LOGGING
+
+/**
+ * @brief Initialize battery calibration CSV logger.
+ * Creates a separate queue and FreeRTOS writer task for /sdcard/logs/batt_calib.csv.
+ * Must be called after sd_logger_init() and after SD card is mounted.
+ * @return ESP_OK on success
+ */
+esp_err_t sd_logger_calib_init(void);
+
+/**
+ * @brief Write a single raw STC8 telemetry row to batt_calib.csv.
+ * Thread-safe and non-blocking. Drops row silently if queue is full.
+ *
+ * @param unix_ts    Unix epoch timestamp (0 if SNTP not yet synced)
+ * @param boot_ms    Milliseconds since device boot (esp_timer_get_time / 1000)
+ * @param bat_mv     Battery terminal voltage in mV
+ * @param adc_mv     Raw STC8 ADC voltage in mV (may equal bat_mv; logged for analysis)
+ * @param stc8_pct   STC8-reported battery percentage 0-100
+ * @param stc8_state Raw STC8 state byte (0=idle,1=charging,2=full,3=no-charge,4=error)
+ * @param charging   true if plugged in and charging
+ * @param event      Row label: "NORMAL","PLUG_IN","PLUG_OUT","SESSION_START","SESSION_END"
+ */
+void sd_logger_write_batt_calib(time_t unix_ts, uint32_t boot_ms,
+                                 uint16_t bat_mv, uint16_t adc_mv,
+                                 uint8_t stc8_pct, uint8_t stc8_state,
+                                 bool charging, const char *event);
+
+#else /* BATTERY_CALIB_LOGGING == 0 — compile to no-ops */
+
+static inline esp_err_t sd_logger_calib_init(void) { return ESP_OK; }
+static inline void sd_logger_write_batt_calib(time_t u, uint32_t b,
+                                               uint16_t bv, uint16_t av,
+                                               uint8_t p, uint8_t s,
+                                               bool c, const char *e)
+    { (void)u;(void)b;(void)bv;(void)av;(void)p;(void)s;(void)c;(void)e; }
+
+#endif /* BATTERY_CALIB_LOGGING */
+
 #ifdef __cplusplus
 }
 #endif
+

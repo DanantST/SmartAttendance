@@ -120,6 +120,29 @@ int battery_monitor_get_percent(void) {
     return s_last_percent;
 }
 
+esp_err_t battery_monitor_read_raw(battery_raw_t *out) {
+    if (!out) return ESP_ERR_INVALID_ARG;
+
+    STC8_Battery_info_t info;
+    esp_err_t ret = stc8_read_battery(&info);
+    if (ret != ESP_OK) return ret;
+
+    /* Update shared cache */
+    s_last_voltage_mv = info.bat_voltage;
+    s_last_percent    = info.bat_level;
+    s_charging        = (info.bat_state == 1 || info.bat_state == 2);
+    if (s_charging) battery_monitor_update_activity();
+
+    out->bat_mv     = info.bat_voltage;
+    out->adc_mv     = info.adc_voltage;
+    out->stc8_pct   = info.bat_level;
+    out->stc8_state = info.bat_state;
+    out->charging   = s_charging;
+
+    return ESP_OK;
+}
+
+
 battery_status_t battery_monitor_get_status(void) {
     int percent = battery_monitor_get_percent();
     

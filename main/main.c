@@ -1879,18 +1879,74 @@ static void schedule_checker_task(void *pvParameters) {
  * @brief Battery monitoring task
  */
 static void battery_task(void *pvParameters) {
-    int battery_percent;
-    
+    static uint8_t calib_tick    = 0;
+    static uint8_t prev_stc8_state = 0xFF;  /* 0xFF = sentinel: no previous reading */
+
+    /* Write SESSION_START calibration marker on task start */
+    sd_logger_write_batt_calib(
+        (time_t)0,
+        (uint32_t)(esp_timer_get_time() / 1000LL),
+        0, 0, 0, 0, false, "SESSION_START"
+    );
+
     while (1) {
         #if ENABLE_BATTERY_MONITOR
-        battery_percent = battery_monitor_get_percent();
-        bool is_charging = battery_monitor_is_charging();   /* reads cached s_charging */
+
+        battery_raw_t raw = {0};
+        bool raw_ok = (battery_monitor_read_raw(&raw) == ESP_OK);
+
+        /* Fall back to cached values if I²C read fails */
+        int  battery_percent = raw_ok ? (int)raw.stc8_pct : battery_monitor_get_percent();
+        bool is_charging     = raw_ok ? raw.charging      : battery_monitor_is_charging();
+
         ui_set_battery_percent(battery_percent, is_charging);
-        
+
+        /* ---- Battery Calibration Logging ---- */
+        #if BATTERY_CALIB_LOGGING
+        if (raw_ok) {
+            time_t    now     = time(NULL);
+            uint32_t  boot_ms = (uint32_t)(esp_timer_get_time() / 1000LL);
+
+            /* Detect charge-state transitions and write marker rows immediately */
+            if (prev_stc8_state != 0xFF && prev_stc8_state != raw.stc8_state) {
+                bool was_charging = (prev_stc8_state == 1 || prev_stc8_state == 2);
+                bool now_charging = (raw.stc8_state  == 1 || raw.stc8_state  == 2);
+
+                if (!was_charging && now_charging) {
+                    sd_logger_write_batt_calib(now, boot_ms,
+                        raw.bat_mv, raw.adc_mv, raw.stc8_pct,
+                        raw.stc8_state, raw.charging, "PLUG_IN");
+                } else if (was_charging && !now_charging) {
+                    sd_logger_write_batt_calib(now, boot_ms,
+                        raw.bat_mv, raw.adc_mv, raw.stc8_pct,
+                        raw.stc8_state, raw.charging, "PLUG_OUT");
+                }
+            }
+            prev_stc8_state = raw.stc8_state;
+
+            /* Write timed NORMAL row every BATTERY_CALIB_INTERVAL_TICKS × 10s */
+            if (++calib_tick >= BATTERY_CALIB_INTERVAL_TICKS) {
+                calib_tick = 0;
+                sd_logger_write_batt_calib(now, boot_ms,
+                    raw.bat_mv, raw.adc_mv, raw.stc8_pct,
+                    raw.stc8_state, raw.charging, "NORMAL");
+            }
+        }
+        #endif /* BATTERY_CALIB_LOGGING */
+
         /* Only trigger critical battery if NOT charging */
         static int shutdown_strikes = 0; 
         if (battery_percent <= BATTERY_SHUTDOWN_THRESHOLD && !battery_monitor_is_charging()) {
             if (++shutdown_strikes >= 3) { /* 30 seconds of critical battery before shutdown */
+                /* Write SESSION_END before the system goes down */
+                sd_logger_write_batt_calib(
+                    time(NULL),
+                    (uint32_t)(esp_timer_get_time() / 1000LL),
+                    raw_ok ? raw.bat_mv : 0, raw_ok ? raw.adc_mv : 0,
+                    raw_ok ? raw.stc8_pct : 0, raw_ok ? raw.stc8_state : 0,
+                    false, "SESSION_END"
+                );
+                vTaskDelay(pdMS_TO_TICKS(200)); /* allow queue to flush */
                 xEventGroupSetBits(g_system_event_group, SYSTEM_EVENT_BATTERY_CRITICAL);
             }
         } else {
@@ -1910,6 +1966,7 @@ static void battery_task(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(BATTERY_CHECK_INTERVAL_MS));
     }
 }
+
 
 /**
  * @brief System state machine - handles transitions and events

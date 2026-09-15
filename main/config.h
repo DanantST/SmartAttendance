@@ -124,6 +124,16 @@ extern "C" {
 #define BATTERY_SHUTDOWN_THRESHOLD  5                // Percentage
 #define BATTERY_CHECK_INTERVAL_MS   10000            // 10 seconds
 
+/* ==================== Battery Calibration Logging ==================== */
+/* Set BATTERY_CALIB_LOGGING to 1 ONLY during calibration sessions.      */
+/* Writes raw STC8 telemetry CSV to /sdcard/logs/batt_calib.csv every    */
+/* (BATTERY_CALIB_INTERVAL_TICKS × BATTERY_CHECK_INTERVAL_MS).           */
+/* BATTERY_CALIB_INTERVAL_TICKS=2 → 20 second sample interval.           */
+/* Compiles to zero overhead when set to 0. Revert before production.    */
+#define BATTERY_CALIB_LOGGING           1
+#define BATTERY_CALIB_INTERVAL_TICKS    2    /* 2 × 10s = 20s normal sample rate */
+
+
 /* ==================== UI Configuration ==================== */
 #define DISPLAY_WIDTH               1024
 #define DISPLAY_HEIGHT              600

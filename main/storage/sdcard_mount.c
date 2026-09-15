@@ -52,6 +52,10 @@ esp_err_t sdcard_mount(void) {
     /* Initialize SD Card System Logger */
     sd_logger_init();
 
+    /* Initialize Battery Calibration CSV Logger (no-op when BATTERY_CALIB_LOGGING=0) */
+    sd_logger_calib_init();
+
+
     /* Diagnostic File Write Test */
     ESP_LOGI(TAG, "Running diagnostic write/read test on SD card...");
     FILE *f_test = fopen("/sdcard/diag_test.txt", "w");

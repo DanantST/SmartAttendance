@@ -2,13 +2,16 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "config.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 static const char *TAG = "SD_LOG";
@@ -101,6 +104,114 @@ esp_err_t sd_logger_init(void) {
     sd_logger_write("SYSTEM", "SD Card Logger initialized");
     return ESP_OK;
 }
+
+/* ===========================================================================
+ * Battery Calibration CSV Logger
+ * Separate queue + task + file from system.log.
+ * Enabled only when BATTERY_CALIB_LOGGING == 1 in config.h.
+ * =========================================================================*/
+
+#if BATTERY_CALIB_LOGGING
+
+#define CALIB_QUEUE_SIZE         32
+#define CALIB_ENTRY_MAX_LEN      128
+#define CALIB_FILE_PATH          "/sdcard/logs/batt_calib.csv"
+#define CALIB_FILE_OLD_PATH      "/sdcard/logs/batt_calib.csv.old"
+#define MAX_CALIB_FILE_BYTES     (1024 * 1024)   /* 1 MB rotation threshold */
+
+#define CALIB_CSV_HEADER \
+    "unix_ts,boot_ms,bat_mv,adc_mv,stc8_pct,stc8_state,charging,event\n"
+
+typedef struct {
+    char text[CALIB_ENTRY_MAX_LEN];
+} calib_msg_t;
+
+static QueueHandle_t s_calib_queue = NULL;
+static bool s_calib_active = false;
+
+static void rotate_calib_if_needed(void) {
+    struct stat st;
+    if (stat(CALIB_FILE_PATH, &st) == 0 && st.st_size >= MAX_CALIB_FILE_BYTES) {
+        remove(CALIB_FILE_OLD_PATH);
+        rename(CALIB_FILE_PATH, CALIB_FILE_OLD_PATH);
+        ESP_LOGI(TAG, "Rotated batt_calib.csv -> batt_calib.csv.old");
+    }
+}
+
+static void batt_calib_writer_task(void *pvParameters) {
+    (void)pvParameters;
+    calib_msg_t msg;
+
+    /* Ensure logs directory exists */
+    mkdir("/sdcard/logs", 0777);
+
+    while (1) {
+        if (xQueueReceive(s_calib_queue, &msg, portMAX_DELAY) == pdTRUE) {
+            rotate_calib_if_needed();
+
+            /* Inject CSV header if file is new/empty */
+            struct stat st;
+            bool needs_header = (stat(CALIB_FILE_PATH, &st) != 0 || st.st_size == 0);
+
+            FILE *f = fopen(CALIB_FILE_PATH, "a");
+            if (f) {
+                if (needs_header) {
+                    fputs(CALIB_CSV_HEADER, f);
+                }
+                fputs(msg.text, f);
+                fclose(f);
+            } else {
+                ESP_LOGE(TAG, "Failed to open %s for append", CALIB_FILE_PATH);
+            }
+        }
+    }
+}
+
+esp_err_t sd_logger_calib_init(void) {
+    if (s_calib_active) return ESP_OK;
+
+    s_calib_queue = xQueueCreate(CALIB_QUEUE_SIZE, sizeof(calib_msg_t));
+    if (!s_calib_queue) {
+        ESP_LOGE(TAG, "Failed to create calib queue");
+        return ESP_ERR_NO_MEM;
+    }
+
+    BaseType_t tr = xTaskCreate(batt_calib_writer_task, "batt_calib", 3072, NULL, 2, NULL);
+    if (tr != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create batt_calib_writer_task");
+        return ESP_FAIL;
+    }
+
+    s_calib_active = true;
+    ESP_LOGI(TAG, "Battery calibration logger started -> %s", CALIB_FILE_PATH);
+    return ESP_OK;
+}
+
+void sd_logger_write_batt_calib(time_t unix_ts, uint32_t boot_ms,
+                                 uint16_t bat_mv, uint16_t adc_mv,
+                                 uint8_t stc8_pct, uint8_t stc8_state,
+                                 bool charging, const char *event) {
+    if (!s_calib_active || !s_calib_queue) return;
+
+    calib_msg_t msg;
+    snprintf(msg.text, sizeof(msg.text),
+             "%ld,%lu,%u,%u,%u,%u,%d,%s\n",
+             (long)unix_ts,
+             (unsigned long)boot_ms,
+             (unsigned)bat_mv,
+             (unsigned)adc_mv,
+             (unsigned)stc8_pct,
+             (unsigned)stc8_state,
+             charging ? 1 : 0,
+             event ? event : "NORMAL");
+
+    /* Non-blocking send — caller must not stall */
+    if (xQueueSend(s_calib_queue, &msg, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "batt_calib queue full — row dropped");
+    }
+}
+
+#endif /* BATTERY_CALIB_LOGGING */
 
 int sd_logger_dump(void) {
     if (xSemaphoreTake(s_log_mutex, pdMS_TO_TICKS(2000)) != pdTRUE) {
