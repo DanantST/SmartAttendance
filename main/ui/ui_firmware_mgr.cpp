@@ -330,7 +330,13 @@ static void start_cloud_download(const char *url, const char *ver) {
 /* ------------------------------------------------------------------ */
 
 static void scan_firmwares_worker_task(void *param) {
-    firmware_info_t list[MAX_FIRMWARE_ENTRIES];
+    firmware_info_t *list = (firmware_info_t *)malloc(sizeof(firmware_info_t) * MAX_FIRMWARE_ENTRIES);
+    if (!list) {
+        ESP_LOGE(TAG, "Failed to allocate memory for firmware scan list");
+        vTaskDelete(NULL);
+        return;
+    }
+
     int count = ota_manager_list_sd_firmwares(list, MAX_FIRMWARE_ENTRIES);
 
     firmware_info_t running_info;
@@ -454,6 +460,7 @@ static void scan_firmwares_worker_task(void *param) {
         }
         ui_unlock();
     }
+    free(list);
     vTaskDelete(NULL);
 }
 
@@ -465,7 +472,7 @@ static void refresh_sd_firmwares_async(void) {
         lv_obj_set_style_text_color(loading, lv_color_hex(0x94A3B8), 0);
         lv_obj_align(loading, LV_ALIGN_CENTER, 0, 40);
     }
-    xTaskCreate(scan_firmwares_worker_task, "fw_scan", 4096, NULL, 5, NULL);
+    xTaskCreate(scan_firmwares_worker_task, "fw_scan", 8192, NULL, 5, NULL);
 }
 
 /* ------------------------------------------------------------------ */

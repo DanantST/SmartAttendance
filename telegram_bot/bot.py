@@ -16,7 +16,7 @@ if hasattr(time, "tzset"):
     time.tzset()
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 import uvicorn
 from telegram import (
     Update,
@@ -379,6 +379,122 @@ async def get_course_enrollments(since: int = 0):
         return JSONResponse(status_code=200, content=enrollments)
     except Exception as e:
         logger.error(f"Error fetching enrollments: {e}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
+# ==================== Firmware OTA Management ====================
+FIRMWARE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "firmware")
+os.makedirs(FIRMWARE_DIR, exist_ok=True)
+
+@web_app.get("/firmware/{filename}")
+@web_app.get("/api/firmware/{filename}")
+async def serve_firmware_binary(filename: str):
+    """
+    Serves .bin firmware binaries directly to the ESP32-P4 device.
+    Supports /firmware/latest.bin as a dynamic alias to the newest .bin available.
+    """
+    safe_name = os.path.basename(filename)
+    if not safe_name.endswith(".bin"):
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Only .bin files are served"})
+
+    file_path = os.path.join(FIRMWARE_DIR, safe_name)
+    if not os.path.exists(file_path):
+        if safe_name == "latest.bin":
+            bin_files = sorted([f for f in os.listdir(FIRMWARE_DIR) if f.endswith(".bin")], reverse=True)
+            if bin_files:
+                file_path = os.path.join(FIRMWARE_DIR, bin_files[0])
+            else:
+                return JSONResponse(status_code=404, content={"status": "error", "message": "No firmware binary found on server"})
+        else:
+            return JSONResponse(status_code=404, content={"status": "error", "message": f"Firmware file {safe_name} not found"})
+
+    logger.info(f"Serving firmware binary {os.path.basename(file_path)} ({os.path.getsize(file_path)} bytes) to device.")
+    return FileResponse(
+        path=file_path,
+        media_type="application/octet-stream",
+        filename=os.path.basename(file_path)
+    )
+
+@web_app.get("/api/firmware/version")
+@web_app.get("/api/firmware/info")
+async def get_firmware_info():
+    """
+    Returns metadata about the latest firmware build available on the server.
+    Parses esp_app_desc_t at offset 0x20 if available.
+    """
+    bin_files = sorted([f for f in os.listdir(FIRMWARE_DIR) if f.endswith(".bin")], reverse=True)
+    if not bin_files:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "No firmware available on server"})
+
+    latest_file = "latest.bin" if "latest.bin" in bin_files else bin_files[0]
+    file_path = os.path.join(FIRMWARE_DIR, latest_file)
+    stat = os.stat(file_path)
+
+    version = "1.0.0"
+    project_name = "SmartAttendance"
+    compile_time = ""
+    compile_date = ""
+
+    try:
+        with open(file_path, "rb") as f:
+            f.seek(32)  # offset of esp_app_desc_t in ESP-IDF v5 binaries
+            header = f.read(256)
+            if len(header) >= 112 and header[0:4] == b'\x32\x54\xcd\xab':
+                version = header[16:48].split(b'\x00')[0].decode('utf-8', errors='ignore')
+                project_name = header[48:80].split(b'\x00')[0].decode('utf-8', errors='ignore')
+                compile_time = header[80:96].split(b'\x00')[0].decode('utf-8', errors='ignore')
+                compile_date = header[96:112].split(b'\x00')[0].decode('utf-8', errors='ignore')
+    except Exception as e:
+        logger.warning(f"Failed to parse binary header: {e}")
+
+    return JSONResponse(status_code=200, content={
+        "status": "ok",
+        "filename": latest_file,
+        "version": version,
+        "project_name": project_name,
+        "compile_date": compile_date,
+        "compile_time": compile_time,
+        "size_bytes": stat.st_size,
+        "download_url": f"/firmware/{latest_file}",
+        "latest_url": "/firmware/latest.bin"
+    })
+
+@web_app.post("/api/firmware/upload")
+async def upload_firmware_binary(request: Request):
+    """
+    Uploads a raw firmware binary to the server.
+    Body should be raw binary (application/octet-stream).
+    Query parameter ?filename=SmartAttendance_vX.X.X.bin is optional.
+    """
+    try:
+        filename = request.query_params.get("filename", "latest.bin")
+        safe_name = os.path.basename(filename)
+        if not safe_name.endswith(".bin"):
+            safe_name += ".bin"
+
+        body = await request.body()
+        if len(body) < 1024:
+            return JSONResponse(status_code=400, content={"status": "error", "message": "Binary data too small"})
+
+        target_path = os.path.join(FIRMWARE_DIR, safe_name)
+        with open(target_path, "wb") as f:
+            f.write(body)
+
+        # Also update latest.bin alias
+        latest_path = os.path.join(FIRMWARE_DIR, "latest.bin")
+        if target_path != latest_path:
+            with open(latest_path, "wb") as f:
+                f.write(body)
+
+        logger.info(f"Successfully uploaded firmware {safe_name} ({len(body)} bytes)")
+        return JSONResponse(status_code=200, content={
+            "status": "ok",
+            "message": f"Firmware {safe_name} uploaded successfully",
+            "size_bytes": len(body),
+            "download_url": f"/firmware/{safe_name}"
+        })
+    except Exception as e:
+        logger.error(f"Firmware upload failed: {e}")
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 

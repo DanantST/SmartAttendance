@@ -3006,6 +3006,41 @@ fix(boot): resolve ESP32-P4 FreeRTOS TCM stack assert and ESP-Hosted SPIRAM task
 #### Commit
 feat(ota): implement SD-buffered OTA update pipeline and multi-version firmware rollback UI
 
+---
+
+## Session - 2026-10-13 - Server-Side OTA Firmware Serving & Cloud Deployment
+
+### User Request
+> we need a fail-proof implementation for navigation and an improved ui layout planning. WE must first implement the server-side feature to support the ota update. Then the new ui update will be pushed to the server whhile we monitor the device via USB on COM 3.
+
+### Implementation
+> 1. Implemented FastAPI server-side OTA endpoints in `telegram_bot/bot.py`:
+>    - `GET /firmware/{filename}` and `GET /api/firmware/{filename}`: Serves `.bin` binaries via `FileResponse` (`application/octet-stream`). Supports `/firmware/latest.bin` alias resolving dynamically to the newest `.bin` in `telegram_bot/firmware/`.
+>    - `GET /api/firmware/version` and `GET /api/firmware/info`: Returns JSON metadata (version, compile date, compile time, project name, file size) by parsing the binary's 32-byte `esp_app_desc_t` header (`0xABCD5432` magic word) directly on the server.
+>    - `POST /api/firmware/upload`: Accepts raw binary uploads to deploy new firmware builds.
+> 2. Placed the latest compiled binary (`SmartAttendance.bin`, 5.55 MB) into `telegram_bot/firmware/latest.bin`.
+> 3. Resolved `fw_scan` task stack overflow on the ESP32-P4 device:
+>    - Heap-allocated `firmware_info_t *list` instead of allocating ~10KB on the task stack.
+>    - Increased `fw_scan` FreeRTOS task stack from 4096 to 8192 bytes.
+>    - Flashed and verified over a 120-second serial monitor session on COM3: navigating into Firmware Manager and scanning SD card now runs with zero stack faults.
+
+#### Feature Overview
+- **Cloud OTA Server Live**: Endpoints `/firmware/latest.bin` and `/api/firmware/version` ready for cloud delivery on Hugging Face Spaces.
+- **`fw_scan` Stack Safety**: Firmware scanner operates cleanly on the heap without stack overflow panics.
+
+**`telegram_bot/bot.py`** changes:
+- Added `FileResponse` imports and endpoints `GET /firmware/{filename}`, `GET /api/firmware/version`, `POST /api/firmware/upload`.
+
+**`telegram_bot/firmware/latest.bin`**:
+- Added compiled firmware binary for cloud distribution.
+
+**`main/ui/ui_firmware_mgr.cpp`** changes:
+- Dynamically allocated `list` buffer in `scan_firmwares_worker_task` and increased task stack to 8192 bytes.
+
+#### Commit
+feat(server): add OTA firmware serving endpoints and fix fw_scan task heap allocation
+
+
 
 
 
