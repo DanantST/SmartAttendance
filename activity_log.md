@@ -3040,6 +3040,55 @@ feat(ota): implement SD-buffered OTA update pipeline and multi-version firmware 
 #### Commit
 feat(server): add OTA firmware serving endpoints and fix fw_scan task heap allocation
 
+---
+
+## Session - 2026-10-13 - Fail-Proof Navigation, UI Layout Optimization & Hugging Face Git LFS Sync
+
+### User Request
+> we need a fail-proof implementation for navigation and an improved ui layout planning. WE must first implement the server-side feature to support the ota update. Then the new ui update will be pushed to the server whhile we monitor the device via USB on COM 3.
+
+### Implementation
+> 1. **Fail-Proof Navigation Architecture**:
+>    - Implemented a 350ms software debounce filter on all bottom navigation bar touch events (`nav_button_event_handler`) to prevent double-tap race conditions.
+>    - Replaced raw stack pop in Back button navigation with recursive validity validation using `lv_obj_is_valid()`. Now safely cleans invalid or destroyed screen pointers until a valid ancestor is found, or gracefully returns to `s_main_screen`.
+>    - Enhanced `ui_load_screen_with_history()` to sanitize history stack entries, pruning dead screen references before appending.
+>    - Hardened `ui_return_to_main()`: resets history depth to 0, hides modals/keyboards/notifications, and safely triggers cleanup for all sub-screens including `ui_close_firmware_mgr_screen()`.
+> 2. **UI Layout & Geometry Optimization**:
+>    - Settings Screen (`ui_settings.cpp`): Redesigned header bar to 48px height at `y=30` with unified left `< Home` button, centered title, and right close button. Constrained content height to 450px at `y=84`, leaving margin above the persistent 60px bottom navigation bar.
+>    - Firmware Manager Screen (`ui_firmware_mgr.cpp`): Adjusted columns to `h=444` and list container to `h=390` within `h=448` content container to eliminate overlap and scrolling clipping.
+> 3. **Hugging Face Git LFS Deployment**:
+>    - Added `git-lfs` tracking and credential storage to `.github/workflows/hf_sync.yml` to support distributing the 5.5MB `latest.bin` firmware binary to Hugging Face Spaces.
+> 4. **Build & Binary Update**:
+>    - Recompiled device firmware cleanly with Ninja (`SmartAttendance.bin`, 5.55 MB).
+>    - Updated `telegram_bot/firmware/latest.bin` with the new navigation and UI build.
+
+#### Feature Overview
+- **Zero-Crash Navigation**: Touch-debounced, null/tombstone-safe screen navigation stack across all application screens.
+- **Improved UI Layout**: Responsive 1024x600 layout with dedicated header bar and no bottom nav bar collision.
+- **Hugging Face LFS Sync**: Automated CI/CD pipeline pushes binaries without file size rejections.
+
+**`main/ui/ui_main.cpp`** changes:
+- Added 350ms touch debounce filter in `nav_button_event_handler`.
+- Validated pointers in back button traversal via `lv_obj_is_valid()`.
+- Added dead pointer pruning in `ui_load_screen_with_history()`.
+- Added `ui_close_firmware_mgr_screen()` cleanup in `ui_return_to_main()`.
+
+**`main/ui/ui_settings.cpp`** changes:
+- Unified title bar height to 48px, added `< Home` button, and adjusted content area height to 450px.
+
+**`main/ui/ui_firmware_mgr.cpp`** changes:
+- Resized columns and list container to prevent clipping against bottom navigation bar.
+
+**`.github/workflows/hf_sync.yml`** changes:
+- Added Git LFS installation, tracking for `*.bin`, and credential helper for Hugging Face Spaces deployment.
+
+**`telegram_bot/firmware/latest.bin`** changes:
+- Updated binary with newly compiled build.
+
+#### Commit
+feat(ui): implement fail-proof navigation, refined UI layout, and Git LFS cloud OTA sync
+
+
 
 
 

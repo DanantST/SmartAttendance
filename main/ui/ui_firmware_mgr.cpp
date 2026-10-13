@@ -531,8 +531,8 @@ static void create_firmware_screen(void) {
 
     /* 2. Main Content Area (Two Columns) */
     lv_obj_t *content = lv_obj_create(s_fw_screen);
-    lv_obj_set_size(content, DISPLAY_WIDTH - 30, 500);
-    lv_obj_set_pos(content, 15, 90);
+    lv_obj_set_size(content, DISPLAY_WIDTH - 30, 448);
+    lv_obj_set_pos(content, 15, 84);
     lv_obj_set_style_bg_color(content, lv_color_hex(0x0F172A), 0);
     lv_obj_set_style_border_width(content, 0, 0);
     lv_obj_set_style_pad_all(content, 0, 0);
@@ -540,13 +540,13 @@ static void create_firmware_screen(void) {
 
     /* === Left Column (System Status & Cloud Update) === */
     lv_obj_t *left_col = lv_obj_create(content);
-    lv_obj_set_size(left_col, 340, 490);
+    lv_obj_set_size(left_col, 340, 444);
     lv_obj_align(left_col, LV_ALIGN_TOP_LEFT, 0, 0);
     lv_obj_set_style_bg_color(left_col, lv_color_hex(0x1E293B), 0);
     lv_obj_set_style_border_color(left_col, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(left_col, 1, 0);
     lv_obj_set_style_radius(left_col, 14, 0);
-    lv_obj_set_style_pad_all(left_col, 18, 0);
+    lv_obj_set_style_pad_all(left_col, 16, 0);
 
     /* Card Title */
     lv_obj_t *sys_title = lv_label_create(left_col);
@@ -559,45 +559,45 @@ static void create_firmware_screen(void) {
     lv_label_set_text(s_cur_version_lbl, "Version: Reading...");
     lv_obj_set_style_text_font(s_cur_version_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_cur_version_lbl, lv_color_white(), 0);
-    lv_obj_align(s_cur_version_lbl, LV_ALIGN_TOP_LEFT, 0, 30);
+    lv_obj_align(s_cur_version_lbl, LV_ALIGN_TOP_LEFT, 0, 26);
 
     s_cur_slot_lbl = lv_label_create(left_col);
     lv_label_set_text(s_cur_slot_lbl, "Slot: Reading...");
     lv_obj_set_style_text_font(s_cur_slot_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_cur_slot_lbl, lv_color_hex(0x94A3B8), 0);
-    lv_obj_align(s_cur_slot_lbl, LV_ALIGN_TOP_LEFT, 0, 55);
+    lv_obj_align(s_cur_slot_lbl, LV_ALIGN_TOP_LEFT, 0, 50);
 
     s_cur_build_lbl = lv_label_create(left_col);
     lv_label_set_text(s_cur_build_lbl, "Build: Reading...");
     lv_obj_set_style_text_font(s_cur_build_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_cur_build_lbl, lv_color_hex(0x94A3B8), 0);
-    lv_obj_align(s_cur_build_lbl, LV_ALIGN_TOP_LEFT, 0, 75);
+    lv_obj_align(s_cur_build_lbl, LV_ALIGN_TOP_LEFT, 0, 70);
 
     /* Rollback Badge */
     lv_obj_t *sec_badge = lv_obj_create(left_col);
-    lv_obj_set_size(sec_badge, 300, 48);
-    lv_obj_align(sec_badge, LV_ALIGN_TOP_LEFT, 0, 110);
+    lv_obj_set_size(sec_badge, 305, 46);
+    lv_obj_align(sec_badge, LV_ALIGN_TOP_LEFT, 0, 98);
     lv_obj_set_style_bg_color(sec_badge, lv_color_hex(0x064E3B), 0);
     lv_obj_set_style_border_color(sec_badge, lv_color_hex(0x10B981), 0);
     lv_obj_set_style_border_width(sec_badge, 1, 0);
     lv_obj_set_style_radius(sec_badge, 8, 0);
 
     lv_obj_t *badge_icon = lv_label_create(sec_badge);
-    lv_label_set_text(badge_icon, LV_SYMBOL_OK " Bootloader Self-Healing");
+    lv_label_set_text(badge_icon, LV_SYMBOL_OK " Bootloader Self-Healing Active");
     lv_obj_set_style_text_color(badge_icon, lv_color_hex(0x34D399), 0);
     lv_obj_set_style_text_font(badge_icon, &lv_font_montserrat_12, 0);
     lv_obj_align(badge_icon, LV_ALIGN_TOP_LEFT, 5, 0);
 
     lv_obj_t *badge_sub = lv_label_create(sec_badge);
-    lv_label_set_text(badge_sub, "Auto-rollback protects against boot crash");
+    lv_label_set_text(badge_sub, "Automatic rollback protects against boot failures");
     lv_obj_set_style_text_color(badge_sub, lv_color_hex(0xA7F3D0), 0);
     lv_obj_set_style_text_font(badge_sub, &lv_font_montserrat_12, 0);
     lv_obj_align(badge_sub, LV_ALIGN_BOTTOM_LEFT, 5, 0);
 
     /* Cloud OTA Section */
     lv_obj_t *cloud_divider = lv_obj_create(left_col);
-    lv_obj_set_size(cloud_divider, 300, 1);
-    lv_obj_align(cloud_divider, LV_ALIGN_TOP_LEFT, 0, 175);
+    lv_obj_set_size(cloud_divider, 305, 1);
+    lv_obj_align(cloud_divider, LV_ALIGN_TOP_LEFT, 0, 158);
     lv_obj_set_style_bg_color(cloud_divider, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(cloud_divider, 0, 0);
 
@@ -605,20 +605,19 @@ static void create_firmware_screen(void) {
     lv_label_set_text(cloud_title, LV_SYMBOL_DOWNLOAD " CLOUD OTA BUFFER");
     lv_obj_set_style_text_font(cloud_title, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(cloud_title, lv_color_hex(0xA855F7), 0); /* Purple */
-    lv_obj_align(cloud_title, LV_ALIGN_TOP_LEFT, 0, 190);
+    lv_obj_align(cloud_title, LV_ALIGN_TOP_LEFT, 0, 172);
 
     lv_obj_t *cloud_desc = lv_label_create(left_col);
-    lv_label_set_text(cloud_desc, "OTA updates are safely downloaded to SD card\n"
-                                  "first. This prevents bricking caused by network\n"
-                                  "interruptions while flashing.");
+    lv_label_set_text(cloud_desc, "OTA updates download to SD card first.\n"
+                                  "Eliminates bricking from network drops.");
     lv_obj_set_style_text_color(cloud_desc, lv_color_hex(0x94A3B8), 0);
     lv_obj_set_style_text_font(cloud_desc, &lv_font_montserrat_12, 0);
-    lv_obj_align(cloud_desc, LV_ALIGN_TOP_LEFT, 0, 220);
+    lv_obj_align(cloud_desc, LV_ALIGN_TOP_LEFT, 0, 200);
 
     /* Download Cloud OTA Button */
     lv_obj_t *cloud_btn = lv_btn_create(left_col);
-    lv_obj_set_size(cloud_btn, 300, 44);
-    lv_obj_align(cloud_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_size(cloud_btn, 305, 42);
+    lv_obj_align(cloud_btn, LV_ALIGN_BOTTOM_MID, 0, -5);
     lv_obj_set_style_bg_color(cloud_btn, lv_color_hex(0x7C3AED), 0); /* Vibrant Violet */
     lv_obj_set_style_radius(cloud_btn, 8, 0);
     lv_obj_t *cloud_lbl = lv_label_create(cloud_btn);
@@ -649,7 +648,7 @@ static void create_firmware_screen(void) {
 
     /* === Right Column (SD Card Archived Firmwares) === */
     lv_obj_t *right_col = lv_obj_create(content);
-    lv_obj_set_size(right_col, 630, 490);
+    lv_obj_set_size(right_col, 630, 444);
     lv_obj_align(right_col, LV_ALIGN_TOP_RIGHT, 0, 0);
     lv_obj_set_style_bg_color(right_col, lv_color_hex(0x1E293B), 0);
     lv_obj_set_style_border_color(right_col, lv_color_hex(0x334155), 0);
@@ -667,7 +666,7 @@ static void create_firmware_screen(void) {
 
     /* Scrollable Container for items */
     s_list_container = lv_obj_create(right_col);
-    lv_obj_set_size(s_list_container, 600, 430);
+    lv_obj_set_size(s_list_container, 600, 390);
     lv_obj_align(s_list_container, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_bg_color(s_list_container, lv_color_hex(0x1E293B), 0);
     lv_obj_set_style_border_width(s_list_container, 0, 0);

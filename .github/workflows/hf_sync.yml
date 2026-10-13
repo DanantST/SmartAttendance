@@ -16,6 +16,8 @@ jobs:
         run: |
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
+          git config --global credential.helper store
+          echo "https://DanantST:${HF_TOKEN}@huggingface.co" > ~/.git-credentials
           
           # Isolate bot files and Dockerfile
           mkdir deploy_dir
@@ -33,9 +35,12 @@ jobs:
           echo "pinned: false" >> deploy_dir/README.md
           echo "---" >> deploy_dir/README.md
           
-          # Initialize clean repository and push
+          # Initialize clean repository and push with Git LFS
           cd deploy_dir
           git init
+          git lfs install
+          git lfs track "*.bin"
+          git add .gitattributes
           git checkout -b main
           git add .
           git commit -m "Deploy bot to Hugging Face Spaces"

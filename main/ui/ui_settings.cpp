@@ -113,26 +113,39 @@ static void create_settings_screen(void) {
     
     /* Title bar */
     lv_obj_t* title_bar = lv_obj_create(s_settings_screen);
-    lv_obj_set_size(title_bar, DISPLAY_WIDTH, 40);
-    lv_obj_set_pos(title_bar, 0, 40);
-    lv_obj_set_style_bg_color(title_bar, ui_theme_get_header_color(), 0);
+    lv_obj_set_size(title_bar, DISPLAY_WIDTH, 48);
+    lv_obj_set_pos(title_bar, 0, 30);
+    lv_obj_set_style_bg_color(title_bar, lv_color_hex(0x1E293B), 0);
+    lv_obj_set_style_border_color(title_bar, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(title_bar, 1, 0);
     lv_obj_set_style_radius(title_bar, 0, 0);
     lv_obj_set_style_pad_all(title_bar, 0, 0);
-    lv_obj_set_style_border_width(title_bar, 0, 0);
     lv_obj_remove_flag(title_bar, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Back Button on Left */
+    lv_obj_t* back_btn = lv_btn_create(title_bar);
+    lv_obj_set_size(back_btn, 110, 36);
+    lv_obj_align(back_btn, LV_ALIGN_LEFT_MID, 15, 0);
+    lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_radius(back_btn, 8, 0);
+    lv_obj_t* back_label = lv_label_create(back_btn);
+    lv_label_set_text(back_label, LV_SYMBOL_LEFT " Home");
+    lv_obj_center(back_label);
+    lv_obj_add_event_cb(back_btn, close_btn_event, LV_EVENT_CLICKED, NULL);
     
+    /* Title in Center */
     lv_obj_t* title_label = lv_label_create(title_bar);
-    lv_label_set_text(title_label, "Settings");
-    lv_obj_align(title_label, LV_ALIGN_LEFT_MID, 20, 0);
-    lv_obj_set_style_text_color(title_label, ui_theme_get_text_color(), 0);
-    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
+    lv_label_set_text(title_label, "Settings & Preferences");
+    lv_obj_center(title_label);
+    lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_16, 0);
     
-    /* Close button */
+    /* Close button on Right */
     lv_obj_t* close_btn = lv_btn_create(title_bar);
-    lv_obj_set_size(close_btn, 32, 32);
-    lv_obj_align(close_btn, LV_ALIGN_RIGHT_MID, -10, 0);
-    lv_obj_set_style_bg_color(close_btn, lv_color_hex(0xFF4444), 0);
-    lv_obj_set_style_radius(close_btn, 16, 0);
+    lv_obj_set_size(close_btn, 36, 36);
+    lv_obj_align(close_btn, LV_ALIGN_RIGHT_MID, -15, 0);
+    lv_obj_set_style_bg_color(close_btn, lv_color_hex(0xEF4444), 0);
+    lv_obj_set_style_radius(close_btn, 8, 0);
     
     lv_obj_t* close_label = lv_label_create(close_btn);
     lv_label_set_text(close_label, LV_SYMBOL_CLOSE);
@@ -144,7 +157,7 @@ static void create_settings_screen(void) {
     /* Scrollable content area */
     lv_obj_t* content = lv_obj_create(s_settings_screen);
     lv_obj_set_size(content, DISPLAY_WIDTH, 450);
-    lv_obj_set_pos(content, 0, 90);
+    lv_obj_set_pos(content, 0, 84);
     lv_obj_set_style_bg_color(content, ui_theme_get_bg_color(), 0);
     lv_obj_set_style_border_width(content, 0, 0);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);

@@ -480,18 +480,31 @@ static void update_time_task(lv_timer_t *timer) {
 static void nav_button_event_handler(lv_event_t* e) {
     int btn_id = (int)(uintptr_t)lv_event_get_user_data(e);
     
+    /* Touch debounce protection (350ms filter) */
+    static uint32_t s_last_nav_tap = 0;
+    uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    if (now - s_last_nav_tap < 350) {
+        return;
+    }
+    s_last_nav_tap = now;
+
     if (btn_id == 0) {
-        /* Back Button */
+        /* Back Button - Fail-proof stack traversal */
         ui_acquire();
-        if (s_history_depth > 1) {
-            s_history_depth--; // Pop current screen
-            lv_obj_t* prev_scr = s_screen_history[s_history_depth - 1];
-            lv_screen_load(prev_scr);
-            ui_release();
-        } else {
-            ui_release();
-            ui_return_to_main();
+        lv_obj_t* active = lv_scr_act();
+        while (s_history_depth > 0) {
+            s_history_depth--;
+            if (s_history_depth > 0) {
+                lv_obj_t* prev_scr = s_screen_history[s_history_depth - 1];
+                if (prev_scr && lv_obj_is_valid(prev_scr) && prev_scr != active) {
+                    lv_screen_load(prev_scr);
+                    ui_release();
+                    return;
+                }
+            }
         }
+        ui_release();
+        ui_return_to_main();
     } else if (btn_id == 1) {
         /* Home Button */
         ui_return_to_main();
@@ -1147,6 +1160,7 @@ void ui_close_reports_screen(void);
 void ui_close_settings_screen(void);
 void ui_close_enrollment_screen(void);
 void ui_close_user_manager(void);
+extern "C" void ui_close_firmware_mgr_screen(void);
 
 void ui_return_to_main(void) {
     static bool inside_return = false;
@@ -1164,6 +1178,8 @@ void ui_return_to_main(void) {
         s_recents_panel = NULL;
     }
     
+    s_history_depth = 0;
+    
     lv_obj_t* current = lv_scr_act();
     if (current != s_main_screen) {
         /* Transition safely back to main first */
@@ -1176,6 +1192,7 @@ void ui_return_to_main(void) {
         ui_close_settings_screen();
         ui_close_enrollment_screen();
         ui_close_user_manager();
+        ui_close_firmware_mgr_screen();
     }
 
     inside_return = false;
@@ -1620,10 +1637,19 @@ void ui_show_recent_apps(void) {
 }
 
 extern "C" void ui_load_screen_with_history(lv_obj_t* scr) {
-    if (!scr) return;
+    if (!scr || !lv_obj_is_valid(scr)) return;
     ui_acquire();
     lv_obj_t* active = lv_scr_act();
-    if (active && active != scr && active != s_main_screen) {
+    if (active && lv_obj_is_valid(active) && active != scr && active != s_main_screen) {
+        /* Prune dead/deleted pointers from stack first */
+        int valid_count = 0;
+        for (int i = 0; i < s_history_depth; i++) {
+            if (s_screen_history[i] && lv_obj_is_valid(s_screen_history[i])) {
+                s_screen_history[valid_count++] = s_screen_history[i];
+            }
+        }
+        s_history_depth = valid_count;
+
         bool exists = false;
         for (int i = 0; i < s_history_depth; i++) {
             if (s_screen_history[i] == active) { exists = true; break; }
