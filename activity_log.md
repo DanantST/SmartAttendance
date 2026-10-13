@@ -2915,4 +2915,43 @@ feat(power): implement calibrated battery lookup table and charging voltage comp
 #### Commit
 feat(rtc,power): add DS1302 RTC driver for boot timekeeping and fix battery-draining idle sleep
 
+---
+
+## Session - 2026-10-13 - Fix Bootloader Panic & ESP32-P4 FreeRTOS TCM Memory Allocation
+
+### User Request
+> You need to run monitor session for this device because it is not booting up
+
+### Implementation
+> 1. Executed serial monitor on COM3 and captured the crash dump showing:
+>    `assert failed: xTaskCreateStaticPinnedToCore freertos_tasks_c_additions.h:299 (xPortcheckValidStackMem(puxStackBuffer))`
+> 2. Traced the call via `addr2line` against `SmartAttendance.elf` and discovered the panic occurred in `prvCreateIdleTasks()` during `vTaskStartScheduler()` in system startup before `app_main()` ever started.
+> 3. Root caused the failure: ESP-IDF v5.4.2 added the ESP32-P4 8KB TCM memory region (`0x30100000`-`0x30102000`) into the heap allocator with generic `MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT` capabilities in `memory_layout.c`. FreeRTOS's `vApplicationGetIdleTaskMemory()` allocated the Idle Task stack from TCM, but `esp_ptr_internal()` and `esp_ptr_byte_accessible()` in `esp_memory_utils` omitted the TCM memory address range, causing `xPortcheckValidStackMem()` to return false and trip the FreeRTOS assertion.
+> 4. Patched `components/heap/port/esp32p4/memory_layout.c` so TCM only matches explicit `MALLOC_CAP_TCM` requests (preventing generic dynamic allocations from using it), and patched `esp_memory_utils.h` and `esp_memory_utils.c` to properly validate `esp_ptr_in_tcm()`.
+> 5. Additionally disabled `H_DFLT_TASK_FROM_SPIRAM` in ESP-Hosted to ensure hosted tasks do not allocate static task stacks in external PSRAM.
+> 6. Recompiled and flashed firmware to COM3 at 460800 baud.
+> 7. Ran serial monitor on COM3 confirming complete successful boot:
+>    - Dual-core FreeRTOS scheduler started cleanly.
+>    - GT911 touch and EK79007 MIPI-DSI display initialized.
+>    - DS1302 RTC driver initialized and successfully restored system time on boot (2026-10-13 20:18:48).
+>    - SC2336 camera, SD card, SQLite database, Face Recognizer, STC8 battery monitor, and ESP-Hosted Wi-Fi co-processor all initialized without errors.
+>    - Device connected to Wi-Fi and reached operational state with UI active.
+
+#### Feature Overview
+- **Boot Loop Resolved**: Fixed upstream ESP32-P4 FreeRTOS assertion crash caused by TCM memory placement.
+- **Hardware Verified**: Board booted successfully on COM3 with active display, touch, camera, RTC, and Wi-Fi.
+
+**`managed_components/espressif__esp_hosted/host/port/esp/freertos/include/port_esp_hosted_host_config.h`** changes:
+- Set `H_DFLT_TASK_FROM_SPIRAM` to 0.
+
+**`managed_components/espressif__esp_hosted/host/port/esp/freertos/src/port_esp_hosted_host_os.c`** changes:
+- Safeguarded `hosted_thread_create()` to use `xTaskCreate()` with internal RAM.
+
+**`scratch/patch_tcm.py`**:
+- Script to patch ESP-IDF `memory_layout.c`, `esp_memory_utils.h`, and `esp_memory_utils.c` for TCM validation on ESP32-P4.
+
+#### Commit
+fix(boot): resolve ESP32-P4 FreeRTOS TCM stack assert and ESP-Hosted SPIRAM task allocation
+
+
 

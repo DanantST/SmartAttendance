@@ -4,16 +4,20 @@
  *
  * Deadlock-safe design
  * --------------------
- * The original code called db_get_all_users() and per-user db_get_user_courses()
- * from inside the LVGL event callback (which holds s_lvgl_mux).  The detection
- * task can hold s_db_mutex while waiting for s_lvgl_mux, causing a classic
- * ABBA deadlock the moment the re-enroll feature was added (extra DB calls
- * per user widened the window).
+ * ABBA deadlock risk: the detection task holds s_db_mutex while waiting for
+ * s_lvgl_mux; any LVGL callback that calls DB functions will deadlock.
  *
- * Fix: create_user_manager_screen() builds only the skeleton UI, loads the
- * screen immediately, then spawns user_mgr_populate_task().  That task does
- * ALL DB work without holding s_lvgl_mux, then acquires it briefly only to
- * paint the list widgets.
+ * All DB work is offloaded to background FreeRTOS tasks:
+ *   - user_mgr_populate_task : populates the user list (original fix)
+ *   - delete_user_task       : handles user deletion (BUG-3 fix)
+ *   - reenroll_user_task     : handles re-enrollment (BUG-3 fix)
+ *
+ * Event handlers extract user_id and spawn the appropriate task immediately;
+ * they perform NO DB calls and return to the LVGL event loop instantly.
+ *
+ * BUG-1 fix: every per-card LVGL allocation failure calls lv_obj_delete(item)
+ * before continue, preventing dangling partial widget trees that cause
+ * Store Access Faults in lv_draw_add_task.
  */
 
 #include "ui_user_manager.h"
@@ -42,6 +46,12 @@ static void delete_user_event_handler(lv_event_t* e);
 static void reenroll_user_event_handler(lv_event_t* e);
 static void close_btn_event_handler(lv_event_t* e);
 static void user_mgr_populate_task(void* arg);
+static void delete_user_task(void* arg);
+static void reenroll_user_task(void* arg);
+
+/* Context structs for background action tasks (BUG-3) */
+typedef struct { uint32_t user_id; } delete_ctx_t;
+typedef struct { uint32_t user_id; } reenroll_ctx_t;
 
 /* ------------------------------------------------------------------ */
 /*  Public API                                                          */
@@ -218,19 +228,26 @@ static void user_mgr_populate_task(void* arg) {
         for (int i = 0; i < count; i++) {
             user_row_t* r = &rows[i];
 
+            /* [BUG-1] Create the top-level card first so we can roll it back
+             * with lv_obj_delete(item) if ANY child allocation fails below.
+             * Without this, partial widget trees cause Store Access Faults in
+             * lv_draw_add_task when LVGL tries to render the dangling objects. */
             lv_obj_t* item = ui_create_card(s_user_list, DISPLAY_WIDTH - 60, 110);
             if (!item) {
                 ESP_LOGE(TAG, "populate_task: item card alloc failed for user %d", i);
-                continue;
+                continue; /* item doesn't exist, nothing to clean up */
             }
             lv_obj_set_flex_flow(item, LV_FLEX_FLOW_ROW);
             lv_obj_set_flex_align(item, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
             lv_obj_set_style_pad_hor(item, 20, 0);
             lv_obj_set_style_pad_ver(item, 10, 0);
 
-            /* Info column */
+            /* Streamlined Info Column - vertical flex flow */
             lv_obj_t* info_col = lv_obj_create(item);
-            if (!info_col) { ESP_LOGE(TAG, "info_col alloc failed"); continue; }
+            if (!info_col) {
+                ESP_LOGE(TAG, "info_col alloc failed — rolling back card");
+                lv_obj_delete(item); continue;
+            }
             lv_obj_set_size(info_col, DISPLAY_WIDTH - 200, LV_SIZE_CONTENT);
             lv_obj_set_style_bg_opa(info_col, 0, 0);
             lv_obj_set_style_border_width(info_col, 0, 0);
@@ -238,52 +255,27 @@ static void user_mgr_populate_task(void* arg) {
             lv_obj_set_flex_flow(info_col, LV_FLEX_FLOW_COLUMN);
             lv_obj_set_flex_align(info_col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
-            /* Row 1: Name + Role badge */
-            lv_obj_t* row1 = lv_obj_create(info_col);
-            if (!row1) { ESP_LOGE(TAG, "row1 alloc failed"); continue; }
-            lv_obj_set_size(row1, LV_PCT(100), LV_SIZE_CONTENT);
-            lv_obj_set_style_bg_opa(row1, 0, 0);
-            lv_obj_set_style_border_width(row1, 0, 0);
-            lv_obj_set_style_pad_all(row1, 0, 0);
-            lv_obj_set_flex_flow(row1, LV_FLEX_FLOW_ROW);
-            lv_obj_set_flex_align(row1, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-            lv_obj_t* name = lv_label_create(row1);
-            if (!name) { ESP_LOGE(TAG, "name label alloc failed"); continue; }
-            lv_label_set_text(name, r->u.name);
+            /* 1. Name & Role */
+            lv_obj_t* name = lv_label_create(info_col);
+            if (!name) {
+                ESP_LOGE(TAG, "name label alloc failed — rolling back card");
+                lv_obj_delete(item); continue;
+            }
+            char name_buf[128];
+            char role_upper[16];
+            snprintf(role_upper, sizeof(role_upper), "%s", r->u.role);
+            if (role_upper[0] >= 'a' && role_upper[0] <= 'z') role_upper[0] -= 32;
+            snprintf(name_buf, sizeof(name_buf), "%s  (%s)", r->u.name, role_upper);
+            lv_label_set_text(name, name_buf);
             lv_obj_set_style_text_font(name, &lv_font_montserrat_16, 0);
             lv_obj_set_style_text_color(name, ui_theme_get_text_color(), 0);
 
-            lv_obj_t* badge = lv_label_create(row1);
-            if (!badge) { ESP_LOGE(TAG, "badge label alloc failed"); continue; }
-            char role_buf[32];
-            snprintf(role_buf, sizeof(role_buf), "  %s  ", r->u.role);
-            if (role_buf[2] >= 'a' && role_buf[2] <= 'z') role_buf[2] -= 32;
-            lv_label_set_text(badge, role_buf);
-            lv_obj_set_style_text_font(badge, &lv_font_montserrat_12, 0);
-            lv_obj_set_style_text_color(badge, lv_color_white(), 0);
-            lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
-            if (strcmp(r->u.role, "admin") == 0) {
-                lv_obj_set_style_bg_color(badge, lv_color_hex(0xFF9900), 0);
-            } else if (strcmp(r->u.role, "lecturer") == 0) {
-                lv_obj_set_style_bg_color(badge, lv_color_hex(0x3B82F6), 0);
-            } else {
-                lv_obj_set_style_bg_color(badge, lv_color_hex(0x10B981), 0);
+            /* 2. Details (ID / Phone / Telegram) */
+            lv_obj_t* details = lv_label_create(info_col);
+            if (!details) {
+                ESP_LOGE(TAG, "details label alloc failed — rolling back card");
+                lv_obj_delete(item); continue;
             }
-            lv_obj_set_style_radius(badge, 6, 0);
-            lv_obj_set_style_margin_left(badge, 10, 0);
-
-            /* Row 2: ID / phone */
-            lv_obj_t* row2 = lv_obj_create(info_col);
-            if (!row2) { ESP_LOGE(TAG, "row2 alloc failed"); continue; }
-            lv_obj_set_size(row2, LV_PCT(100), LV_SIZE_CONTENT);
-            lv_obj_set_style_bg_opa(row2, 0, 0);
-            lv_obj_set_style_border_width(row2, 0, 0);
-            lv_obj_set_style_pad_all(row2, 0, 0);
-            lv_obj_set_flex_flow(row2, LV_FLEX_FLOW_ROW);
-            lv_obj_set_flex_align(row2, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-            lv_obj_set_style_margin_top(row2, 4, 0);
-
             char details_text[128] = {0};
             if (strcmp(r->u.role, "student") == 0) {
                 snprintf(details_text, sizeof(details_text), "ID: %s  |  Phone: %s",
@@ -294,32 +286,28 @@ static void user_mgr_populate_task(void* arg) {
                          r->u.phone_number[0]  ? r->u.phone_number  : "N/A",
                          r->u.telegram_id[0]   ? r->u.telegram_id   : "Not Linked");
             }
-            lv_obj_t* details = lv_label_create(row2);
-            if (!details) { ESP_LOGE(TAG, "details label alloc failed"); continue; }
             lv_label_set_text(details, details_text);
             lv_obj_set_style_text_font(details, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(details, ui_theme_get_text_muted_color(), 0);
+            lv_obj_set_style_margin_top(details, 2, 0);
 
-            /* Row 3: Courses (pre-fetched, no DB call here) */
-            lv_obj_t* row3 = lv_obj_create(info_col);
-            if (!row3) { ESP_LOGE(TAG, "row3 alloc failed"); continue; }
-            lv_obj_set_size(row3, LV_PCT(100), LV_SIZE_CONTENT);
-            lv_obj_set_style_bg_opa(row3, 0, 0);
-            lv_obj_set_style_border_width(row3, 0, 0);
-            lv_obj_set_style_pad_all(row3, 0, 0);
-            lv_obj_set_flex_flow(row3, LV_FLEX_FLOW_ROW);
-            lv_obj_set_flex_align(row3, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-            lv_obj_set_style_margin_top(row3, 4, 0);
-
-            lv_obj_t* course_lbl = lv_label_create(row3);
-            if (!course_lbl) { ESP_LOGE(TAG, "course_lbl alloc failed"); continue; }
+            /* 3. Courses */
+            lv_obj_t* course_lbl = lv_label_create(info_col);
+            if (!course_lbl) {
+                ESP_LOGE(TAG, "course_lbl alloc failed — rolling back card");
+                lv_obj_delete(item); continue;
+            }
             lv_label_set_text(course_lbl, r->courses_text);
             lv_obj_set_style_text_font(course_lbl, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(course_lbl, lv_color_hex(0x3B82F6), 0);
+            lv_obj_set_style_margin_top(course_lbl, 2, 0);
 
             /* Actions column */
             lv_obj_t* actions_row = lv_obj_create(item);
-            if (!actions_row) { ESP_LOGE(TAG, "actions_row alloc failed"); continue; }
+            if (!actions_row) {
+                ESP_LOGE(TAG, "actions_row alloc failed — rolling back card");
+                lv_obj_delete(item); continue;
+            }
             lv_obj_set_size(actions_row, 100, 45);
             lv_obj_set_style_bg_opa(actions_row, 0, 0);
             lv_obj_set_style_border_width(actions_row, 0, 0);
@@ -346,7 +334,10 @@ static void user_mgr_populate_task(void* arg) {
 
             /* Delete button */
             lv_obj_t* del_btn = lv_btn_create(actions_row);
-            if (!del_btn) { ESP_LOGE(TAG, "del_btn alloc failed"); continue; }
+            if (!del_btn) {
+                ESP_LOGE(TAG, "del_btn alloc failed — rolling back card");
+                lv_obj_delete(item); continue;
+            }
             lv_obj_set_size(del_btn, 45, 45);
             lv_obj_set_style_bg_color(del_btn, lv_color_hex(0xCC3333), 0);
             lv_obj_set_user_data(del_btn, (void*)(uintptr_t)r->u.id);
@@ -371,50 +362,108 @@ static void user_mgr_populate_task(void* arg) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Event handlers                                                      */
+/*  Background action tasks (BUG-3: ABBA deadlock fix)                  */
+/*  These run WITHOUT s_lvgl_mux.  They acquire it ONLY for UI updates. */
+/* ------------------------------------------------------------------ */
+
+static void delete_user_task(void* arg) {
+    delete_ctx_t* ctx = (delete_ctx_t*)arg;
+    uint32_t uid = ctx->user_id;
+    free(ctx);
+
+    ESP_LOGI(TAG, "[BG] Deleting user ID: %u", (unsigned int)uid);
+    bool ok = (db_delete_user(uid) == ESP_OK);
+    if (ok) recognizer_load_cache();
+
+    if (ui_acquire()) {
+        if (ok) {
+            ui_show_notification(NOTIFY_SUCCESS, "User Management", "User deleted successfully", 2000);
+            /* Reload the list to reflect the deletion */
+            if (s_user_list && s_user_screen && lv_obj_is_valid(s_user_screen)) {
+                lv_obj_clean(s_user_list);
+            }
+        } else {
+            ui_show_notification(NOTIFY_ERROR, "User Management", "Failed to delete user", 2000);
+        }
+        ui_release();
+    }
+
+    /* Re-populate the list after deletion if screen is still open */
+    if (ok && s_user_screen && lv_obj_is_valid(s_user_screen)) {
+        xTaskCreate(user_mgr_populate_task, "usr_mgr_pop", 8192, NULL, 3, NULL);
+    }
+
+    vTaskDelete(NULL);
+}
+
+static void reenroll_user_task(void* arg) {
+    reenroll_ctx_t* ctx = (reenroll_ctx_t*)arg;
+    uint32_t uid = ctx->user_id;
+    free(ctx);
+
+    ESP_LOGI(TAG, "[BG] Re-enrolling user ID: %u", (unsigned int)uid);
+
+    user_t user;
+    bool fetch_ok = (db_get_user_by_id(uid, &user) == ESP_OK);
+    bool del_ok   = fetch_ok && (db_delete_user(uid) == ESP_OK);
+
+    if (del_ok) {
+        recognizer_load_cache();
+        ble_registration_add_pending_student(user.name, user.student_id, user.role, user.phone_number);
+    }
+
+    if (ui_acquire()) {
+        if (del_ok) {
+            ui_show_notification(NOTIFY_SUCCESS, "Re-enrollment", "Student queued. Opening Enrollment screen...", 2500);
+            ui_close_user_manager();
+            ui_show_enrollment_screen();
+        } else if (!fetch_ok) {
+            ui_show_notification(NOTIFY_ERROR, "Re-enrollment", "Failed to load user details", 2000);
+        } else {
+            ui_show_notification(NOTIFY_ERROR, "Re-enrollment", "Failed to delete existing user", 2000);
+        }
+        ui_release();
+    }
+    vTaskDelete(NULL);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Event handlers — extract user_id, spawn task, return immediately    */
+/*  NO DB calls here (s_lvgl_mux is held by the LVGL event loop).      */
 /* ------------------------------------------------------------------ */
 
 static void delete_user_event_handler(lv_event_t* e) {
     lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(e);
     uint32_t user_id = (uint32_t)(uintptr_t)lv_obj_get_user_data(btn);
 
-    ESP_LOGI(TAG, "Deleting user ID: %u", (unsigned int)user_id);
-
-    if (db_delete_user(user_id) == ESP_OK) {
-        recognizer_load_cache();
-        ui_show_notification(NOTIFY_SUCCESS, "User Management", "User deleted successfully", 2000);
-        lv_obj_delete_async(lv_obj_get_parent(lv_obj_get_parent(btn)));
-        if (lv_obj_get_child_count(s_user_list) == 0) {
-            lv_obj_t* empty_label = lv_label_create(s_user_list);
-            lv_label_set_text(empty_label, "No users enrolled.");
-            lv_obj_set_style_text_color(empty_label, ui_theme_get_text_muted_color(), 0);
-        }
-    } else {
-        ui_show_notification(NOTIFY_ERROR, "User Management", "Failed to delete user", 2000);
+    delete_ctx_t* ctx = (delete_ctx_t*)malloc(sizeof(delete_ctx_t));
+    if (!ctx) {
+        ESP_LOGE(TAG, "delete_user_event_handler: malloc failed");
+        return;
     }
+    ctx->user_id = user_id;
+    if (xTaskCreate(delete_user_task, "del_user", 4096, ctx, 3, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "delete_user_event_handler: task create failed");
+        free(ctx);
+    }
+    /* Return immediately — DB work happens in delete_user_task */
 }
 
 static void reenroll_user_event_handler(lv_event_t* e) {
     lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(e);
     uint32_t user_id = (uint32_t)(uintptr_t)lv_obj_get_user_data(btn);
 
-    ESP_LOGI(TAG, "Re-enrolling user ID: %u", (unsigned int)user_id);
-
-    user_t user;
-    if (db_get_user_by_id(user_id, &user) == ESP_OK) {
-        if (db_delete_user(user_id) == ESP_OK) {
-            recognizer_load_cache();
-            ble_registration_add_pending_student(user.name, user.student_id, user.role, user.phone_number);
-            ui_show_notification(NOTIFY_SUCCESS, "Re-enrollment", "Student queued. Opening Enrollment screen...", 2500);
-            lv_obj_delete_async(lv_obj_get_parent(lv_obj_get_parent(btn)));
-            ui_close_user_manager();
-            ui_show_enrollment_screen();
-        } else {
-            ui_show_notification(NOTIFY_ERROR, "Re-enrollment", "Failed to delete existing user", 2000);
-        }
-    } else {
-        ui_show_notification(NOTIFY_ERROR, "Re-enrollment", "Failed to load user details", 2000);
+    reenroll_ctx_t* ctx = (reenroll_ctx_t*)malloc(sizeof(reenroll_ctx_t));
+    if (!ctx) {
+        ESP_LOGE(TAG, "reenroll_user_event_handler: malloc failed");
+        return;
     }
+    ctx->user_id = user_id;
+    if (xTaskCreate(reenroll_user_task, "reenroll_user", 6144, ctx, 3, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "reenroll_user_event_handler: task create failed");
+        free(ctx);
+    }
+    /* Return immediately — DB work happens in reenroll_user_task */
 }
 
 static void close_btn_event_handler(lv_event_t* e) {

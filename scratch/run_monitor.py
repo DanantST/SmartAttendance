@@ -3,39 +3,44 @@ import time
 import sys
 
 def main():
-    print("Opening serial port COM5...")
-    try:
-        s = serial.Serial('COM5', 115200, timeout=0.1)
-    except Exception as e:
-        print(f"Error opening port: {e}")
-        return
-
-    print("Successfully opened COM5. Resetting board...")
-    s.setDTR(False)
-    s.setRTS(True)
-    time.sleep(0.1)
-    s.setRTS(False)
-    time.sleep(0.1)
-    s.setDTR(True)
+    print("Opening serial port COM4 with auto-reconnect...")
+    duration = 300  # 5 minutes
+    end_time = time.time() + duration
     
-    s.reset_input_buffer()
-    
-    print("--- Serial Monitor Started (120 Seconds) ---")
-    end_time = time.time() + 120.0
+    s = None
     while time.time() < end_time:
+        if s is None:
+            try:
+                s = serial.Serial('COM4', 115200, timeout=0.1)
+                print("\n--- Serial Monitor Connected ---")
+                s.reset_input_buffer()
+            except Exception as e:
+                # print(".", end="")
+                sys.stdout.write(".")
+                sys.stdout.flush()
+                time.sleep(0.5)
+                continue
+        
         try:
             line = s.readline()
             if line:
-                sys.stdout.write(line.decode('utf-8', errors='replace'))
+                text = line.decode('utf-8', errors='replace')
+                sys.stdout.write(text)
                 sys.stdout.flush()
         except KeyboardInterrupt:
             break
         except Exception as e:
-            print(f"\nRead error: {e}")
-            break
-            
+            print(f"\nRead error / Disconnect: {e}")
+            try:
+                s.close()
+            except:
+                pass
+            s = None
+            time.sleep(0.5)
+
+    if s is not None:
+        s.close()
     print("\n--- Serial Monitor Stopped ---")
-    s.close()
 
 if __name__ == '__main__':
     main()

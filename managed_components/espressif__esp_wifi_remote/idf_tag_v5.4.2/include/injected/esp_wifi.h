@@ -297,45 +297,6 @@ extern wifi_osi_funcs_t g_wifi_osi_funcs;
                            WIFI_ENABLE_11R  | \
                            WIFI_ENABLE_ENTERPRISE)
 
-/* Compatibility shims: WIFI_RMT_* symbols are "ignore:multiple-definition"
- * in Kconfig so they won't appear in sdkconfig. Fall back to the equivalent
- * ESP_WIFI_* symbols (set by the IDF's own wifi Kconfig) or safe defaults. */
-#ifndef CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM
-#  ifdef CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM
-#    define CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM
-#  else
-#    define CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM 16
-#  endif
-#endif
-#ifndef CONFIG_WIFI_RMT_DYNAMIC_RX_BUFFER_NUM
-#  ifdef CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM
-#    define CONFIG_WIFI_RMT_DYNAMIC_RX_BUFFER_NUM CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM
-#  else
-#    define CONFIG_WIFI_RMT_DYNAMIC_RX_BUFFER_NUM 32
-#  endif
-#endif
-#ifndef CONFIG_WIFI_RMT_TX_BUFFER_TYPE
-#  ifdef CONFIG_ESP_WIFI_TX_BUFFER_TYPE
-#    define CONFIG_WIFI_RMT_TX_BUFFER_TYPE CONFIG_ESP_WIFI_TX_BUFFER_TYPE
-#  else
-#    define CONFIG_WIFI_RMT_TX_BUFFER_TYPE 1
-#  endif
-#endif
-#ifndef CONFIG_WIFI_RMT_DYNAMIC_RX_MGMT_BUF
-#  ifdef CONFIG_ESP_WIFI_DYNAMIC_RX_MGMT_BUF
-#    define CONFIG_WIFI_RMT_DYNAMIC_RX_MGMT_BUF CONFIG_ESP_WIFI_DYNAMIC_RX_MGMT_BUF
-#  else
-#    define CONFIG_WIFI_RMT_DYNAMIC_RX_MGMT_BUF 0
-#  endif
-#endif
-#ifndef CONFIG_WIFI_RMT_ESPNOW_MAX_ENCRYPT_NUM
-#  ifdef CONFIG_ESP_WIFI_ESPNOW_MAX_ENCRYPT_NUM
-#    define CONFIG_WIFI_RMT_ESPNOW_MAX_ENCRYPT_NUM CONFIG_ESP_WIFI_ESPNOW_MAX_ENCRYPT_NUM
-#  else
-#    define CONFIG_WIFI_RMT_ESPNOW_MAX_ENCRYPT_NUM 7
-#  endif
-#endif
-
 #define WIFI_INIT_CONFIG_DEFAULT() { \
     .osi_funcs = &g_wifi_osi_funcs, \
     .wpa_crypto_funcs = g_wifi_default_wpa_crypto_funcs, \

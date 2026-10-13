@@ -86,7 +86,7 @@ static void start_capture_btn_event_handler(lv_event_t* e) {
     s_phone_ta   = NULL;
     s_telegram_ta = NULL;
 
-    xTaskCreate(start_enrollment_task, "enrollment", 8192, NULL, 5, NULL);
+    xTaskCreate(start_enrollment_task, "enrollment", TASK_DETECTION_STACK_SIZE, NULL, 5, NULL);
 }
 
 static void textarea_click_event_cb(lv_event_t* e) {

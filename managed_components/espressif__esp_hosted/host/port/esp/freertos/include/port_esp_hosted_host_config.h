@@ -19,11 +19,7 @@
 #ifdef CONFIG_ESP_HOSTED_DFLT_TASK_STACK
   #define H_ESP_HOSTED_DFLT_TASK_STACK CONFIG_ESP_HOSTED_DFLT_TASK_STACK
 #endif
-#ifdef CONFIG_ESP_HOSTED_DFLT_TASK_FROM_SPIRAM
-    #define H_DFLT_TASK_FROM_SPIRAM (1)
-#else
-    #define H_DFLT_TASK_FROM_SPIRAM (0)
-#endif
+#define H_DFLT_TASK_FROM_SPIRAM (0)
 
 // to allow external code to override Hosted Functions if required
 #define H_WEAK_REF __attribute__((weak))

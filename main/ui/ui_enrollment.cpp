@@ -337,8 +337,8 @@ static void student_card_event_handler(lv_event_t* e) {
     ui_show_pose_guidance("Please stand in front of the camera");
     lv_obj_add_flag(s_status_label, LV_OBJ_FLAG_HIDDEN);
 
-    /* Start capture task — needs 16 KB: 30x (face_detector + alignment + feature_extractor) call stacks */
-    xTaskCreate(start_single_capture_task, "single_capture", 16384, (void*)(intptr_t)idx, 5, NULL);
+    /* Start capture task — uses TASK_DETECTION_STACK_SIZE (32 KB) for esp-dl face detection */
+    xTaskCreate(start_single_capture_task, "single_capture", TASK_DETECTION_STACK_SIZE, (void*)(intptr_t)idx, 5, NULL);
 }
 
 /* ─── Student List API ─────────────────────────────────────────────────── */
@@ -484,8 +484,7 @@ void ui_enrollment_show_quality_result(const char* rating, int quality_score, in
             lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(ev);
             int card_idx  = (int)(intptr_t)lv_obj_get_user_data(btn);
             
-            /* Remove redo button and sibling keep button if present */
-            lv_obj_t* parent = lv_obj_get_parent(btn);
+            /* Remove redo button */
             lv_obj_delete(btn);
 
             if (s_success_popup) lv_obj_add_flag(s_success_popup, LV_OBJ_FLAG_HIDDEN);
@@ -502,7 +501,7 @@ void ui_enrollment_show_quality_result(const char* rating, int quality_score, in
             ui_show_pose_guidance("Please stand in front of the camera");
 
             xTaskCreate(start_single_capture_task, "enroll_redo",
-                        16384, (void*)(intptr_t)card_idx, 5, NULL);
+                        TASK_DETECTION_STACK_SIZE, (void*)(intptr_t)card_idx, 5, NULL);
         }, LV_EVENT_CLICKED, NULL);
 
         /* Also add "Keep Template" button so admin can choose to keep poor template if desired */
@@ -617,7 +616,7 @@ void ui_enrollment_set_status(bool success, const char* message) {
                 ui_show_pose_guidance("Please stand in front of the camera");
 
                 xTaskCreate(start_single_capture_task, "enroll_retry",
-                            16384, (void*)(intptr_t)card_idx, 5, NULL);
+                            TASK_DETECTION_STACK_SIZE, (void*)(intptr_t)card_idx, 5, NULL);
             }, LV_EVENT_CLICKED, NULL);
         }
     }

@@ -17,11 +17,14 @@ set IDF_SKIP_COMPONENT_MANAGER_VERSION_CHECK=1
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 
-REM Restore sdkconfig from git HEAD in case cmake clobbered it
-git checkout -- sdkconfig
-
 REM Export IDF environment (also sets PATH, IDF_PATH, etc.)
 call C:\Espressif\frameworks\esp-idf-v5.4.2\export.bat esp32p4
+
+REM Full clean to purge stale CMake/Python-env cache (safe to skip if env hasn't changed)
+idf.py fullclean
+
+REM Restore sdkconfig from git HEAD AFTER fullclean (fullclean can remove build/config)
+git checkout -- sdkconfig
 
 REM Build (reconfigure picks up sdkconfig.defaults.esp32p4)
 idf.py build

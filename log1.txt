@@ -1,0 +1,1066 @@
+Writing at 0x00542b1b... (97 %)
+Writing at 0x005498d3... (97 %)
+Writing at 0x005502b1... (98 %)
+Writing at 0x0055648c... (98 %)
+Writing at 0x0055ca86... (99 %)
+Writing at 0x0056524e... (100 %)
+Wrote 5528320 bytes (2933641 compressed) at 0x00020000 in 69.8 seconds (effective 634.0 kbit/s)...
+Hash of data verified.
+Compressed 3072 bytes to 157...
+Writing at 0x00008000... (100 %)
+Wrote 3072 bytes (157 compressed) at 0x00008000 in 0.1 seconds (effective 438.6 kbit/s)...
+Hash of data verified.
+Compressed 8192 bytes to 31...
+Writing at 0x00010000... (100 %)
+Wrote 8192 bytes (31 compressed) at 0x00010000 in 0.1 seconds (effective 684.9 kbit/s)...
+Hash of data verified.
+
+Leaving...
+Hard resetting via RTS pin...
+Executing action: monitor
+Running idf_monitor in directory C:\Users\user\Documents\projects\SmartAttendance
+Executing "C:\Espressif\python_env\idf5.4_py3.11_env\Scripts\python.exe C:\Espressif\frameworks\esp-idf-v5.4.2\tools/idf_monitor.py -p COM5 -b 115200 --toolchain-prefix riscv32-esp-elf- --target esp32p4 --revision 1 --decode-panic backtrace C:\Users\user\Documents\projects\SmartAttendance\build\SmartAttendance.elf --force-color -m 'C:\Espressif\python_env\idf5.4_py3.11_env\Scripts\python.exe' 'C:\Espressif\frameworks\esp-idf-v5.4.2\tools\idf.py'"...
+--- Warning: GDB cannot open serial ports accessed as COMx
+--- Using \\.\COM5 instead...
+--- esp-idf-monitor 1.7.0 on \\.\COM5 115200
+--- Quit: Ctrl+] | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H
+ESP-ROM:esp32p4-eco2-20240710
+Build:Jul 10 2024
+rst:0x1 (POWERON),boot:0x31f (SPI_FAST_FLASH_BOOT)
+SPI mode:DIO, clock div:1
+load:0x4ff33ce0,len:0x15f0
+load:0x4ff2abd0,len:0xd88
+load:0x4ff2cbd0,len:0x3310
+entry 0x4ff2abda
+I (25) boot: ESP-IDF v5.4.2 2nd stage bootloader
+I (26) boot: compile time Aug 28 2026 04:12:44
+I (26) boot: Multicore bootloader
+I (27) boot: chip revision: v1.3
+I (29) boot: efuse block revision: v0.3
+I (32) boot.esp32p4: SPI Speed      : 80MHz
+I (36) boot.esp32p4: SPI Mode       : DIO
+I (40) boot.esp32p4: SPI Flash Size : 16MB
+I (44) boot: Enabling RNG early entropy source...
+I (48) boot: Partition Table:
+I (51) boot: ## Label            Usage          Type ST Offset   Length
+I (57) boot:  0 nvs_keys         NVS keys         01 04 00009000 00001000
+I (64) boot:  1 nvs              WiFi data        01 02 0000a000 00006000
+I (70) boot:  2 otadata          OTA data         01 00 00010000 00002000
+I (77) boot:  3 phy_init         RF data          01 01 00012000 00001000
+I (83) boot:  4 ota_0            OTA app          00 10 00020000 00600000
+I (90) boot:  5 ota_1            OTA app          00 11 00620000 00600000
+I (96) boot:  6 storage          Unknown data     01 81 00c20000 00300000
+I (104) boot: End of partition table
+I (107) boot: No factory image, trying OTA 0
+I (110) esp_image: segment 0: paddr=00020020 vaddr=40320020 size=219a20h (2202144) map
+I (483) esp_image: segment 1: paddr=00239a48 vaddr=30100000 size=0031ch (   796) load
+I (485) esp_image: segment 2: paddr=00239d6c vaddr=3010031c size=00040h (    64) load
+I (489) esp_image: segment 3: paddr=00239db4 vaddr=4ff00000 size=06264h ( 25188) load
+I (501) esp_image: segment 4: paddr=00240020 vaddr=40000020 size=313218h (3224088) map
+I (1037) esp_image: segment 5: paddr=00553240 vaddr=4ff06264 size=0e360h ( 58208) load
+I (1050) esp_image: segment 6: paddr=005615a8 vaddr=4ff14600 size=04510h ( 17680) load
+I (1055) esp_image: segment 7: paddr=00565ac0 vaddr=50108080 size=0001ch (    28) load
+I (1061) boot: Loaded app from partition at offset 0x20000
+I (1090) boot: Set actual ota_seq=1 in otadata[0]
+I (1090) boot: Disabling RNG early entropy source...
+I (1100) hex_psram: vendor id    : 0x0d (AP)
+I (1100) hex_psram: Latency      : 0x01 (Fixed)
+I (1101) hex_psram: DriveStr.    : 0x00 (25 Ohm)
+I (1101) hex_psram: dev id       : 0x03 (generation 4)
+I (1106) hex_psram: density      : 0x07 (256 Mbit)
+I (1111) hex_psram: good-die     : 0x06 (Pass)
+I (1115) hex_psram: SRF          : 0x02 (Slow Refresh)
+I (1120) hex_psram: BurstType    : 0x00 ( Wrap)
+I (1124) hex_psram: BurstLen     : 0x03 (2048 Byte)
+I (1129) hex_psram: BitMode      : 0x01 (X16 Mode)
+I (1133) hex_psram: Readlatency  : 0x04 (14 cycles@Fixed)
+I (1138) hex_psram: DriveStrength: 0x00 (1/1)
+I (1143) MSPI DQS: tuning success, best phase id is 0
+I (1315) MSPI DQS: tuning success, best delayline id is 17
+I (1316) esp_psram: Found 32MB PSRAM device
+I (1316) esp_psram: Speed: 200MHz
+I (1317) hex_psram: psram CS IO is dedicated
+I (1320) cpu_start: Multicore app
+I (2255) esp_psram: SPI SRAM memory test OK
+I (2265) cpu_start: Pro cpu start user code
+I (2265) cpu_start: cpu freq: 360000000 Hz
+I (2266) app_init: Application information:
+I (2266) app_init: Project name:     SmartAttendance
+I (2270) app_init: App version:      ed9a770-dirty
+I (2275) app_init: Compile time:     Aug 28 2026 04:19:51
+I (2280) app_init: ELF file SHA256:  eea86a091...
+I (2284) app_init: ESP-IDF:          v5.4.2
+I (2288) efuse_init: Min chip rev:     v0.1
+I (2292) efuse_init: Max chip rev:     v1.99
+I (2296) efuse_init: Chip rev:         v1.3
+I (2300) heap_init: Initializing. RAM available for dynamic allocation:
+I (2307) heap_init: At 4FF1C850 len 0001E770 (121 KiB): RAM
+I (2312) heap_init: At 4FF3AFC0 len 00004BF0 (18 KiB): RAM
+I (2317) heap_init: At 4FF52790 len 0004D870 (310 KiB): RAM
+I (2322) heap_init: At 5010809C len 00007F64 (31 KiB): RTCRAM
+I (2328) heap_init: At 3010035C len 00001CA4 (7 KiB): TCM
+I (2333) esp_psram: Adding pool of 32768K of PSRAM memory to heap allocator
+I (2340) spi_flash: detected chip: generic
+I (2343) spi_flash: flash io: dio
+I (2347) host_init: ESP Hosted : Host chip_ip[18]
+I (2383) H_API: ESP-Hosted starting. Hosted_Tasks: prio:23, stack: 5120 RPC_task_stack: 5120
+I (2383) H_API: ** add_esp_wifi_remote_channels **
+I (2385) gpio: GPIO[18]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2393) gpio: GPIO[19]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2402) gpio: GPIO[14]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2410) gpio: GPIO[15]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2418) gpio: GPIO[16]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2427) gpio: GPIO[17]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (2436) H_SDIO_DRV: sdio_data_to_rx_buf_task started
+I (2436) main_task: Started on CPU0
+I (2446) esp_psram: Reserving pool of 128K of internal memory for DMA/internal allocations
+I (2456) main_task: Calling app_main()
+I (2456) MAIN: ========================================
+I (2456) MAIN: Smart Attendance System v1.0.0
+I (2466) MAIN: Hardware: CrowPanel-Advanced-7-P4
+I (2466) MAIN: ========================================
+I (2506) BOARD: Initializing CrowPanel Advanced 7" ESP32-P4
+I (2506) gpio: GPIO[30]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 1| Intr:0
+I (2506) gpio: GPIO[32]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (2516) BOARD: Initializing Backlight PWM GPIO31 30kHz 11-bit
+I (2526) gpio: GPIO[31]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (2536) BOARD: Board initialization complete
+I (2536) UI_MAIN: Initializing UI system
+I (2536) TOUCH: Initializing GT911 touch (Phase 1 exact sequence)
+I (2616) GT911: I2C address initialization procedure skipped - using default GT9xx setup
+I (2616) GT911: TouchPad_ID:0x39,0x31,0x31
+I (2616) GT911: TouchPad_Config_Version:0
+I (3626) TOUCH: GT911 touch initialized OK (async poll task running)
+I (3626) LCD: Initializing MIPI-DSI display (EK79007, 1024x600)
+I (3626) LCD: MIPI DSI PHY and Panel Logic powered (LDO3/LDO4)
+I (3626) ek79007: version: 1.0.4
+I (3886) LCD: LVGL task started
+I (3886) BACKLIGHT: Initializing backlight via LEDC timer and channel
+W (3886) ledc: GPIO 31 is not usable, maybe conflict with others
+I (3906) UI_MAIN: Theme set to dark
+I (3906) UI_MAIN: UI initialized successfully
+I (3906) MAIN: UI initialized (boot screen active)
+I (3906) CAM_DRV: Initializing SC2336 camera (validated sequence)
+I (3916) CAM_DRV: LDO3=2500mV LDO4=3300mV
+I (3916) CAM_DRV: Camera power-on sequence
+I (3916) CAM_DRV: XCLK 24MHz on GPIO 15
+I (3926) gpio: GPIO[8]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (3936) gpio: GPIO[9]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+E (4046) ov5647: Camera sensor is not OV5647, PID=0x2040
+I (4046) sc2336: Detected Camera sensor PID=0xcb3a
+I (4046) CAM_DRV: Detected sensor at 0x30
+I (4046) CAM_DRV:   fmt[0] MIPI_2lane_24Minput_RAW8_1280x720_30fps (1280x720)
+I (4056) CAM_DRV: Using format: MIPI_2lane_24Minput_RAW8_1280x720_30fps
+I (4176) CAM_DRV: HMIRROR=0 VFLIP=0 (BGGR)
+I (4176) CAM_DRV: Exposure baseline: val=280 gain_index=15
+I (4176) CAM_DRV: ISP AWB: register=ESP_OK, enable=ESP_OK, start=ESP_OK
+I (4186) CAM_DRV: ISP AE: set_env=ESP_OK, register=ESP_OK, enable=ESP_OK, start=ESP_OK
+I (4186) CAM_DRV: ISP ready (Color+AWB+AE+CCM)
+I (4216) CAM_DRV: Sensor streaming started
+I (4246) CAM_DRV: Camera ready (1280x720 -> 480x360 RGB565)
+I (4246) MAIN: Camera initialized
+I (4256) FACE_DET: Initializing face detector
+I (4256) FACE_DET: Face detector initialized
+I (4256) MAIN: Face detector initialized
+I (4256) FEATURE: Initializing feature extractor (MobileFaceNet)
+I (4266) FEATURE: Feature extractor initialized
+I (4266) MAIN: Face recognizer initialized
+I (4276) SDCARD: Initializing SD card
+I (4276) SDCARD: Mounting filesystem
+I (4276) sdmmc_periph: sdmmc_host_init: SDMMC host already initialized, skipping init flow
+Name: APPSD
+Type: SDHC
+Speed: 20.00 MHz (limit: 20.00 MHz)
+Size: 7680MB
+CSD: ver=2, sector_size=512, capacity=15728640 read_bl_len=9
+SSR: bus_width=1
+I (4336) SDCARD: SD card mounted successfully.
+I (4336) SDCARD: Running diagnostic write/read test on SD card...
+I (4796) SDCARD: DIAG: Wrote 45 bytes successfully to diag_test.txt.
+I (4796) SDCARD: DIAG: Read back content: 'SmartAttendance SD Card Diagnostic Write Test'
+I (5106) DB: Standard SD card directories verified/created
+I (5286) DB: No duplicate schedules found in database
+I (5286) DB: === DEVICE SCHEDULES TABLE DUMP ===
+I (5296) DB:   [1] ID: 1 | Course ID: 4 | Start: 1781375400 | End: 1781375700 | UUID: 36a41de7b5c67d4355217da5de391fd0
+I (5296) DB:   [2] ID: 3 | Course ID: 5 | Start: 1781426400 | End: 1781430600 | UUID: 3e0e8b8d3d1934aa24dc1c6346d9f10a
+I (5306) DB:   [3] ID: 12 | Course ID: 5 | Start: 1781442900 | End: 1781443500 | UUID: f993cbbd492ca277ac0defda8630c310
+I (5316) DB:   [4] ID: 13 | Course ID: 5 | Start: 1781532000 | End: 1781533200 | UUID: 86cec4d6c22659269b35810a4a00079e
+I (5326) DB:   [5] ID: 14 | Course ID: 5 | Start: 1781613900 | End: 1781614500 | UUID: 77a541daf84f781e94640dbbd30d9070
+I (5336) DB:   [6] ID: 15 | Course ID: 5 | Start: 1783938600 | End: 1783945800 | UUID: 48a79364cd32af1d9875d153ab75c37c
+I (5346) DB:   [7] ID: 16 | Course ID: 5 | Start: 1783938600 | End: 1783945200 | UUID: ecb0d1f950b40bc7815292cb92a5a4cc
+I (5356) DB:   [8] ID: 17 | Course ID: 4 | Start: 1785314100 | End: 1785314700 | UUID: e26524ecdc7f47ef79d0de2b2b887d67
+I (5366) DB:   [9] ID: 21 | Course ID: 4 | Start: 1785367800 | End: 1785375000 | UUID: 5e156a3255e5ad6f883911e18f160060
+I (5376) DB:   [10] ID: 22 | Course ID: 4 | Start: 1785399900 | End: 1785402300 | UUID: 679afe4d62ee4f184259657021c7c308
+I (5386) DB:   [11] ID: 23 | Course ID: 4 | Start: 1785417900 | End: 1785421500 | UUID: a706e1e17f10b527691bb02141648f36
+I (5396) DB:   [12] ID: 24 | Course ID: 6 | Start: 1785916800 | End: 1785920400 | UUID: 5b5ec20494af8a14fe72960df8608419
+I (5406) DB: Total schedules in table: 12
+I (5416) DB: === DEBUG DUMP USERS ===
+I (5426) DB:   User: ID=4, Name=Prof John Doe, SID=NULL, Role=lecturer
+I (5426) DB:   User: ID=8, Name=Babarinde Emmanuel, SID=MTE/2020/1149, Role=student
+I (5436) DB:   User: ID=9, Name=Adesare Adegbagi, SID=MTE/2020/1133, Role=student
+I (5436) DB:   User: ID=10, Name=Adeoluwa Emmanuel, SID=MTE/2020/1145, Role=student
+I (5446) DB:   User: ID=11, Name=Omopariola Fortune Ifeoluwa, SID=MTE/2020/1146, Role=student
+I (5456) DB:   User: ID=12, Name=Olasanmi Precious Damilare, SID=MTE/2020/1198, Role=student
+I (5466) DB:   User: ID=13, Name=Adeyemi Abdullahi Adetunji, SID=MTE/2020/1087, Role=student
+I (5466) DB:   User: ID=14, Name=Happi_boy, SID=201030, Role=student
+I (5476) DB:   User: ID=15, Name=Dudu of MTE, SID=MTE/2020/1007, Role=student
+I (5486) DB:   User: ID=16, Name=Imobedameh, SID=MTE/2020/1061, Role=student
+I (5486) DB:   User: ID=17, Name=Falemu Oluwatobiloba, SID=MTE/2020/1053, Role=student
+I (5496) DB:   User: ID=18, Name=Oyegoke Michael, SID=MTE/2020/1098, Role=admin
+I (5506) DB:   User: ID=19, Name=Atolagbe Philip oluwasegun, SID=Met/2021/2006, Role=student
+I (5516) DB:   User: ID=20, Name=Omotosho mutiu, SID=Met/2020/1093, Role=student
+I (5516) DB:   User: ID=21, Name=Peter Emmanuel, SID=Met/2020/1100, Role=student
+I (5526) DB: === DEBUG DUMP COURSES ===
+I (5536) DB:   Course: ID=1, Code=MATH201, Name=Linear Algebra
+I (5536) DB:   Course: ID=2, Code=CS480, Name=Computer Vision
+I (5546) DB:   Course: ID=3, Code=ECE320, Name=Embedded Systems
+I (5546) DB:   Course: ID=4, Code=MTE 534, Name=Specification Writing
+I (5556) DB:   Course: ID=5, Code=MTE534, Name=Datasheet Writing
+I (5556) DB:   Course: ID=6, Code=MTE536, Name=Edge Database Organization
+I (5566) DB:   Course: ID=7, Code=MTE538, Name=Edge-AI Optimization
+I (5576) DB: === DEBUG DUMP USER_COURSES ===
+I (5586) DB:   Enrollment: UserID=8, CourseID=1
+I (5586) DB:   Enrollment: UserID=8, CourseID=2
+I (5586) DB:   Enrollment: UserID=8, CourseID=3
+I (5586) DB:   Enrollment: UserID=8, CourseID=4
+I (5596) DB:   Enrollment: UserID=8, CourseID=5
+I (5596) DB:   Enrollment: UserID=14, CourseID=1
+I (5606) DB:   Enrollment: UserID=14, CourseID=2
+I (5606) DB:   Enrollment: UserID=14, CourseID=3
+I (5606) DB:   Enrollment: UserID=14, CourseID=4
+I (5616) DB:   Enrollment: UserID=14, CourseID=5
+I (5616) DB: === DEBUG DUMP ATTENDANCE ===
+I (5636) DB:   Log: ID=1, UserID=8, SchedID=0, TS=1781436175, Status=present
+I (5636) DEBUG_CSV: === CONTENT OF /sdcard/attendance_report.csv ===
+I (5636) DEBUG_CSV: MTE 534 Specification Writing attendance report as at [1 January, 1970. 1:01 a.m.]
+I (5646) DEBUG_CSV: S/N,Student name,Matric number,"Class [13 June, 2026. 7:30 p.m. To 7:35 p.m.]","Class [29 July, 2026. 9:35 a.m. To 9:45 a.m.]","Class [30 July, 2026. 12:30 a.m. To 2:30 a.m.]","Class [30 July, 2026. 9:25 a.m. To 10:05 a.m.]","Class [30 July, 2026. 2:25 p.m. To 3:25 p.m.]"
+I (5676) DEBUG_CSV: 1,"Babarinde Emmanuel","MTE/2020/1149","Absent","Absent","Absent","Absent","Absent"
+I (5686) DEBUG_CSV: 2,"Happi_boy","201030","Absent","Absent","Absent","Absent","Absent"
+I (5696) DB: Database initialized
+I (5696) RECOG: Loading users into cache from database...
+I (5726) RECOG: Loaded 15 users into recognition cache
+I (5726) RECOG:   User Prof John Doe: id=4, role=lecturer, embedding sample=0 0 0 0 0
+I (5726) RECOG:   User Babarinde Emmanuel: id=8, role=student, embedding sample=4 -7 9 7 -6
+I (5736) RECOG:   User Adesare Adegbagi: id=9, role=student, embedding sample=-9 -6 -4 3 2
+I (5736) RECOG:   User Adeoluwa Emmanuel: id=10, role=student, embedding sample=-7 -4 -1 5 -2
+I (5746) RECOG:   User Omopariola Fortune Ifeoluwa: id=11, role=student, embedding sample=-7 -7 7 5 9
+I (5756) RECOG:   User Olasanmi Precious Damilare: id=12, role=student, embedding sample=-5 -3 2 6 5
+I (5766) RECOG:   User Adeyemi Abdullahi Adetunji: id=13, role=student, embedding sample=-8 1 4 -7 5
+I (5776) RECOG:   User Happi_boy: id=14, role=student, embedding sample=-5 -4 -5 -2 3
+I (5786) RECOG:   User Dudu of MTE: id=15, role=student, embedding sample=-8 -4 6 3 3
+I (5786) RECOG:   User Imobedameh: id=16, role=student, embedding sample=-3 -4 1 2 -5
+I (5796) RECOG:   User Falemu Oluwatobiloba: id=17, role=student, embedding sample=-11 -5 -2 7 -1
+I (5806) RECOG:   User Oyegoke Michael: id=18, role=admin, embedding sample=1 1 3 11 -1
+I (5816) RECOG:   User Atolagbe Philip oluwasegun: id=19, role=student, embedding sample=-9 -5 6 5 9
+I (5826) RECOG:   User Omotosho mutiu: id=20, role=student, embedding sample=4 -3 2 5 2
+I (5826) RECOG:   User Peter Emmanuel: id=21, role=student, embedding sample=1 -3 0 6 5
+I (5836) MAIN: Database initialized, 15 users loaded
+I (5846) BATTERY: Initializing STC8 battery monitor via shared I2C bus...
+I (5846) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (5856) BATTERY: STC8 battery monitor initialized successfully
+I (5866) ENROLL_QUEUE: Enrollment queue ready (max 20 slots)
+I (5866) MAIN: NET: Enrollment queue ready
+I (5866) CLOUD_SYNC: Initializing cloud sync module
+I (5876) CLOUD_SYNC: Cloud sync initialized: endpoint='https://danantst-smart-attendance-bot.hf.space', token_len=0, chat_id=''
+I (5886) WIFI_MGR: Initializing Wi-Fi manager (via esp_hosted)
+I (5896) WIFI_MGR: Connecting to ESP-Hosted slave co-processor...
+I (5896) H_API: ESP-Hosted Try to communicate with ESP-Hosted slave
+
+I (5906) transport: Attempt connection with slave: retry[0]
+W (5906) H_SDIO_DRV: Reset slave using GPIO[54]
+I (5916) os_wrapper_esp: GPIO [54] configured
+I (5916) gpio: GPIO[54]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (7446) sdio_wrapper: SDIO master: Slot 1, Data-Lines: 4-bit Freq(KHz)[10000 KHz]
+I (7446) sdio_wrapper: GPIOs: CLK[18] CMD[19] D0[14] D1[15] D2[16] D3[17] Slave_Reset[54]
+I (7446) sdio_wrapper: Queues: Tx[20] Rx[20] SDIO-Rx-Mode[3]
+I (7486) gpio: GPIO[15]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (7486) gpio: GPIO[17]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (7486) sdio_wrapper: Function 0 Blocksize: 512
+I (7496) sdio_wrapper: Function 1 Blocksize: 512
+I (7596) H_SDIO_DRV: Card init success, TRANSPORT_RX_ACTIVE
+I (7596) transport: set_transport_state: 1
+I (7596) transport: Waiting for esp_hosted slave to be ready
+I (7636) H_SDIO_DRV: SDIO Host operating in PACKET MODE
+I (7636) H_SDIO_DRV: Open data path at slave
+I (7636) H_SDIO_DRV: Starting SDIO process rx task
+I (7656) H_SDIO_DRV: Received ESP_PRIV_IF type message
+I (7656) transport: Received INIT event from ESP32 peripheral
+I (7656) transport: EVENT: 12
+I (7666) transport: Identified slave [esp32c6]
+W (7666) H_SDIO_DRV: SDIO clock freq set to [10000]KHz, Max possible (on PCB) is 40000KHz
+I (7676) transport: EVENT: 11
+I (7676) transport: capabilities: 0xd
+I (7676) transport: Features supported are:
+I (7686) transport:      * WLAN
+I (7686) transport:        - HCI over SDIO
+I (7686) transport:        - BLE only
+I (7696) transport: EVENT: 13
+W (7696) transport: Version mismatch: Host [2.12.0] > Co-proc [2.3.0] ==> Upgrade co-proc to avoid RPC timeouts
+I (7706) transport: ESP board type is : 13
+
+I (7706) transport: Base transport is set-up, TRANSPORT_TX_ACTIVE
+I (7716) H_API: Transport active
+I (7716) transport: Slave chip Id[12]
+I (7726) transport: raw_tp_dir[-], flow_ctrl: low[60] high[80]
+I (7726) transport: transport_delayed_init
+I (7726) esp_cli: Registering command: crash
+I (7736) esp_cli: Registering command: reboot
+I (7736) esp_cli: Registering command: mem-dump
+I (7746) esp_cli: Registering command: task-dump
+I (7746) esp_cli: Registering command: cpu-dump
+I (7756) esp_cli: Registering command: heap-trace
+I (7756) esp_cli: Registering command: sock-dump
+I (7756) esp_cli: Registering command: host-power-save
+I (7766) vhci_drv: Host BT Support: Enabled
+I (7766) vhci_drv:      BT Transport Type: VHCI
+I (7776) H_SDIO_DRV: Received INIT event
+I (7776) H_SDIO_DRV: Event type: 0x22
+I (7776) H_SDIO_DRV: Write thread started
+I (7796) WIFI_MGR: Connected to ESP-Hosted slave co-processor successfully.
+I (7796) transport: Attempt connection with slave: retry[0]
+I (7796) transport: Transport is already up
+I (8646) RPC_WRAP: ESP Event: wifi station started
+I (8676) WIFI_MGR: Wi-Fi started
+I (8676) rpc_req: Scan start Req
+
+I (8686) WIFI_MGR: Wi-Fi Auto-Connect Daemon started
+I (8686) WIFI_MGR: Wi-Fi manager initialized
+I (8686) MAIN: NET_BLE: Wi-Fi ready; starting network sync task
+I (8686) MAIN: Waiting for Wi-Fi before boot sync...
+I (8696) MAIN: Found saved Wi-Fi networks, waiting for auto-connect...
+I (8796) RPC_WRAP: ESP Event: wifi station started
+I (8796) RPC_WRAP: ESP Event: StaScanDone
+E (8796) WIFI_MGR: WiFi scan get records failed: 258
+I (8806) WIFI_MGR: Connecting to SSID: Shalom
+I (8826) H_API: esp_wifi_remote_connect
+I (11306) RPC_WRAP: ESP Event: Station mode: Connected
+I (11306) esp_wifi_remote: esp_wifi_internal_reg_rxcb: sta: 0x402cd606
+--- 0x402cd606: wifi_sta_receive at C:/Espressif/frameworks/esp-idf-v5.4.2/components/esp_wifi/src/wifi_netif.c:39
+I (12336) esp_netif_handlers: sta ip: 192.168.137.51, mask: 255.255.255.0, gw: 192.168.137.1
+I (12336) WIFI_MGR: Got IP: 192.168.137.51
+I (12336) WIFI_MGR: Wi-Fi connected. Initiating SNTP...
+I (12336) SNTP: Initializing SNTP
+I (12346) MAIN: Wi-Fi connected on boot — triggering immediate cloud sync
+I (12346) MAIN: Sync task waiting. Interval: 3600000 ms
+I (12356) MAIN: Boot sync: skipping timer wait
+I (12356) MAIN: Starting brief-connect sync cycle
+I (12356) SNTP: SNTP already running, skipping re-init
+I (12366) MAIN: SNTP sync attempt 1/3 (timeout 20s)...
+I (12366) SNTP: Waiting for system time to be set... (timeout 20000ms)
+I (13006) MAIN: All tasks started. System ready.
+I (13006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (23006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+W (32376) SNTP: Failed to update system time within timeout
+W (32376) MAIN: SNTP attempt 1/3 timed out
+I (32376) MAIN: SNTP sync attempt 2/3 (timeout 20s)...
+I (32376) SNTP: Waiting for system time to be set... (timeout 20000ms)
+I (33006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (43006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+W (52386) SNTP: Failed to update system time within timeout
+W (52386) MAIN: SNTP attempt 2/3 timed out
+I (52386) MAIN: SNTP sync attempt 3/3 (timeout 20s)...
+I (52386) SNTP: Waiting for system time to be set... (timeout 20000ms)
+I (53006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (63006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+W (72396) SNTP: Failed to update system time within timeout
+W (72396) MAIN: SNTP attempt 3/3 timed out
+W (72396) MAIN: SNTP timed out after 3 attempts — cloud sync will still run (self-syncs via HTTP Date header)
+W (72396) CLOUD_SYNC: Telegram credentials not configured. Skipping Telegram notifications/uploads.
+I (72406) CLOUD_SYNC: Starting cloud sync
+I (73006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (73916) CLOUD_SYNC: Fetching course deletions from https://danantst-smart-attendance-bot.hf.space/api/get_course_deletions?since=0
+E (73916) esp-tls: couldn't get hostname for :danantst-smart-attendance-bot.hf.space: getaddrinfo() returns 202, addrinfo=0x0
+E (73926) esp-tls: Failed to open new connection
+E (73936) transport_base: Failed to open a new connection
+E (73936) HTTP_CLIENT: Connection failed, sock < 0
+E (73946) CLOUD_SYNC: HTTP request failed: 28674
+E (73946) CLOUD_SYNC: Failed to fetch course deletions from cloud (err=28674)
+E (73956) CLOUD_SYNC: Course deletion sync failed: 28674
+I (73956) CLOUD_SYNC: Fetching schedule deletions from https://danantst-smart-attendance-bot.hf.space/api/get_schedule_deletions?since=0
+E (73976) esp-tls: couldn't get hostname for :danantst-smart-attendance-bot.hf.space: getaddrinfo() returns 202, addrinfo=0x0
+E (73986) esp-tls: Failed to open new connection
+E (73986) transport_base: Failed to open a new connection
+E (73986) HTTP_CLIENT: Connection failed, sock < 0
+E (73996) CLOUD_SYNC: HTTP request failed: 28674
+E (73996) CLOUD_SYNC: Failed to fetch schedule deletions from cloud (err=28674)
+E (74006) CLOUD_SYNC: Schedule deletion sync failed: 28674
+I (74016) CLOUD_SYNC: Fetching enrollment deletions from https://danantst-smart-attendance-bot.hf.space/api/get_enrollment_deletions?since=0
+E (74026) esp-tls: couldn't get hostname for :danantst-smart-attendance-bot.hf.space: getaddrinfo() returns 202, addrinfo=0x0
+E (74036) esp-tls: Failed to open new connection
+E (74036) transport_base: Failed to open a new connection
+E (74046) HTTP_CLIENT: Connection failed, sock < 0
+E (74046) CLOUD_SYNC: HTTP request failed: 28674
+E (74056) CLOUD_SYNC: Failed to fetch enrollment deletions (err=28674)
+E (74056) CLOUD_SYNC: Enrollment deletion sync failed: 28674
+I (74066) CLOUD_SYNC: Fetching lecturer course deletions from https://danantst-smart-attendance-bot.hf.space/api/get_lecturer_course_deletions?since=0
+E (74076) esp-tls: couldn't get hostname for :danantst-smart-attendance-bot.hf.space: getaddrinfo() returns 202, addrinfo=0x0
+E (74086) esp-tls: Failed to open new connection
+E (74096) transport_base: Failed to open a new connection
+E (74096) HTTP_CLIENT: Connection failed, sock < 0
+E (74106) CLOUD_SYNC: HTTP request failed: 28674
+E (74106) CLOUD_SYNC: Failed to fetch lecturer course deletions (err=28674)
+E (74116) CLOUD_SYNC: Lecturer course deletion sync failed: 28674
+I (74116) CLOUD_SYNC: Fetching deleted users from https://danantst-smart-attendance-bot.hf.space/api/get_deletions?since=0
+E (74136) esp-tls: couldn't get hostname for :danantst-smart-attendance-bot.hf.space: getaddrinfo() returns 202, addrinfo=0x0
+E (74146) esp-tls: Failed to open new connection
+E (74146) transport_base: Failed to open a new connection
+E (74156) HTTP_CLIENT: Connection failed, sock < 0
+E (74156) CLOUD_SYNC: HTTP request failed: 28674
+E (74156) CLOUD_SYNC: Failed to fetch deletions from cloud (err=28674)
+E (74166) CLOUD_SYNC: Deletion sync failed: 28674
+I (74166) CLOUD_SYNC: Syncing users to cloud server...
+E (74206) esp-tls: couldn't get hostname for :danantst-smart-attendance-bot.hf.space: getaddrinfo() returns 202, addrinfo=0x0
+E (74206) esp-tls: Failed to open new connection
+E (74216) transport_base: Failed to open a new connection
+E (74216) HTTP_CLIENT: Connection failed, sock < 0
+E (74226) CLOUD_SYNC: HTTP request failed: 28674
+E (74226) CLOUD_SYNC: Failed to sync users to cloud (err=28674)
+E (74236) CLOUD_SYNC: User sync failed: 28674
+I (74386) CLOUD_SYNC: Bidirectional sync upload: 12 schedules, 7 courses, 4 lecturer links
+I (74386) CLOUD_SYNC: POSTing bidirectional schedule sync to https://danantst-smart-attendance-bot.hf.space/api/sync_schedules
+E (74396) esp-tls: couldn't get hostname for :danantst-smart-attendance-bot.hf.space: getaddrinfo() returns 202, addrinfo=0x0
+E (74406) esp-tls: Failed to open new connection
+E (74406) transport_base: Failed to open a new connection
+E (74416) HTTP_CLIENT: Connection failed, sock < 0
+E (74416) CLOUD_SYNC: HTTP request failed: 28674
+E (74426) CLOUD_SYNC: Bidirectional schedule sync POST failed (err=28674)
+E (74426) CLOUD_SYNC: Schedule sync failed: 28674
+I (74436) CLOUD_SYNC: Fetching course enrollment updates from https://danantst-smart-attendance-bot.hf.space/api/get_course_enrollments?since=0
+E (74446) esp-tls: couldn't get hostname for :danantst-smart-attendance-bot.hf.space: getaddrinfo() returns 202, addrinfo=0x0
+E (74456) esp-tls: Failed to open new connection
+E (74466) transport_base: Failed to open a new connection
+E (74466) HTTP_CLIENT: Connection failed, sock < 0
+E (74476) CLOUD_SYNC: HTTP request failed: 28674
+E (74476) CLOUD_SYNC: Failed to fetch course enrollments from cloud (err=28674)
+E (74486) CLOUD_SYNC: Enrollment sync failed: 28674
+I (74506) CLOUD_SYNC: No logs to sync
+I (74516) CLOUD_SYNC: Checking for pending attendance report requests from https://danantst-smart-attendance-bot.hf.space/api/get_report_requests
+E (74516) esp-tls: couldn't get hostname for :danantst-smart-attendance-bot.hf.space: getaddrinfo() returns 202, addrinfo=0x0
+E (74526) esp-tls: Failed to open new connection
+E (74536) transport_base: Failed to open a new connection
+E (74536) HTTP_CLIENT: Connection failed, sock < 0
+E (74546) CLOUD_SYNC: HTTP request failed: 28674
+E (74546) CLOUD_SYNC: Failed to fetch report requests from cloud (err=28674)
+E (74556) CLOUD_SYNC: Report requests sync failed: 28674
+E (74556) CLOUD_SYNC: Cloud sync failed
+I (74566) MAIN: Sync cycle completed and disconnected
+I (74566) MAIN: Sync task waiting. Interval: 3600000 ms
+W (74646) dl::Model: Minimize() will delete variables not used in model inference, which will make it impossible to test or debug the model.
+W (74676) dl::Model: Minimize() will delete variables not used in model inference, which will make it impossible to test or debug the model.
+I (83006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (93006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (103006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (113006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (123006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (133006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (143006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (153006) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (155486) TOUCH: Touch at x:387 y:243
+I (158086) TOUCH: Touch at x:375 y:283
+I (159236) TOUCH: Touch at x:512 y:293
+I (160406) TOUCH: Touch at x:442 y:351
+I (161296) MAIN: Admin session activated
+E (161766) UI_USER: name label alloc failed — rolling back card
+Guru Meditation Error: Core  1 panic'ed (Store access fault). Exception was unhandled.
+
+--- Stack dump detected
+Core  1 register dump:
+MEPC    : 0x4004d788  RA      : 0x4004d674  SP      : 0x4ff336c0  GP      : 0x4ff14e00
+--- 0x4004d788: circ_calc_aa4 at C:/Users/user/Documents/projects/SmartAttendance/components/lvgl/src/draw/sw/lv_draw_sw_mask.c:1123
+--- (inlined by) lv_draw_sw_mask_radius_init at C:/Users/user/Documents/projects/SmartAttendance/components/lvgl/src/draw/sw/lv_draw_sw_mask.c:352
+--- 0x4004d674: circ_calc_aa4 at C:/Users/user/Documents/projects/SmartAttendance/components/lvgl/src/draw/sw/lv_draw_sw_mask.c:1096
+--- (inlined by) lv_draw_sw_mask_radius_init at C:/Users/user/Documents/projects/SmartAttendance/components/lvgl/src/draw/sw/lv_draw_sw_mask.c:352
+TP      : 0x4ff33f50  T0      : 0x00000004  T1      : 0xffffffd9  T2      : 0x00000088
+S0/FP   : 0x4ff1c7a8  S1      : 0x00000010  A0      : 0x00000000  A1      : 0x00000000
+A2      : 0x00000088  A3      : 0x00000000  A4      : 0x00000000  A5      : 0x00000000
+A6      : 0x00000000  A7      : 0x00000001  S2      : 0x4ff336c0  S3      : 0x4ff1c000
+S4      : 0x00000040  S5      : 0x4ff336d0  S6      : 0x00000010  S7      : 0x00000010
+S8      : 0x00000008  S9      : 0x00000000  S10     : 0x00000073  S11     : 0x00000067
+T3      : 0x00000000  T4      : 0x00000010  T5      : 0x00000000  T6      : 0x4ff4fe94
+MSTATUS : 0x00011880  MTVEC   : 0x4ff00003  MCAUSE  : 0x00000007  MTVAL   : 0x00000000
+--- 0x4ff00003: _vector_table at ??:?
+MHARTID : 0x00000001
+
+--- Warning: Failed to run gdb_panic_server.py script: Command '['riscv32-esp-elf-gdb', '--batch', '-n', 'C:\\Users\\user\\Documents\\projects\\SmartAttendance\\build\\SmartAttendance.elf', '-ex', 'target remote | "C:\\Espressif\\python_env\\idf5.4_py3.11_env\\Scripts\\python.exe" -m esp_idf_panic_decoder --target esp32p4 "C:\\Users\\user\\AppData\\Local\\Temp\\tmpgj2kpz_7"', '-ex', 'bt']' returned non-zero exit status 1.
+--- Warning: b"\r\nwarning: could not convert 'main' from the host encoding (CP1252) to UTF-32.\r\nThis normally should not happen, please file a bug report.\r\nerror starting child process 'C:\\Espressif\\python_env\\idf5.4_py3.11_env\\Scripts\\python.exe -m esp_idf_panic_decoder --target esp32p4 C:\\Users\\user\\AppData\\Local\\Temp\\tmpgj2kpz_7': CreateProcess: No such file or directory\r\nNo stack.\r\n"
+
+
+Stack memory:
+4ff336c0: 0x00000010 0x00000010 0x00000010 0x00000010 0x00000000 0x00000000 0x00000000 0x00000000
+4ff336e0: 0x00000073 0x4ff4fe58 0x00000008 0x00000010 0x00000000 0x00000018 0x4ff40c98 0x4ff33770
+4ff33700: 0x000000ff 0x00000008 0x00000018 0x40066fee 0x3a6ea5ff 0x4ff44620 0x00000010 0x4ff33640
+4ff33720: 0x00000000 0x00000000 0x4ff33768 0x4ff33798 0x00000000 0x0000005f 0x4ff44644 0x00000027
+003e6 0x000000e7
+4ff33760: 0x00000019 0x00000070 0x000003e6 0x000000c5 0x0000001f 0x00000074 0x000003e0 0x000000df
+4ff33780: 0x00000001 0x00000002 0x00000097 0x00000009 0x00000000 0x4ff410ac 0x4ff337d8 0x00000000
+4ff337a0: 0xfffffc4e 0x00000005 0x00000012 0x00000073 0x00000836 0x000001f2 0x00000000 0x00000000
+4ff337c0: 0x0000001d 0x4004cea8 0x00000002 0xfffffc4e 0x00000005 0x00000012 0x00000073 0x00000010
+4ff337e0: 0x0000001c 0x4ff1c7a8 0x00000000 0x00000015 0x4ff40000 0x4ff4fda8 0x4ff4fda0 0x00000067
+4ff33800: 0x00000003 0x000000ff 0x00000001 0x00000006 0x00000003 0x00000000 0x4ff4fe00 0x4ff40d6c
+4ff33820: 0x4ff41094 0x4ff40c98 0x4ff4fe00 0x4006619c 0x00000000 0x4ff41094 0x4ff40c98 0x4004a438
+4ff33840: 0x00000001 0x4ff41094 0x00000002 0x4ff4fe00 0x00000000 0x00000000 0x00000001 0x4ff1c000
+4ff33860: 0x4ff41094 0x00000000 0x4ff40d6c 0x4004a49a 0x00000000 0x4ff41094 0x00000000 0x4ff33920
+4ff33880: 0x4ff4fe58 0x4ff41094 0x4ff33930 0x4004bfe0 0x00000001 0x00000002 0x00000217 0x4ff4fe18
+4ff338a0: 0x0000000e 0x4ff410ac 0x4ff338e8 0x00000000 0x00000000 0x00000069 0x4ff44e94 0x40046b86
+4ff338c0: 0x00000036 0x4ff33e70 0x00000000 0x00000000 0x00000001 0x00000002 0x00000217 0x00000009
+4ff338e0: 0x0000000e 0x4ff410ac 0x00000000 0x00000000 0x4ff41094 0x00000000 0x4ff44e94 0x40042734
+4ff33900: 0x00000001 0x00000001 0x00000014 0x00000014 0x4ff45278 0x4ff4546c 0x00000014 0x00000067
+4ff33920: 0x0000001e 0x00000073 0x000003e1 0x000000e0 0x4ff44e94 0x00000000 0x00000000 0x00000000
+4ff33940: 0x00000000 0x00000000 0x00000000 0x00000010 0x2a2a2aff 0x00ffffff 0x00000000 0x0002ff00
+4ff33960: 0x00000000 0x4037c394 0xff000000 0x00000000 0x00000000 0x00000000 0x00002fff 0x00000000
+4ff33980: 0x00000000 0x00000000 0x000000ff 0x00000008 0x00000000 0x00000002 0x00000000 0x000000ff
+4ff339a0: 0x00000002 0x4ff410ac 0x00000000 0x00000000 0x4ff44724 0x00000001 0x4ff339f4 0x40043b8c
+7 0x00000000
+4ff339e0: 0x00000001 0x4ff41094 0x00000001 0x40043ca0 0x00000001 0x4ff44e94 0x4ff44e94 0x0000001a
+4ff33a00: 0x00000000 0x4ff41094 0x00000000 0x00000000 0x00000000 0x00000060 0x4ff44e94 0x40048842
+4ff33a20: 0x00000002 0x00000014 0x0000005f 0x000003eb 0x000000c5 0x00000017 0x0000006c 0x000003e8
+4ff33a40: 0x000000c5 0x00000017 0x0000006c 0x000003e8 0x000000e7 0x00000000 0x4ff44e94 0x40048ae2
+4ff33a60: 0x00000014 0x0000005f 0x000003eb 0x00000216 0x4ff451d0 0x00000000 0x00000000 0x00000000
+4ff33a80: 0x00000000 0x00000000 0x00000000 0x0000000a 0xffffff00 0x00ffffff 0x00000000 0x0002ff00
+4ff33aa0: 0x00000000 0x4037c394 0xff000000 0x00000000 0x00000000 0x000000ff 0x00002fff 0x00000000
+
+
+
+ELF file SHA256: eea86a091
+
+Rebooting...
+ESP-ROM:esp32p4-eco2-20240710
+Build:Jul 10 2024
+rst:0xc (SW_CPU_RESET),boot:0x31f (SPI_FAST_FLASH_BOOT)
+Core0 Saved PC:0x4ff06512
+--- 0x4ff06512: rv_utils_wait_for_intr at C:/Espressif/frameworks/esp-idf-v5.4.2/components/riscv/include/riscv/rv_utils.h:62
+--- (inlined by) esp_cpu_wait_for_intr at C:/Espressif/frameworks/esp-idf-v5.4.2/components/esp_hw_support/cpu.c:62
+Core1 Saved PC:0x4ff00de0
+--- 0x4ff00de0: esp_restart_noos at C:/Espressif/frameworks/esp-idf-v5.4.2/components/esp_system/port/soc/esp32p4/system_internal.c:218
+SPI mode:DIO, clock div:1
+load:0x4ff33ce0,len:0x15f0
+load:0x4ff2abd0,len:0xd88
+load:0x4ff2cbd0,len:0x3310
+entry 0x4ff2abda
+I (33) boot: ESP-IDF v5.4.2 2nd stage bootloader
+I (33) boot: compile time Aug 28 2026 04:12:44
+I (34) boot: Multicore bootloader
+I (35) boot: chip revision: v1.3
+I (36) boot: efuse block revision: v0.3
+I (40) boot.esp32p4: SPI Speed      : 80MHz
+I (44) boot.esp32p4: SPI Mode       : DIO
+I (47) boot.esp32p4: SPI Flash Size : 16MB
+I (51) boot: Enabling RNG early entropy source...
+I (56) boot: Partition Table:
+I (58) boot: ## Label            Usage          Type ST Offset   Length
+I (65) boot:  0 nvs_keys         NVS keys         01 04 00009000 00001000
+I (71) boot:  1 nvs              WiFi data        01 02 0000a000 00006000
+I (78) boot:  2 otadata          OTA data         01 00 00010000 00002000
+I (84) boot:  3 phy_init         RF data          01 01 00012000 00001000
+I (91) boot:  4 ota_0            OTA app          00 10 00020000 00600000
+I (97) boot:  5 ota_1            OTA app          00 11 00620000 00600000
+I (104) boot:  6 storage          Unknown data     01 81 00c20000 00300000
+I (111) boot: End of partition table
+I (114) esp_image: segment 0: paddr=00020020 vaddr=40320020 size=219a20h (2202144) map
+I (428) esp_image: segment 1: paddr=00239a48 vaddr=30100000 size=0031ch (   796) load
+I (430) esp_image: segment 2: paddr=00239d6c vaddr=3010031c size=00040h (    64) load
+I (433) esp_image: segment 3: paddr=00239db4 vaddr=4ff00000 size=06264h ( 25188) load
+I (445) esp_image: segment 4: paddr=00240020 vaddr=40000020 size=313218h (3224088) map
+I (897) esp_image: segment 5: paddr=00553240 vaddr=4ff06264 size=0e360h ( 58208) load
+I (908) esp_image: segment 6: paddr=005615a8 vaddr=4ff14600 size=04510h ( 17680) load
+I (912) esp_image: segment 7: paddr=00565ac0 vaddr=50108080 size=0001ch (    28) load
+I (918) boot: Loaded app from partition at offset 0x20000
+I (918) boot: Disabling RNG early entropy source...
+I (934) hex_psram: vendor id    : 0x0d (AP)
+I (934) hex_psram: Latency      : 0x01 (Fixed)
+I (934) hex_psram: DriveStr.    : 0x00 (25 Ohm)
+I (935) hex_psram: dev id       : 0x03 (generation 4)
+I (940) hex_psram: density      : 0x07 (256 Mbit)
+I (944) hex_psram: good-die     : 0x06 (Pass)
+I (948) hex_psram: SRF          : 0x02 (Slow Refresh)
+I (953) hex_psram: BurstType    : 0x00 ( Wrap)
+I (957) hex_psram: BurstLen     : 0x03 (2048 Byte)
+I (962) hex_psram: BitMode      : 0x01 (X16 Mode)
+I (966) hex_psram: Readlatency  : 0x04 (14 cycles@Fixed)
+I (971) hex_psram: DriveStrength: 0x00 (1/1)
+I (975) MSPI DQS: tuning success, best phase id is 0
+I (1148) MSPI DQS: tuning success, best delayline id is 17
+I (1148) esp_psram: Found 32MB PSRAM device
+I (1148) esp_psram: Speed: 200MHz
+I (1149) hex_psram: psram CS IO is dedicated
+I (1152) cpu_start: Multicore app
+I (2088) esp_psram: SPI SRAM memory test OK
+I (2097) cpu_start: Pro cpu start user code
+I (2098) cpu_start: cpu freq: 360000000 Hz
+I (2098) app_init: Application information:
+I (2098) app_init: Project name:     SmartAttendance
+I (2102) app_init: App version:      ed9a770-dirty
+I (2107) app_init: Compile time:     Aug 28 2026 04:19:51
+I (2112) app_init: ELF file SHA256:  eea86a091...
+I (2117) app_init: ESP-IDF:          v5.4.2
+I (2120) efuse_init: Min chip rev:     v0.1
+I (2124) efuse_init: Max chip rev:     v1.99
+I (2128) efuse_init: Chip rev:         v1.3
+I (2132) heap_init: Initializing. RAM available for dynamic allocation:
+I (2139) heap_init: At 4FF1C850 len 0001E770 (121 KiB): RAM
+I (2144) heap_init: At 4FF3AFC0 len 00004BF0 (18 KiB): RAM
+I (2149) heap_init: At 4FF52790 len 0004D870 (310 KiB): RAM
+I (2155) heap_init: At 5010809C len 00007F64 (31 KiB): RTCRAM
+I (2160) heap_init: At 3010035C len 00001CA4 (7 KiB): TCM
+I (2165) esp_psram: Adding pool of 32768K of PSRAM memory to heap allocator
+I (2173) spi_flash: detected chip: generic
+I (2176) spi_flash: flash io: dio
+I (2179) host_init: ESP Hosted : Host chip_ip[18]
+I (2215) H_API: ESP-Hosted starting. Hosted_Tasks: prio:23, stack: 5120 RPC_task_stack: 5120
+I (2215) H_API: ** add_esp_wifi_remote_channels **
+I (2217) gpio: GPIO[18]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2225) gpio: GPIO[19]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2234) gpio: GPIO[14]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2242) gpio: GPIO[15]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2251) gpio: GPIO[16]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2259) gpio: GPIO[17]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (2268) H_SDIO_DRV: sdio_data_to_rx_buf_task started
+I (2268) main_task: Started on CPU0
+I (2278) esp_psram: Reserving pool of 128K of internal memory for DMA/internal allocations
+I (2288) main_task: Calling app_main()
+I (2288) MAIN: ========================================
+I (2288) MAIN: Smart Attendance System v1.0.0
+I (2298) MAIN: Hardware: CrowPanel-Advanced-7-P4
+I (2298) MAIN: ========================================
+I (2338) BOARD: Initializing CrowPanel Advanced 7" ESP32-P4
+I (2338) gpio: GPIO[30]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 1| Intr:0
+I (2338) gpio: GPIO[32]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (2348) BOARD: Initializing Backlight PWM GPIO31 30kHz 11-bit
+I (2358) gpio: GPIO[31]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (2368) BOARD: Board initialization complete
+I (2368) UI_MAIN: Initializing UI system
+I (2368) TOUCH: Initializing GT911 touch (Phase 1 exact sequence)
+I (2448) GT911: I2C address initialization procedure skipped - using default GT9xx setup
+I (2448) GT911: TouchPad_ID:0x39,0x31,0x31
+I (2448) GT911: TouchPad_Config_Version:0
+I (3458) TOUCH: GT911 touch initialized OK (async poll task running)
+I (3458) LCD: Initializing MIPI-DSI display (EK79007, 1024x600)
+I (3458) LCD: MIPI DSI PHY and Panel Logic powered (LDO3/LDO4)
+I (3458) ek79007: version: 1.0.4
+I (3718) LCD: LVGL task started
+I (3718) BACKLIGHT: Initializing backlight via LEDC timer and channel
+W (3718) ledc: GPIO 31 is not usable, maybe conflict with others
+I (3738) UI_MAIN: Theme set to dark
+I (3738) UI_MAIN: UI initialized successfully
+I (3738) MAIN: UI initialized (boot screen active)
+I (3738) CAM_DRV: Initializing SC2336 camera (validated sequence)
+I (3748) CAM_DRV: LDO3=2500mV LDO4=3300mV
+I (3748) CAM_DRV: Camera power-on sequence
+I (3748) CAM_DRV: XCLK 24MHz on GPIO 15
+I (3758) gpio: GPIO[8]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (3768) gpio: GPIO[9]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+E (3878) ov5647: Camera sensor is not OV5647, PID=0x2040
+I (3878) sc2336: Detected Camera sensor PID=0xcb3a
+I (3878) CAM_DRV: Detected sensor at 0x30
+I (3878) CAM_DRV:   fmt[0] MIPI_2lane_24Minput_RAW8_1280x720_30fps (1280x720)
+I (3888) CAM_DRV: Using format: MIPI_2lane_24Minput_RAW8_1280x720_30fps
+I (4008) CAM_DRV: HMIRROR=0 VFLIP=0 (BGGR)
+I (4008) CAM_DRV: Exposure baseline: val=280 gain_index=15
+I (4008) CAM_DRV: ISP AWB: register=ESP_OK, enable=ESP_OK, start=ESP_OK
+I (4018) CAM_DRV: ISP AE: set_env=ESP_OK, register=ESP_OK, enable=ESP_OK, start=ESP_OK
+I (4018) CAM_DRV: ISP ready (Color+AWB+AE+CCM)
+I (4048) CAM_DRV: Sensor streaming started
+I (4078) CAM_DRV: Camera ready (1280x720 -> 480x360 RGB565)
+I (4078) MAIN: Camera initialized
+I (4088) FACE_DET: Initializing face detector
+I (4088) FACE_DET: Face detector initialized
+I (4088) MAIN: Face detector initialized
+I (4088) FEATURE: Initializing feature extractor (MobileFaceNet)
+I (4098) FEATURE: Feature extractor initialized
+I (4098) MAIN: Face recognizer initialized
+I (4108) SDCARD: Initializing SD card
+I (4108) SDCARD: Mounting filesystem
+I (4108) sdmmc_periph: sdmmc_host_init: SDMMC host already initialized, skipping init flow
+Name: APPSD
+Type: SDHC
+Speed: 20.00 MHz (limit: 20.00 MHz)
+Size: 7680MB
+CSD: ver=2, sector_size=512, capacity=15728640 read_bl_len=9
+SSR: bus_width=1
+I (4168) SDCARD: SD card mounted successfully.
+I (4168) SDCARD: Running diagnostic write/read test on SD card...
+I (4628) SDCARD: DIAG: Wrote 45 bytes successfully to diag_test.txt.
+I (4628) SDCARD: DIAG: Read back content: 'SmartAttendance SD Card Diagnostic Write Test'
+I (4948) DB: Standard SD card directories verified/created
+I (5118) DB: No duplicate schedules found in database
+I (5118) DB: === DEVICE SCHEDULES TABLE DUMP ===
+I (5128) DB:   [1] ID: 1 | Course ID: 4 | Start: 1781375400 | End: 1781375700 | UUID: 36a41de7b5c67d4355217da5de391fd0
+I (5128) DB:   [2] ID: 3 | Course ID: 5 | Start: 1781426400 | End: 1781430600 | UUID: 3e0e8b8d3d1934aa24dc1c6346d9f10a
+I (5138) DB:   [3] ID: 12 | Course ID: 5 | Start: 1781442900 | End: 1781443500 | UUID: f993cbbd492ca277ac0defda8630c310
+I (5148) DB:   [4] ID: 13 | Course ID: 5 | Start: 1781532000 | End: 1781533200 | UUID: 86cec4d6c22659269b35810a4a00079e
+I (5158) DB:   [5] ID: 14 | Course ID: 5 | Start: 1781613900 | End: 1781614500 | UUID: 77a541daf84f781e94640dbbd30d9070
+I (5168) DB:   [6] ID: 15 | Course ID: 5 | Start: 1783938600 | End: 1783945800 | UUID: 48a79364cd32af1d9875d153ab75c37c
+I (5188) DB:   [7] ID: 16 | Course ID: 5 | Start: 1783938600 | End: 1783945200 | UUID: ecb0d1f950b40bc7815292cb92a5a4cc
+I (5198) DB:   [8] ID: 17 | Course ID: 4 | Start: 1785314100 | End: 1785314700 | UUID: e26524ecdc7f47ef79d0de2b2b887d67
+I (5208) DB:   [9] ID: 21 | Course ID: 4 | Start: 1785367800 | End: 1785375000 | UUID: 5e156a3255e5ad6f883911e18f160060
+I (5218) DB:   [10] ID: 22 | Course ID: 4 | Start: 1785399900 | End: 1785402300 | UUID: 679afe4d62ee4f184259657021c7c308
+I (5228) DB:   [11] ID: 23 | Course ID: 4 | Start: 1785417900 | End: 1785421500 | UUID: a706e1e17f10b527691bb02141648f36
+I (5238) DB:   [12] ID: 24 | Course ID: 6 | Start: 1785916800 | End: 1785920400 | UUID: 5b5ec20494af8a14fe72960df8608419
+I (5248) DB: Total schedules in table: 12
+I (5248) DB: === DEBUG DUMP USERS ===
+I (5268) DB:   User: ID=4, Name=Prof John Doe, SID=NULL, Role=lecturer
+I (5268) DB:   User: ID=8, Name=Babarinde Emmanuel, SID=MTE/2020/1149, Role=student
+I (5268) DB:   User: ID=9, Name=Adesare Adegbagi, SID=MTE/2020/1133, Role=student
+I (5278) DB:   User: ID=10, Name=Adeoluwa Emmanuel, SID=MTE/2020/1145, Role=student
+I (5278) DB:   User: ID=11, Name=Omopariola Fortune Ifeoluwa, SID=MTE/2020/1146, Role=student
+I (5288) DB:   User: ID=12, Name=Olasanmi Precious Damilare, SID=MTE/2020/1198, Role=student
+I (5298) DB:   User: ID=13, Name=Adeyemi Abdullahi Adetunji, SID=MTE/2020/1087, Role=student
+I (5308) DB:   User: ID=14, Name=Happi_boy, SID=201030, Role=student
+I (5308) DB:   User: ID=15, Name=Dudu of MTE, SID=MTE/2020/1007, Role=student
+I (5318) DB:   User: ID=16, Name=Imobedameh, SID=MTE/2020/1061, Role=student
+I (5328) DB:   User: ID=17, Name=Falemu Oluwatobiloba, SID=MTE/2020/1053, Role=student
+I (5338) DB:   User: ID=18, Name=Oyegoke Michael, SID=MTE/2020/1098, Role=admin
+I (5338) DB:   User: ID=19, Name=Atolagbe Philip oluwasegun, SID=Met/2021/2006, Role=student
+I (5348) DB:   User: ID=20, Name=Omotosho mutiu, SID=Met/2020/1093, Role=student
+I (5358) DB:   User: ID=21, Name=Peter Emmanuel, SID=Met/2020/1100, Role=student
+I (5368) DB: === DEBUG DUMP COURSES ===
+I (5378) DB:   Course: ID=1, Code=MATH201, Name=Linear Algebra
+I (5378) DB:   Course: ID=2, Code=CS480, Name=Computer Vision
+I (5378) DB:   Course: ID=3, Code=ECE320, Name=Embedded Systems
+I (5388) DB:   Course: ID=4, Code=MTE 534, Name=Specification Writing
+I (5388) DB:   Course: ID=5, Code=MTE534, Name=Datasheet Writing
+I (5398) DB:   Course: ID=6, Code=MTE536, Name=Edge Database Organization
+I (5398) DB:   Course: ID=7, Code=MTE538, Name=Edge-AI Optimization
+I (5408) DB: === DEBUG DUMP USER_COURSES ===
+I (5418) DB:   Enrollment: UserID=8, CourseID=1
+I (5418) DB:   Enrollment: UserID=8, CourseID=2
+I (5418) DB:   Enrollment: UserID=8, CourseID=3
+I (5428) DB:   Enrollment: UserID=8, CourseID=4
+I (5428) DB:   Enrollment: UserID=8, CourseID=5
+I (5428) DB:   Enrollment: UserID=14, CourseID=1
+I (5438) DB:   Enrollment: UserID=14, CourseID=2
+I (5438) DB:   Enrollment: UserID=14, CourseID=3
+I (5448) DB:   Enrollment: UserID=14, CourseID=4
+I (5448) DB:   Enrollment: UserID=14, CourseID=5
+I (5458) DB: === DEBUG DUMP ATTENDANCE ===
+I (5478) DB:   Log: ID=1, UserID=8, SchedID=0, TS=1781436175, Status=present
+I (5478) DEBUG_CSV: === CONTENT OF /sdcard/attendance_report.csv ===
+I (5478) DEBUG_CSV: MTE 534 Specification Writing attendance report as at [1 January, 1970. 1:01 a.m.]
+I (5488) DEBUG_CSV: S/N,Student name,Matric number,"Class [13 June, 2026. 7:30 p.m. To 7:35 p.m.]","Class [29 July, 2026. 9:35 a.m. To 9:45 a.m.]","Class [30 July, 2026. 12:30 a.m. To 2:30 a.m.]","Class [30 July, 2026. 9:25 a.m. To 10:05 a.m.]","Class [30 July, 2026. 2:25 p.m. To 3:25 p.m.]"
+I (5508) DEBUG_CSV: 1,"Babarinde Emmanuel","MTE/2020/1149","Absent","Absent","Absent","Absent","Absent"
+I (5518) DEBUG_CSV: 2,"Happi_boy","201030","Absent","Absent","Absent","Absent","Absent"
+I (5528) DB: Database initialized
+I (5528) RECOG: Loading users into cache from database...
+I (5558) RECOG: Loaded 15 users into recognition cache
+I (5558) RECOG:   User Prof John Doe: id=4, role=lecturer, embedding sample=0 0 0 0 0
+I (5558) RECOG:   User Babarinde Emmanuel: id=8, role=student, embedding sample=4 -7 9 7 -6
+I (5568) RECOG:   User Adesare Adegbagi: id=9, role=student, embedding sample=-9 -6 -4 3 2
+I (5578) RECOG:   User Adeoluwa Emmanuel: id=10, role=student, embedding sample=-7 -4 -1 5 -2
+I (5578) RECOG:   User Omopariola Fortune Ifeoluwa: id=11, role=student, embedding sample=-7 -7 7 5 9
+I (5588) RECOG:   User Olasanmi Precious Damilare: id=12, role=student, embedding sample=-5 -3 2 6 5
+I (5598) RECOG:   User Adeyemi Abdullahi Adetunji: id=13, role=student, embedding sample=-8 1 4 -7 5
+I (5608) RECOG:   User Happi_boy: id=14, role=student, embedding sample=-5 -4 -5 -2 3
+I (5618) RECOG:   User Dudu of MTE: id=15, role=student, embedding sample=-8 -4 6 3 3
+I (5628) RECOG:   User Imobedameh: id=16, role=student, embedding sample=-3 -4 1 2 -5
+I (5628) RECOG:   User Falemu Oluwatobiloba: id=17, role=student, embedding sample=-11 -5 -2 7 -1
+I (5638) RECOG:   User Oyegoke Michael: id=18, role=admin, embedding sample=1 1 3 11 -1
+I (5648) RECOG:   User Atolagbe Philip oluwasegun: id=19, role=student, embedding sample=-9 -5 6 5 9
+I (5658) RECOG:   User Omotosho mutiu: id=20, role=student, embedding sample=4 -3 2 5 2
+I (5668) RECOG:   User Peter Emmanuel: id=21, role=student, embedding sample=1 -3 0 6 5
+I (5678) MAIN: Database initialized, 15 users loaded
+I (5678) BATTERY: Initializing STC8 battery monitor via shared I2C bus...
+I (5688) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (5688) BATTERY: STC8 battery monitor initialized successfully
+I (5698) ENROLL_QUEUE: Enrollment queue ready (max 20 slots)
+I (5698) MAIN: NET: Enrollment queue ready
+I (5708) CLOUD_SYNC: Initializing cloud sync module
+I (5718) CLOUD_SYNC: Cloud sync initialized: endpoint='https://danantst-smart-attendance-bot.hf.space', token_len=0, chat_id=''
+I (5718) WIFI_MGR: Initializing Wi-Fi manager (via esp_hosted)
+I (5728) WIFI_MGR: Connecting to ESP-Hosted slave co-processor...
+I (5738) H_API: ESP-Hosted Try to communicate with ESP-Hosted slave
+
+I (5738) transport: Attempt connection with slave: retry[0]
+W (5748) H_SDIO_DRV: Reset slave using GPIO[54]
+I (5748) os_wrapper_esp: GPIO [54] configured
+I (5748) gpio: GPIO[54]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (7278) sdio_wrapper: SDIO master: Slot 1, Data-Lines: 4-bit Freq(KHz)[10000 KHz]
+I (7278) sdio_wrapper: GPIOs: CLK[18] CMD[19] D0[14] D1[15] D2[16] D3[17] Slave_Reset[54]
+I (7278) sdio_wrapper: Queues: Tx[20] Rx[20] SDIO-Rx-Mode[3]
+I (7318) gpio: GPIO[15]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (7318) gpio: GPIO[17]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (7318) sdio_wrapper: Function 0 Blocksize: 512
+I (7328) sdio_wrapper: Function 1 Blocksize: 512
+I (7428) H_SDIO_DRV: Card init success, TRANSPORT_RX_ACTIVE
+I (7428) transport: set_transport_state: 1
+I (7428) transport: Waiting for esp_hosted slave to be ready
+I (7468) H_SDIO_DRV: Starting SDIO process rx task
+I (7468) H_SDIO_DRV: SDIO Host operating in PACKET MODE
+I (7468) H_SDIO_DRV: Open data path at slave
+E (7468) H_SDIO_DRV: sdio_get_len_from_slave: Len from slave[2706] exceeds max [1536]
+W (7468) H_SDIO_DRV: invalid ret or len_from_slave: -1 0
+I (17228) transport: Not able to connect with ESP-Hosted slave device
+W (17228) H_SDIO_DRV: Reset slave using GPIO[54]
+I (17228) os_wrapper_esp: GPIO [54] configured
+I (17228) gpio: GPIO[54]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (18758) sdio_wrapper: SDIO master: Slot 1, Data-Lines: 4-bit Freq(KHz)[10000 KHz]
+I (18758) sdio_wrapper: GPIOs: CLK[18] CMD[19] D0[14] D1[15] D2[16] D3[17] Slave_Reset[54]
+I (18758) sdio_wrapper: Queues: Tx[20] Rx[20] SDIO-Rx-Mode[3]
+E (18788) sdmmc_io: sdmmc_io_rw_extended: sdmmc_send_cmd returned 0x107
+E (18788) H_SDIO_DRV: failed to read registers
+I (18788) H_SDIO_DRV: Host is resetting itself, to avoid any sdio race condition
+I (18788) os_wrapper_esp: Restarting host
+ESP-ROM:esp32p4-eco2-20240710
+Build:Jul 10 2024
+rst:0xc (SW_CPU_RESET),boot:0x31f (SPI_FAST_FLASH_BOOT)
+Core0 Saved PC:0x4ff00de0
+--- 0x4ff00de0: esp_restart_noos at C:/Espressif/frameworks/esp-idf-v5.4.2/components/esp_system/port/soc/esp32p4/system_internal.c:218
+Core1 Saved PC:0x4ff06504
+--- 0x4ff06504: esp_cpu_wait_for_intr at C:/Espressif/frameworks/esp-idf-v5.4.2/components/esp_hw_support/cpu.c:57
+SPI mode:DIO, clock div:1
+load:0x4ff33ce0,len:0x15f0
+load:0x4ff2abd0,len:0xd88
+load:0x4ff2cbd0,len:0x3310
+entry 0x4ff2abda
+I (33) boot: ESP-IDF v5.4.2 2nd stage bootloader
+I (33) boot: compile time Aug 28 2026 04:12:44
+I (33) boot: Multicore bootloader
+I (34) boot: chip revision: v1.3
+I (36) boot: efuse block revision: v0.3
+I (40) boot.esp32p4: SPI Speed      : 80MHz
+I (44) boot.esp32p4: SPI Mode       : DIO
+I (47) boot.esp32p4: SPI Flash Size : 16MB
+I (51) boot: Enabling RNG early entropy source...
+I (56) boot: Partition Table:
+I (58) boot: ## Label            Usage          Type ST Offset   Length
+I (65) boot:  0 nvs_keys         NVS keys         01 04 00009000 00001000
+I (71) boot:  1 nvs              WiFi data        01 02 0000a000 00006000
+I (78) boot:  2 otadata          OTA data         01 00 00010000 00002000
+I (84) boot:  3 phy_init         RF data          01 01 00012000 00001000
+I (91) boot:  4 ota_0            OTA app          00 10 00020000 00600000
+I (97) boot:  5 ota_1            OTA app          00 11 00620000 00600000
+I (104) boot:  6 storage          Unknown data     01 81 00c20000 00300000
+I (111) boot: End of partition table
+I (114) esp_image: segment 0: paddr=00020020 vaddr=40320020 size=219a20h (2202144) map
+I (428) esp_image: segment 1: paddr=00239a48 vaddr=30100000 size=0031ch (   796) load
+I (430) esp_image: segment 2: paddr=00239d6c vaddr=3010031c size=00040h (    64) load
+I (433) esp_image: segment 3: paddr=00239db4 vaddr=4ff00000 size=06264h ( 25188) load
+I (445) esp_image: segment 4: paddr=00240020 vaddr=40000020 size=313218h (3224088) map
+I (897) esp_image: segment 5: paddr=00553240 vaddr=4ff06264 size=0e360h ( 58208) load
+I (907) esp_image: segment 6: paddr=005615a8 vaddr=4ff14600 size=04510h ( 17680) load
+I (912) esp_image: segment 7: paddr=00565ac0 vaddr=50108080 size=0001ch (    28) load
+I (917) boot: Loaded app from partition at offset 0x20000
+I (918) boot: Disabling RNG early entropy source...
+I (933) hex_psram: vendor id    : 0x0d (AP)
+I (934) hex_psram: Latency      : 0x01 (Fixed)
+I (934) hex_psram: DriveStr.    : 0x00 (25 Ohm)
+I (934) hex_psram: dev id       : 0x03 (generation 4)
+I (939) hex_psram: density      : 0x07 (256 Mbit)
+I (944) hex_psram: good-die     : 0x06 (Pass)
+I (948) hex_psram: SRF          : 0x02 (Slow Refresh)
+I (952) hex_psram: BurstType    : 0x00 ( Wrap)
+I (957) hex_psram: BurstLen     : 0x03 (2048 Byte)
+I (961) hex_psram: BitMode      : 0x01 (X16 Mode)
+I (966) hex_psram: Readlatency  : 0x04 (14 cycles@Fixed)
+I (971) hex_psram: DriveStrength: 0x00 (1/1)
+I (975) MSPI DQS: tuning success, best phase id is 0
+I (1147) MSPI DQS: tuning success, best delayline id is 17
+I (1147) esp_psram: Found 32MB PSRAM device
+I (1148) esp_psram: Speed: 200MHz
+I (1148) hex_psram: psram CS IO is dedicated
+I (1152) cpu_start: Multicore app
+I (2087) esp_psram: SPI SRAM memory test OK
+I (2097) cpu_start: Pro cpu start user code
+I (2097) cpu_start: cpu freq: 360000000 Hz
+I (2097) app_init: Application information:
+I (2097) app_init: Project name:     SmartAttendance
+I (2102) app_init: App version:      ed9a770-dirty
+I (2106) app_init: Compile time:     Aug 28 2026 04:19:51
+I (2112) app_init: ELF file SHA256:  eea86a091...
+I (2116) app_init: ESP-IDF:          v5.4.2
+I (2120) efuse_init: Min chip rev:     v0.1
+I (2124) efuse_init: Max chip rev:     v1.99
+I (2128) efuse_init: Chip rev:         v1.3
+I (2132) heap_init: Initializing. RAM available for dynamic allocation:
+I (2138) heap_init: At 4FF1C850 len 0001E770 (121 KiB): RAM
+I (2143) heap_init: At 4FF3AFC0 len 00004BF0 (18 KiB): RAM
+I (2149) heap_init: At 4FF52790 len 0004D870 (310 KiB): RAM
+I (2154) heap_init: At 5010809C len 00007F64 (31 KiB): RTCRAM
+I (2159) heap_init: At 3010035C len 00001CA4 (7 KiB): TCM
+I (2165) esp_psram: Adding pool of 32768K of PSRAM memory to heap allocator
+I (2172) spi_flash: detected chip: generic
+I (2175) spi_flash: flash io: dio
+I (2178) host_init: ESP Hosted : Host chip_ip[18]
+I (2215) H_API: ESP-Hosted starting. Hosted_Tasks: prio:23, stack: 5120 RPC_task_stack: 5120
+I (2215) H_API: ** add_esp_wifi_remote_channels **
+I (2217) gpio: GPIO[18]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2225) gpio: GPIO[19]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2233) gpio: GPIO[14]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2242) gpio: GPIO[15]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2250) gpio: GPIO[16]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (2258) gpio: GPIO[17]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (2268) H_SDIO_DRV: sdio_data_to_rx_buf_task started
+I (2268) main_task: Started on CPU0
+I (2278) esp_psram: Reserving pool of 128K of internal memory for DMA/internal allocations
+I (2288) main_task: Calling app_main()
+I (2288) MAIN: ========================================
+I (2288) MAIN: Smart Attendance System v1.0.0
+I (2298) MAIN: Hardware: CrowPanel-Advanced-7-P4
+I (2298) MAIN: ========================================
+I (2338) BOARD: Initializing CrowPanel Advanced 7" ESP32-P4
+I (2338) gpio: GPIO[30]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 1| Intr:0
+I (2338) gpio: GPIO[32]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (2348) BOARD: Initializing Backlight PWM GPIO31 30kHz 11-bit
+I (2358) gpio: GPIO[31]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (2368) BOARD: Board initialization complete
+I (2368) UI_MAIN: Initializing UI system
+I (2368) TOUCH: Initializing GT911 touch (Phase 1 exact sequence)
+I (2448) GT911: I2C address initialization procedure skipped - using default GT9xx setup
+I (2448) GT911: TouchPad_ID:0x39,0x31,0x31
+I (2448) GT911: TouchPad_Config_Version:0
+I (3458) TOUCH: GT911 touch initialized OK (async poll task running)
+I (3458) LCD: Initializing MIPI-DSI display (EK79007, 1024x600)
+I (3458) LCD: MIPI DSI PHY and Panel Logic powered (LDO3/LDO4)
+I (3458) ek79007: version: 1.0.4
+I (3718) LCD: LVGL task started
+I (3718) BACKLIGHT: Initializing backlight via LEDC timer and channel
+W (3718) ledc: GPIO 31 is not usable, maybe conflict with others
+I (3738) UI_MAIN: Theme set to dark
+I (3738) UI_MAIN: UI initialized successfully
+I (3738) MAIN: UI initialized (boot screen active)
+I (3738) CAM_DRV: Initializing SC2336 camera (validated sequence)
+I (3748) CAM_DRV: LDO3=2500mV LDO4=3300mV
+I (3748) CAM_DRV: Camera power-on sequence
+I (3748) CAM_DRV: XCLK 24MHz on GPIO 15
+I (3758) gpio: GPIO[8]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (3768) gpio: GPIO[9]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+E (3878) ov5647: Camera sensor is not OV5647, PID=0x2040
+I (3878) sc2336: Detected Camera sensor PID=0xcb3a
+I (3878) CAM_DRV: Detected sensor at 0x30
+I (3878) CAM_DRV:   fmt[0] MIPI_2lane_24Minput_RAW8_1280x720_30fps (1280x720)
+I (3888) CAM_DRV: Using format: MIPI_2lane_24Minput_RAW8_1280x720_30fps
+I (4008) CAM_DRV: HMIRROR=0 VFLIP=0 (BGGR)
+I (4008) CAM_DRV: Exposure baseline: val=280 gain_index=15
+I (4008) CAM_DRV: ISP AWB: register=ESP_OK, enable=ESP_OK, start=ESP_OK
+I (4018) CAM_DRV: ISP AE: set_env=ESP_OK, register=ESP_OK, enable=ESP_OK, start=ESP_OK
+I (4018) CAM_DRV: ISP ready (Color+AWB+AE+CCM)
+I (4048) CAM_DRV: Sensor streaming started
+I (4078) CAM_DRV: Camera ready (1280x720 -> 480x360 RGB565)
+I (4078) MAIN: Camera initialized
+I (4088) FACE_DET: Initializing face detector
+I (4088) FACE_DET: Face detector initialized
+I (4088) MAIN: Face detector initialized
+I (4088) FEATURE: Initializing feature extractor (MobileFaceNet)
+I (4098) FEATURE: Feature extractor initialized
+I (4098) MAIN: Face recognizer initialized
+I (4108) SDCARD: Initializing SD card
+I (4108) SDCARD: Mounting filesystem
+I (4108) sdmmc_periph: sdmmc_host_init: SDMMC host already initialized, skipping init flow
+Name: APPSD
+Type: SDHC
+Speed: 20.00 MHz (limit: 20.00 MHz)
+Size: 7680MB
+CSD: ver=2, sector_size=512, capacity=15728640 read_bl_len=9
+SSR: bus_width=1
+I (4168) SDCARD: SD card mounted successfully.
+I (4168) SDCARD: Running diagnostic write/read test on SD card...
+I (4628) SDCARD: DIAG: Wrote 45 bytes successfully to diag_test.txt.
+I (4628) SDCARD: DIAG: Read back content: 'SmartAttendance SD Card Diagnostic Write Test'
+I (4938) DB: Standard SD card directories verified/created
+I (5118) DB: No duplicate schedules found in database
+I (5118) DB: === DEVICE SCHEDULES TABLE DUMP ===
+I (5128) DB:   [1] ID: 1 | Course ID: 4 | Start: 1781375400 | End: 1781375700 | UUID: 36a41de7b5c67d4355217da5de391fd0
+I (5128) DB:   [2] ID: 3 | Course ID: 5 | Start: 1781426400 | End: 1781430600 | UUID: 3e0e8b8d3d1934aa24dc1c6346d9f10a
+I (5138) DB:   [3] ID: 12 | Course ID: 5 | Start: 1781442900 | End: 1781443500 | UUID: f993cbbd492ca277ac0defda8630c310
+I (5148) DB:   [4] ID: 13 | Course ID: 5 | Start: 1781532000 | End: 1781533200 | UUID: 86cec4d6c22659269b35810a4a00079e
+I (5158) DB:   [5] ID: 14 | Course ID: 5 | Start: 1781613900 | End: 1781614500 | UUID: 77a541daf84f781e94640dbbd30d9070
+I (5168) DB:   [6] ID: 15 | Course ID: 5 | Start: 1783938600 | End: 1783945800 | UUID: 48a79364cd32af1d9875d153ab75c37c
+I (5178) DB:   [7] ID: 16 | Course ID: 5 | Start: 1783938600 | End: 1783945200 | UUID: ecb0d1f950b40bc7815292cb92a5a4cc
+I (5188) DB:   [8] ID: 17 | Course ID: 4 | Start: 1785314100 | End: 1785314700 | UUID: e26524ecdc7f47ef79d0de2b2b887d67
+I (5198) DB:   [9] ID: 21 | Course ID: 4 | Start: 1785367800 | End: 1785375000 | UUID: 5e156a3255e5ad6f883911e18f160060
+I (5208) DB:   [10] ID: 22 | Course ID: 4 | Start: 1785399900 | End: 1785402300 | UUID: 679afe4d62ee4f184259657021c7c308
+I (5218) DB:   [11] ID: 23 | Course ID: 4 | Start: 1785417900 | End: 1785421500 | UUID: a706e1e17f10b527691bb02141648f36
+I (5228) DB:   [12] ID: 24 | Course ID: 6 | Start: 1785916800 | End: 1785920400 | UUID: 5b5ec20494af8a14fe72960df8608419
+I (5238) DB: Total schedules in table: 12
+I (5248) DB: === DEBUG DUMP USERS ===
+I (5258) DB:   User: ID=4, Name=Prof John Doe, SID=NULL, Role=lecturer
+I (5258) DB:   User: ID=8, Name=Babarinde Emmanuel, SID=MTE/2020/1149, Role=student
+I (5258) DB:   User: ID=9, Name=Adesare Adegbagi, SID=MTE/2020/1133, Role=student
+I (5268) DB:   User: ID=10, Name=Adeoluwa Emmanuel, SID=MTE/2020/1145, Role=student
+I (5278) DB:   User: ID=11, Name=Omopariola Fortune Ifeoluwa, SID=MTE/2020/1146, Role=student
+I (5288) DB:   User: ID=12, Name=Olasanmi Precious Damilare, SID=MTE/2020/1198, Role=student
+I (5298) DB:   User: ID=13, Name=Adeyemi Abdullahi Adetunji, SID=MTE/2020/1087, Role=student
+I (5298) DB:   User: ID=14, Name=Happi_boy, SID=201030, Role=student
+I (5308) DB:   User: ID=15, Name=Dudu of MTE, SID=MTE/2020/1007, Role=student
+I (5318) DB:   User: ID=16, Name=Imobedameh, SID=MTE/2020/1061, Role=student
+I (5318) DB:   User: ID=17, Name=Falemu Oluwatobiloba, SID=MTE/2020/1053, Role=student
+I (5328) DB:   User: ID=18, Name=Oyegoke Michael, SID=MTE/2020/1098, Role=admin
+I (5338) DB:   User: ID=19, Name=Atolagbe Philip oluwasegun, SID=Met/2021/2006, Role=student
+I (5348) DB:   User: ID=20, Name=Omotosho mutiu, SID=Met/2020/1093, Role=student
+I (5348) DB:   User: ID=21, Name=Peter Emmanuel, SID=Met/2020/1100, Role=student
+I (5358) DB: === DEBUG DUMP COURSES ===
+I (5368) DB:   Course: ID=1, Code=MATH201, Name=Linear Algebra
+I (5368) DB:   Course: ID=2, Code=CS480, Name=Computer Vision
+I (5378) DB:   Course: ID=3, Code=ECE320, Name=Embedded Systems
+I (5378) DB:   Course: ID=4, Code=MTE 534, Name=Specification Writing
+I (5388) DB:   Course: ID=5, Code=MTE534, Name=Datasheet Writing
+I (5388) DB:   Course: ID=6, Code=MTE536, Name=Edge Database Organization
+I (5398) DB:   Course: ID=7, Code=MTE538, Name=Edge-AI Optimization
+I (5408) DB: === DEBUG DUMP USER_COURSES ===
+I (5418) DB:   Enrollment: UserID=8, CourseID=1
+I (5418) DB:   Enrollment: UserID=8, CourseID=2
+I (5418) DB:   Enrollment: UserID=8, CourseID=3
+I (5418) DB:   Enrollment: UserID=8, CourseID=4
+I (5428) DB:   Enrollment: UserID=8, CourseID=5
+I (5428) DB:   Enrollment: UserID=14, CourseID=1
+I (5428) DB:   Enrollment: UserID=14, CourseID=2
+I (5438) DB:   Enrollment: UserID=14, CourseID=3
+I (5438) DB:   Enrollment: UserID=14, CourseID=4
+I (5448) DB:   Enrollment: UserID=14, CourseID=5
+I (5448) DB: === DEBUG DUMP ATTENDANCE ===
+I (5468) DB:   Log: ID=1, UserID=8, SchedID=0, TS=1781436175, Status=present
+I (5468) DEBUG_CSV: === CONTENT OF /sdcard/attendance_report.csv ===
+I (5468) DEBUG_CSV: MTE 534 Specification Writing attendance report as at [1 January, 1970. 1:01 a.m.]
+I (5478) DEBUG_CSV: S/N,Student name,Matric number,"Class [13 June, 2026. 7:30 p.m. To 7:35 p.m.]","Class [29 July, 2026. 9:35 a.m. To 9:45 a.m.]","Class [30 July, 2026. 12:30 a.m. To 2:30 a.m.]","Class [30 July, 2026. 9:25 a.m. To 10:05 a.m.]","Class [30 July, 2026. 2:25 p.m. To 3:25 p.m.]"
+I (5508) DEBUG_CSV: 1,"Babarinde Emmanuel","MTE/2020/1149","Absent","Absent","Absent","Absent","Absent"
+I (5518) DEBUG_CSV: 2,"Happi_boy","201030","Absent","Absent","Absent","Absent","Absent"
+I (5518) DB: Database initialized
+I (5528) RECOG: Loading users into cache from database...
+I (5548) RECOG: Loaded 15 users into recognition cache
+I (5558) RECOG:   User Prof John Doe: id=4, role=lecturer, embedding sample=0 0 0 0 0
+I (5558) RECOG:   User Babarinde Emmanuel: id=8, role=student, embedding sample=4 -7 9 7 -6
+I (5558) RECOG:   User Adesare Adegbagi: id=9, role=student, embedding sample=-9 -6 -4 3 2
+I (5568) RECOG:   User Adeoluwa Emmanuel: id=10, role=student, embedding sample=-7 -4 -1 5 -2
+I (5578) RECOG:   User Omopariola Fortune Ifeoluwa: id=11, role=student, embedding sample=-7 -7 7 5 9
+I (5588) RECOG:   User Olasanmi Precious Damilare: id=12, role=student, embedding sample=-5 -3 2 6 5
+I (5598) RECOG:   User Adeyemi Abdullahi Adetunji: id=13, role=student, embedding sample=-8 1 4 -7 5
+I (5608) RECOG:   User Happi_boy: id=14, role=student, embedding sample=-5 -4 -5 -2 3
+I (5608) RECOG:   User Dudu of MTE: id=15, role=student, embedding sample=-8 -4 6 3 3
+I (5618) RECOG:   User Imobedameh: id=16, role=student, embedding sample=-3 -4 1 2 -5
+I (5628) RECOG:   User Falemu Oluwatobiloba: id=17, role=student, embedding sample=-11 -5 -2 7 -1
+I (5638) RECOG:   User Oyegoke Michael: id=18, role=admin, embedding sample=1 1 3 11 -1
+I (5648) RECOG:   User Atolagbe Philip oluwasegun: id=19, role=student, embedding sample=-9 -5 6 5 9
+I (5658) RECOG:   User Omotosho mutiu: id=20, role=student, embedding sample=4 -3 2 5 2
+I (5658) RECOG:   User Peter Emmanuel: id=21, role=student, embedding sample=1 -3 0 6 5
+I (5668) MAIN: Database initialized, 15 users loaded
+I (5678) BATTERY: Initializing STC8 battery monitor via shared I2C bus...
+I (5678) BATTERY: Power Check (STC8): 4192mV, Level: 98%, State: 2, Charging: 1
+I (5688) BATTERY: STC8 battery monitor initialized successfully
+I (5688) ENROLL_QUEUE: Enrollment queue ready (max 20 slots)
+I (5698) MAIN: NET: Enrollment queue ready
+I (5698) CLOUD_SYNC: Initializing cloud sync module
+I (5708) CLOUD_SYNC: Cloud sync initialized: endpoint='https://danantst-smart-attendance-bot.hf.space', token_len=0, chat_id=''
+I (5718) WIFI_MGR: Initializing Wi-Fi manager (via esp_hosted)
+I (5728) WIFI_MGR: Connecting to ESP-Hosted slave co-processor...
+I (5728) H_API: ESP-Hosted Try to communicate with ESP-Hosted slave
+
+I (5738) transport: Attempt connection with slave: retry[0]
+W (5738) H_SDIO_DRV: Reset slave using GPIO[54]
+I (5748) os_wrapper_esp: GPIO [54] configured
+I (5748) gpio: GPIO[54]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
+I (7278) sdio_wrapper: SDIO master: Slot 1, Data-Lines: 4-bit Freq(KHz)[10000 KHz]
+I (7278) sdio_wrapper: GPIOs: CLK[18] CMD[19] D0[14] D1[15] D2[16] D3[17] Slave_Reset[54]
+I (7278) sdio_wrapper: Queues: Tx[20] Rx[20] SDIO-Rx-Mode[3]
+I (7308) gpio: GPIO[15]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (7308) gpio: GPIO[17]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0
+I (7308) sdio_wrapper: Function 0 Blocksize: 512
+I (7318) sdio_wrapper: Function 1 Blocksize: 512
+I (7418) H_SDIO_DRV: Card init success, TRANSPORT_RX_ACTIVE
+I (7418) transport: set_transport_state: 1
+I (7418) transport: Waiting for esp_hosted slave to be ready
+I (7468) H_SDIO_DRV: Starting SDIO process rx task
+I (7468) H_SDIO_DRV: SDIO Host operating in PACKET MODE
+I (7468) H_SDIO_DRV: Open data path at slave
+
+Done
+
+C:\Users\user\Documents\projects\SmartAttendance>

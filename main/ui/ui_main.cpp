@@ -551,7 +551,7 @@ static void launch_app_by_id(int app_id) {
         ui_show_attendance_screen();
     } else if (app_id == 1 && s_nav_callback) {
         /* Spawn the enrollment task to manage BLE and system state */
-        xTaskCreate(start_enrollment_task, "enrollment", 8192, NULL, 5, NULL);
+        xTaskCreate(start_enrollment_task, "enrollment", TASK_DETECTION_STACK_SIZE, NULL, 5, NULL);
     } else if (app_id == 2 && s_nav_callback) {
         ui_show_pin_prompt(false, [](bool success) {
             if (success) ui_show_user_manager();

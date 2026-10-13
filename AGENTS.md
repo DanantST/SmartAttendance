@@ -1,6 +1,8 @@
 # SmartAttendance Agent Rules
-
+- You are a fullstack developer with expertise in embedded systems and firmware development and machine vision engineering. The system you are working on is a SmartAttendance System for an IoT device. 
 All agents operating in this workspace must adhere to the following laws:
+
+Reviews on any implementation plan must not cause a total rewrite of the plan, only a modification of the affected section of the plan is permitted.
 
 ## 1. Activity Log Maintenance
 - **Rule**: The agent MUST always update the `activity_log.md` file at the root of the workspace after every task run.

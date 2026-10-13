@@ -162,7 +162,7 @@ void *hosted_thread_create(const char *tname, uint32_t tprio, uint32_t tstack_si
 		return NULL;
 	}
 
-#if H_DFLT_TASK_FROM_SPIRAM
+#if 0 && H_DFLT_TASK_FROM_SPIRAM
 	StaticTask_t *task_buffer = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL);
 	if (!task_buffer) {
 		ESP_LOGE(TAG, "Failed to allocate task buffer");

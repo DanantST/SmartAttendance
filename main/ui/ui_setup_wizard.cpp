@@ -155,7 +155,7 @@ static lv_obj_t* s_admin_next_btn = NULL;
 static void admin_enroll_event_handler(lv_event_t* e) {
     g_wizard_admin_enrolled = false;  /* clear any stale flag */
     strncpy((char*)g_enrollment_role_override, "admin", sizeof(g_enrollment_role_override) - 1);
-    xTaskCreate(start_enrollment_task, "enrollment", 8192, NULL, 5, NULL);
+    xTaskCreate(start_enrollment_task, "enrollment", TASK_DETECTION_STACK_SIZE, NULL, 5, NULL);
 
     /* Disable "Next" until enrollment task signals completion */
     if (s_admin_next_btn) {
