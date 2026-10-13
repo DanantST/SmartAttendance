@@ -34,6 +34,7 @@ idf_component_register(SRCS
     ui/ui_admin_setup.cpp
     ui/ui_user_manager.cpp
     ui/ui_theme.cpp
+    ui/ui_firmware_mgr.cpp
     ble/ble_registration.c
     network/wifi_manager.c
     network/wifi_ap_portal.cpp

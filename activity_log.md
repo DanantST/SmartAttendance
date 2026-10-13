@@ -2953,5 +2953,59 @@ feat(rtc,power): add DS1302 RTC driver for boot timekeeping and fix battery-drai
 #### Commit
 fix(boot): resolve ESP32-P4 FreeRTOS TCM stack assert and ESP-Hosted SPIRAM task allocation
 
+---
+
+## Session - 2026-10-13 - Safe SD-Buffered OTA Updates & Multi-Version Firmware Rollback
+
+### User Request
+> I want a feature whereby, users can rollback to a specific version. For OTA updates, the device will alert the user that an update is available "download update" to sdcard. This should prevent errors that can occur from unstable internet connection when the device first downloads update to sd card before loading the binary. This should also allow the user to be able to rollback the firmware state to any of the previous firmware versions.
+
+### Implementation
+> 1. Enabled ESP-IDF dual-partition application rollback support (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` and `CONFIG_APP_ROLLBACK_ENABLE=y`) in `sdkconfig` to guarantee bootloader-level automatic reversion if a freshly flashed firmware ever crashes on boot.
+> 2. Implemented `main/network/ota_manager.h` and `main/network/ota_manager.c`:
+>    - Designed a safe two-stage update pipeline: downloads remote binaries over HTTPS/HTTP directly to `/sdcard/firmware/<name>.bin.tmp`, validates the 32-byte `esp_app_desc_t` header (`0xABCD5432` magic word, project name, version, and SHA-256), and renames the file upon successful validation.
+>    - Built local SD-card firmware scanner `ota_manager_list_sd_firmwares()` to discover all valid archived `.bin` builds in `/sdcard/firmware/`, extracting app version, project name, compile date/time, and file size in real-time.
+>    - Built asynchronous local flasher `ota_manager_flash_from_sd_async()` streaming from SD card into the inactive standby OTA slot (`ota_0` or `ota_1`) via 32 KB chunked buffers, reporting percentage and status, setting the new active boot slot, and rebooting automatically.
+> 3. Implemented a rich UI dashboard in `main/ui/ui_firmware_mgr.h` and `main/ui/ui_firmware_mgr.cpp`:
+>    - Top Header Bar with Settings return navigation and SD card rescan trigger.
+>    - Left Card: Active Running System status displaying active app version, active partition slot label, build timestamp, and Bootloader Self-Healing auto-rollback protection status badge.
+>    - Cloud OTA Buffer Card with a direct "Download from Server" button that stages updates to the SD card first to eliminate flash bricking risks from unstable Wi-Fi.
+>    - Right Card: Discovered SD Card Archived Firmwares (`/sdcard/firmware`) list showing each build with filename, version, size, compile timestamp, a `[CURRENT ACTIVE]` badge for the running partition, and `[Rollback / Install]` buttons for older/newer builds.
+>    - Modal confirmation dialog displaying target build details before flashing with cancel and proceed actions.
+>    - Thread-safe modal progress bar and status overlay (`lv_bar`) tracking chunk flashing progress in real-time.
+> 4. Integrated the "Firmware & Updates" screen into the Device Management section in `main/ui/ui_settings.cpp`.
+> 5. Added `esp_ota_mark_app_valid_cancel_rollback()` and `ota_manager_init()` into `main/main.c` on startup.
+> 6. Compiled, flashed to CrowPanel ESP32-P4 on COM3 at 460800 baud, and verified through serial monitor logs: dual-core boot, GT911 touch, EK79007 display, DS1302 time sync, SD card mount, and Wi-Fi connection running cleanly.
+
+#### Feature Overview
+- **Safe SD-Card Buffered OTA**: Network updates buffer to SD storage before touching flash partitions, preventing half-flashed bricks from network loss.
+- **Multi-Version Rollback UI**: Users can inspect all archived `.bin` firmwares on the SD card and switch or roll back to any past version with one tap.
+- **Hardware-Level Auto-Rollback**: Bootloader self-healing ensures failed updates automatically revert to the previous working slot without needing a USB cable.
+
+**`sdkconfig`** changes:
+- Enabled `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` and `CONFIG_APP_ROLLBACK_ENABLE=y`.
+
+**`main/CMakeLists.txt`** changes:
+- Registered `network/ota_manager.c` and `ui/ui_firmware_mgr.cpp`.
+
+**`main/database/db_manager.c`** changes:
+- Created `/sdcard/firmware` directory during storage initialization.
+
+**`main/main.c`** changes:
+- Added `#include "network/ota_manager.h"` and calls to `esp_ota_mark_app_valid_cancel_rollback()` and `ota_manager_init()`.
+
+**`main/network/ota_manager.h` & `main/network/ota_manager.c`** changes:
+- New OTA subsystem providing header parsing, SD archive enumeration, asynchronous SD buffering, and standby slot flashing.
+
+**`main/ui/ui_firmware_mgr.h` & `main/ui/ui_firmware_mgr.cpp`** changes:
+- New firmware management screen with running system overview, SD card build list, cloud download, rollback confirmation, and progress modals.
+
+**`main/ui/ui_settings.cpp`** changes:
+- Added "Firmware & Updates" navigation button under Device Management card.
+
+#### Commit
+feat(ota): implement SD-buffered OTA update pipeline and multi-version firmware rollback UI
+
+
 
 

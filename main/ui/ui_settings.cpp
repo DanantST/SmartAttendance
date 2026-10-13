@@ -15,6 +15,7 @@
 #include "database/db_manager.h"
 #include "ui_user_manager.h"
 #include "ui_admin_setup.h"
+#include "ui_firmware_mgr.h"
 #include <cstring>
 
 /* C function declarations */
@@ -388,6 +389,13 @@ static void create_settings_screen(void) {
     lv_obj_set_pos(s_factory_reset_btn, 15, 95);
     lv_obj_set_style_bg_color(s_factory_reset_btn, lv_color_hex(0xCC3333), 0);
     lv_obj_add_event_cb(s_factory_reset_btn, factory_reset_btn_event, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t* firmware_btn = ui_create_button(device_card, "Firmware & Updates", 200, 40);
+    lv_obj_set_pos(firmware_btn, 210, 95);
+    lv_obj_set_style_bg_color(firmware_btn, lv_color_hex(0x10B981), 0);
+    lv_obj_add_event_cb(firmware_btn, [](lv_event_t* e) {
+        ui_show_firmware_mgr_screen();
+    }, LV_EVENT_CLICKED, NULL);
     
     /* About section */
     lv_obj_t* about_card = ui_create_card(content, DISPLAY_WIDTH - 40, 120);

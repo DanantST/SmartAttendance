@@ -158,6 +158,7 @@ esp_err_t db_manager_init(void) {
     mkdir("/sdcard/models", 0777);
     mkdir("/sdcard/models/p4", 0777);
     mkdir("/sdcard/users", 0777);
+    mkdir("/sdcard/firmware", 0777);
     ESP_LOGI(TAG, "Standard SD card directories verified/created");
 
     /* Seed default courses if the table is empty */
