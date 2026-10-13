@@ -20,9 +20,15 @@
 
 #define IDLE_TIMEOUT_US (5 * 60 * 1000 * 1000LL) // 5 minutes
 static int64_t s_last_activity_time = 0;
+static bool s_screen_dimmed = false;
 
 void battery_monitor_update_activity(void) {
     s_last_activity_time = esp_timer_get_time();
+    if (s_screen_dimmed) {
+        s_screen_dimmed = false;
+        board_backlight_set(ui_get_brightness());
+        ESP_LOGI("BATTERY", "User activity detected: restoring backlight");
+    }
 }
 
 static const char* TAG = "BATTERY";
@@ -280,18 +286,10 @@ void battery_monitor_check_idle_sleep(void) {
         return;
     }
     
-    if (esp_timer_get_time() - s_last_activity_time > IDLE_TIMEOUT_US) {
-        ESP_LOGI(TAG, "System idle for 5 minutes. Entering light sleep...");
-        
+    if (!s_screen_dimmed && (esp_timer_get_time() - s_last_activity_time > IDLE_TIMEOUT_US)) {
+        ESP_LOGI(TAG, "System idle for 5 minutes: blanking backlight to save battery (tap screen to wake)");
         board_backlight_set(0);
-        
-        esp_sleep_enable_ext1_wakeup(1ULL << TOUCH_INT_PIN, ESP_EXT1_WAKEUP_ANY_LOW);
-        
-        esp_light_sleep_start();
-        
-        board_backlight_set(ui_get_brightness());
-        
-        battery_monitor_update_activity();
+        s_screen_dimmed = true;
     }
 }
 

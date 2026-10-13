@@ -17,6 +17,7 @@
 #include "network/ota_manager.h"
 #include "recognition/recognizer.h"
 #include "config.h"
+#include "rtc/ds1302.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -360,6 +361,9 @@ static esp_err_t http_request(const char* url, const char* method,
                     struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
                     settimeofday(&tv, NULL);
                     ESP_LOGI(TAG, "Synchronized system time from HTTP Date header: %s (epoch %lld)", date_val, (long long)t);
+#if ENABLE_DS1302_RTC
+                    ds1302_save_system_time();
+#endif
                 }
             }
         }

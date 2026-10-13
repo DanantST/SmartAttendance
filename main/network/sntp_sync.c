@@ -4,6 +4,8 @@
  */
 
 #include "network/sntp_sync.h"
+#include "config.h"
+#include "rtc/ds1302.h"
 #include "esp_log.h"
 #include "esp_sntp.h"
 #include "esp_netif_sntp.h"
@@ -27,6 +29,9 @@ static void sntp_sync_notification_cb(struct timeval *tv) {
     /* Only accept plausible timestamps (after 2024-01-01 00:00:00 UTC) */
     if (tv->tv_sec > 1704067200) {
         s_time_synced = true;
+#if ENABLE_DS1302_RTC
+        ds1302_save_system_time();
+#endif
     }
 
     char strftime_buf[64];

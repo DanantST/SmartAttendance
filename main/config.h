@@ -133,6 +133,12 @@ extern "C" {
 #define BATTERY_CALIB_LOGGING           0
 #define BATTERY_CALIB_INTERVAL_TICKS    2    /* 2 × 10s = 20s normal sample rate */
 
+/* ==================== External RTC (DS1302) ==================== */
+#define ENABLE_DS1302_RTC               1
+#define DS1302_PIN_CLK                  GPIO_NUM_51  /* Serial Clock (J7 Header IO51) */
+#define DS1302_PIN_DAT                  GPIO_NUM_50  /* Bidirectional Data (J7 Header IO50) */
+#define DS1302_PIN_CE                   GPIO_NUM_49  /* Chip Enable / RST (J7 Header IO49) */
+
 
 /* ==================== UI Configuration ==================== */
 #define DISPLAY_WIDTH               1024

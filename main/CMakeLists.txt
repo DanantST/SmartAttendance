@@ -40,6 +40,7 @@ idf_component_register(SRCS
     network/cloud_sync.c
     network/sntp_sync.c
     power/battery_monitor.c
+    rtc/ds1302.c
     utils/queue_manager.c
     network/ota_manager.c
     INCLUDE_DIRS
@@ -55,6 +56,7 @@ idf_component_register(SRCS
     ble
     network
     power
+    rtc
     utils
     ota
     REQUIRES

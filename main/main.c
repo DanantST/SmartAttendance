@@ -45,6 +45,7 @@
 #include "network/wifi_manager.h"
 #include "network/cloud_sync.h"
 #include "network/sntp_sync.h"
+#include "rtc/ds1302.h"
 #include "esp_task_wdt.h"
 #include <math.h>
 #include <time.h>
@@ -392,6 +393,13 @@ void app_main(void) {
     ESP_LOGI(TAG, "UI initialized (boot screen active)");
 
     ui_update_boot_status("Preparing system...", 5);
+
+#if ENABLE_DS1302_RTC
+    ui_update_boot_status("Reading RTC time...", 8);
+    if (ds1302_init() == ESP_OK) {
+        ds1302_sync_system_time();
+    }
+#endif
 
     /* Create state mutex (Issue 3.8) */
     g_state_mutex = xSemaphoreCreateMutex();

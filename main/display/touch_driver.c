@@ -24,6 +24,7 @@
 
 #include "display/touch_driver.h"
 #include "boards/elecrow_p4_board.h"
+#include "power/battery_monitor.h"
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_check.h"
@@ -92,6 +93,7 @@ static void touch_poll_task(void *arg)
                         s_touch_state.x       = (int32_t)pt.x;
                         s_touch_state.y       = (int32_t)pt.y;
                         s_touch_state.pressed = true;
+                        battery_monitor_update_activity();
                     } else {
                         s_touch_state.pressed = false;
                     }

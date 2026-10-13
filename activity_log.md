@@ -2869,3 +2869,50 @@ feat(power,storage): add battery calibration CSV data logger with PLUG_IN/PLUG_O
 #### Commit
 feat(power): implement calibrated battery lookup table and charging voltage compensation
 
+---
+
+## Session - 2026-10-13 - DS1302 RTC Driver & Idle Battery Protection
+
+### User Request
+> I want to add DS1302 rtc module for consistent timekeeping especially for boot up phases. I noticed that the device never truly shuts down though the screen would be off but constantly drains battery and makes the battery swell. to wake it up from the assumed sleep state, i have to manually switch off the device with the onboard slide switch and switch it on again. The only pain point is the effect on the battery that I have to slide the switch off to prevent battery drainage and damage which will in turn prevent the device from waking up at the preset intervals.
+
+### Implementation
+> 1. Analyzed board schematics (`v1.0.sch`/`.brd`) and identified expansion header `J7` pins `IO51` (CLK), `IO50` (DAT), `IO49` (CE/RST) along with `3V3` and `GND` as completely unconflicted GPIOs for the DS1302 RTC module.
+> 2. Implemented dedicated bit-banged 3-wire driver `main/rtc/ds1302.c` and `main/rtc/ds1302.h` with mutex protection, BCD conversion, write-protect toggling, clock-halt (CH) auto-start, and burst reads.
+> 3. Integrated DS1302 boot synchronization into `app_main()` in `main/main.c`, immediately synchronizing the POSIX system clock (`settimeofday()`) prior to subsystem initialization and logging.
+> 4. Connected network time sync in `network/sntp_sync.c` and `network/cloud_sync.c` to automatically persist network time to the DS1302 upon successful synchronization.
+> 5. Diagnosed and fixed the battery drain/freeze bug: `battery_monitor_check_idle_sleep()` was executing `esp_light_sleep_start()` without peripheral shutdown, leaving high-power MIPI-DSI, MIPI-CSI, and 200MHz PSRAM drawing ~250mA continuously with non-functioning touch wakeup. Replaced the routine with non-blocking backlight blanking, and wired `touch_poll_task()` in `main/display/touch_driver.c` to report activity and immediately restore backlight on touch.
+> 6. Compiled firmware with 0 errors and flashed to the device on COM3.
+
+#### Feature Overview
+- **DS1302 RTC Driver**: Complete 3-wire bit-banged SPI-like implementation for ESP32-P4 on pins GPIO51 (CLK), GPIO50 (DAT), and GPIO49 (CE).
+- **Offline Real-World Boot Time**: System time is restored within milliseconds of boot directly from the coin-cell battery-backed DS1302 without needing WiFi.
+- **Bi-directional Time Synchronization**: When SNTP or cloud HTTP Date headers arrive, valid timestamps are written to the DS1302 to maintain clock accuracy.
+- **Battery & Swelling Protection**: Eliminated the broken light sleep freeze. Idle timeout now safely blanks the display backlight, and any touch immediately restores it without freezing the core or killing the battery.
+
+**`main/rtc/ds1302.h` & `main/rtc/ds1302.c`**:
+- Implemented `ds1302_init()`, `ds1302_get_time()`, `ds1302_set_time()`, `ds1302_sync_system_time()`, and `ds1302_save_system_time()`.
+
+**`main/CMakeLists.txt`** changes:
+- Registered `rtc/ds1302.c` in `SRCS` and `rtc` in `INCLUDE_DIRS`.
+
+**`main/config.h`** changes:
+- Added `ENABLE_DS1302_RTC`, `DS1302_PIN_CLK` (GPIO51), `DS1302_PIN_DAT` (GPIO50), and `DS1302_PIN_CE` (GPIO49).
+
+**`main/main.c`** changes:
+- Added `#include "rtc/ds1302.h"`.
+- Added RTC initialization and boot time sync in `app_main()`.
+
+**`main/network/sntp_sync.c` & `main/network/cloud_sync.c`** changes:
+- Call `ds1302_save_system_time()` whenever network time is verified.
+
+**`main/power/battery_monitor.c`** changes:
+- Removed `esp_light_sleep_start()` freeze; implemented safe screen blanking on 5-minute idle timeout with automatic restore on activity.
+
+**`main/display/touch_driver.c`** changes:
+- Added `#include "power/battery_monitor.h"` and call `battery_monitor_update_activity()` on detected touch events.
+
+#### Commit
+feat(rtc,power): add DS1302 RTC driver for boot timekeeping and fix battery-draining idle sleep
+
+
