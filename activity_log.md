@@ -2837,3 +2837,35 @@ fix(wifi,storage): eliminate SDMMC bus contention and resolve ESP-Hosted SDIO co
 
 #### Commit
 feat(power,storage): add battery calibration CSV data logger with PLUG_IN/PLUG_OUT transition detection
+
+---
+
+## Session - 2026-10-13 - Battery Calibration LUT & Charging Compensation Implementation
+
+### User Request
+> Yes proceed (implement calibrated battery equations and lookup tables derived from harvested batt_calib.csv data)
+
+### Implementation
+> Derived a 44-point empirical discharge lookup table from 1,792 telemetry rows collected in `sdcard/logs/batt_calib.csv`. Implemented integer binary-search interpolation in `battery_monitor.c` mapping millivolts to true resting state-of-charge (0–100%). Added piecewise charging surface-charge voltage compensation (~220–255mV) to prevent artificial percentage jumps on plug/unplug transitions. Replaced the STC8 coprocessor's inaccurate internal percentage with the calibrated output in both `battery_monitor_get_percent()` and `battery_monitor_read_raw()`. Reverted `BATTERY_CALIB_LOGGING` to 0 for production, compiled firmware with 0 errors, and flashed to the device on COM3.
+
+#### Feature Overview
+- **Discharge Look-Up Table**: 44 monotonic breakpoints covering 3300mV (0%) up to 4060mV (100% resting open-circuit voltage measured after full charge). Linear interpolation between breakpoints via fast integer binary search.
+- **Charging Voltage Correction**: Subtracts ~220–255mV charging surface-charge inflation across the voltage range (and clamps `stc8_state == 2` to 100%), eliminating the sudden ~45% percentage drops previously observed upon unplugging USB power.
+- **Unified Telemetry**: `battery_monitor_read_raw()` and `battery_monitor_get_percent()` now return calibrated state-of-charge for UI and system events.
+- **Production Mode Revert**: `BATTERY_CALIB_LOGGING` set to 0 in `config.h`, compiling all CSV writer tasks and queues down to zero-overhead inline stubs.
+
+**`main/power/battery_monitor.c`** changes:
+- Added `discharge_lut[]` table with 44 empirically calibrated breakpoints.
+- Implemented `charging_voltage_correction()` to adjust for surface charge inflation when plugged in.
+- Implemented `battery_calibrated_percent()` performing monotonic binary search with linear interpolation.
+- Updated `battery_monitor_get_percent()` and `battery_monitor_read_raw()` to use `battery_calibrated_percent()`.
+
+**`main/config.h`** changes:
+- Reverted `BATTERY_CALIB_LOGGING` to `0` for production release.
+
+**`main/main.c`** changes:
+- Guarded `calib_tick` and `prev_stc8_state` with `#if BATTERY_CALIB_LOGGING` to prevent compiler warnings when logging is disabled.
+
+#### Commit
+feat(power): implement calibrated battery lookup table and charging voltage compensation
+

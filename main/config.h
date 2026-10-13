@@ -130,7 +130,7 @@ extern "C" {
 /* (BATTERY_CALIB_INTERVAL_TICKS × BATTERY_CHECK_INTERVAL_MS).           */
 /* BATTERY_CALIB_INTERVAL_TICKS=2 → 20 second sample interval.           */
 /* Compiles to zero overhead when set to 0. Revert before production.    */
-#define BATTERY_CALIB_LOGGING           1
+#define BATTERY_CALIB_LOGGING           0
 #define BATTERY_CALIB_INTERVAL_TICKS    2    /* 2 × 10s = 20s normal sample rate */
 
 

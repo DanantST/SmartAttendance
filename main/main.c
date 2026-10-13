@@ -1879,8 +1879,10 @@ static void schedule_checker_task(void *pvParameters) {
  * @brief Battery monitoring task
  */
 static void battery_task(void *pvParameters) {
+#if BATTERY_CALIB_LOGGING
     static uint8_t calib_tick    = 0;
     static uint8_t prev_stc8_state = 0xFF;  /* 0xFF = sentinel: no previous reading */
+#endif
 
     /* Write SESSION_START calibration marker on task start */
     sd_logger_write_batt_calib(
