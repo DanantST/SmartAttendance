@@ -3505,17 +3505,36 @@ fix(ota): resolve pre-sntp 1-hour clock offset and sd-card flashing watchdog sta
 #### Commit
 fix(ui): eliminate lv_sprintf float formatting crash in cloud catalog browser
 
+---
 
+## Session - 2026-10-14 - Fix Cloud Releases Catalog Vertical Layout and Overlapping Cards
 
+### User Request
+> It only discovered v1.1.0 and said it was already on sd card
+> Continue working
 
+### Implementation
+> 1. Investigated why "Browse Cloud Releases" modal only appeared to show `v1.1.0`:
+>    - Live cloud server (`https://danantst-smart-attendance-bot.hf.space/api/firmware/list`) correctly returns all 5 versions (`v1.1.4`, `v1.1.3`, `v1.1.2`, `v1.1.1`, `v1.1.0`).
+>    - The scrollable list container `list_box` in `show_cloud_catalog_modal()` was missing `lv_obj_set_flex_flow(list_box, LV_FLEX_FLOW_COLUMN);` and `lv_obj_set_style_pad_row(list_box, 8, 0);`.
+>    - In LVGL 9, without an explicit flex column layout, created cards default to `(0, 0)`. All 5 release cards were stacked directly on top of each other at `(0, 0)`.
+>    - Since `v1.1.0` was the last element parsed in the loop, it was rendered directly on top of `v1.1.1`–`v1.1.4`.
+> 2. Fixed layout and lifecycle:
+>    - Added `LV_FLEX_FLOW_COLUMN` and `pad_row` 8px to `list_box`.
+>    - Marked `spinner` and `status_lbl` as `LV_OBJ_FLAG_FLOATING` while query is in progress.
+>    - Deleted `spinner` and `status_lbl` upon catalog load so they do not take up space in the flex column.
+> 3. Recompiled firmware and flashed to board via USB on COM3. Updated binaries in `telegram_bot/firmware/`.
 
+#### Feature Overview
+- **Complete Scrollable Cloud Releases Catalog**: All versions (`v1.1.4` down to `v1.1.0`) are arranged vertically in a scrollable list with download buttons or SD card status indicators.
 
+**main/ui/ui_firmware_mgr.cpp** changes:
+- Configured `list_box` with `LV_FLEX_FLOW_COLUMN` and row padding.
+- Added `LV_OBJ_FLAG_FLOATING` to temporary loading widgets and deleted them on catalog completion.
 
+**telegram_bot/firmware/** changes:
+- Staged updated `SmartAttendance_v1.1.4.bin` and `latest.bin`.
 
-
-
-
-
-
-
+#### Commit
+fix(ui): enable flex column layout in cloud release catalog modal to prevent card overlap
 

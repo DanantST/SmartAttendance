@@ -369,7 +369,8 @@ static void fetch_cloud_catalog_worker_task(void *pvParam) {
                 lv_label_set_text(params->status_lbl, "Failed to initialize HTTP client");
             }
             if (params->spinner && lv_obj_is_valid(params->spinner)) {
-                lv_obj_add_flag(params->spinner, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_delete(params->spinner);
+                params->spinner = NULL;
             }
             ui_unlock();
         }
@@ -387,7 +388,8 @@ static void fetch_cloud_catalog_worker_task(void *pvParam) {
                 lv_label_set_text_fmt(params->status_lbl, "Failed to connect to server (%s)", esp_err_to_name(err));
             }
             if (params->spinner && lv_obj_is_valid(params->spinner)) {
-                lv_obj_add_flag(params->spinner, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_delete(params->spinner);
+                params->spinner = NULL;
             }
             ui_unlock();
         }
@@ -402,6 +404,16 @@ static void fetch_cloud_catalog_worker_task(void *pvParam) {
     if (!json_buf) {
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
+        if (ui_lock()) {
+            if (params->status_lbl && lv_obj_is_valid(params->status_lbl)) {
+                lv_label_set_text(params->status_lbl, "Out of memory reading catalog response");
+            }
+            if (params->spinner && lv_obj_is_valid(params->spinner)) {
+                lv_obj_delete(params->spinner);
+                params->spinner = NULL;
+            }
+            ui_unlock();
+        }
         free(params);
         vTaskDelete(NULL);
         return;
@@ -423,7 +435,8 @@ static void fetch_cloud_catalog_worker_task(void *pvParam) {
     if (ui_lock()) {
         if (params->modal && lv_obj_is_valid(params->modal)) {
             if (params->spinner && lv_obj_is_valid(params->spinner)) {
-                lv_obj_add_flag(params->spinner, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_delete(params->spinner);
+                params->spinner = NULL;
             }
 
             cJSON *firmwares = root ? cJSON_GetObjectItem(root, "firmwares") : NULL;
@@ -435,7 +448,8 @@ static void fetch_cloud_catalog_worker_task(void *pvParam) {
                 }
             } else {
                 if (params->status_lbl && lv_obj_is_valid(params->status_lbl)) {
-                    lv_obj_add_flag(params->status_lbl, LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_delete(params->status_lbl);
+                    params->status_lbl = NULL;
                 }
 
                 for (int i = 0; i < count; i++) {
@@ -611,16 +625,20 @@ static void show_cloud_catalog_modal(void) {
     lv_obj_set_style_border_width(list_box, 1, 0);
     lv_obj_set_style_radius(list_box, 10, 0);
     lv_obj_set_style_pad_all(list_box, 10, 0);
+    lv_obj_set_flex_flow(list_box, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(list_box, 8, 0);
     lv_obj_set_scroll_dir(list_box, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list_box, LV_SCROLLBAR_MODE_AUTO);
 
     /* Loading Spinner */
     lv_obj_t *spinner = lv_spinner_create(list_box);
+    lv_obj_add_flag(spinner, LV_OBJ_FLAG_FLOATING);
     lv_obj_set_size(spinner, 40, 40);
     lv_obj_center(spinner);
     lv_obj_set_style_arc_color(spinner, lv_color_hex(0x3B82F6), LV_PART_INDICATOR);
 
     lv_obj_t *status_lbl = lv_label_create(list_box);
+    lv_obj_add_flag(status_lbl, LV_OBJ_FLAG_FLOATING);
     lv_label_set_text(status_lbl, "Querying releases catalog from cloud server...");
     lv_obj_set_style_text_color(status_lbl, lv_color_hex(0x94A3B8), 0);
     lv_obj_set_style_text_font(status_lbl, &lv_font_montserrat_14, 0);
