@@ -793,6 +793,25 @@ static void detection_recognition_task(void *pvParameters) {
             continue;
         }
 
+        /* Reject frames with harsh specular glare (e.g. saturated highlights / flash reflection) */
+        float this_glare = face_detector_compute_glare_ratio(&frame.fb, face);
+        if (this_glare > SCAN_GLARE_RATIO_MAX) {
+            ESP_LOGD(TAG, "Quality gate: glare detected (%.1f%% > %.1f%%), skipping frame",
+                     this_glare * 100.0f, SCAN_GLARE_RATIO_MAX * 100.0f);
+            camera_return_frame(&frame.fb);
+            continue;
+        }
+
+        /* Reject frames with wide mouth opening / jaw drop (e.g. laughing, talking, yawning)
+         * to prevent teeth specular reflection and lower-face distortion from corrupting recognition */
+        float this_mouth_ratio = face_detector_compute_mouth_ratio(face);
+        if (this_mouth_ratio > SCAN_MOUTH_RATIO_MAX) {
+            ESP_LOGD(TAG, "Quality gate: mouth open/jaw drop detected (ratio=%.2f > %.2f), skipping frame",
+                     this_mouth_ratio, SCAN_MOUTH_RATIO_MAX);
+            camera_return_frame(&frame.fb);
+            continue;
+        }
+
         int64_t now_ms = esp_timer_get_time() / 1000LL;
 
         /* -------------------------------------------------------------------
@@ -1239,6 +1258,26 @@ static esp_err_t process_enrollment_frames_for_user(user_t* new_user) {
         float sharpness = face_detector_compute_sharpness(fb, face);
         float brightness = face_detector_compute_brightness(fb, face);
         float yaw = face_detector_compute_yaw(face);
+        float glare = face_detector_compute_glare_ratio(fb, face);
+        float mouth_ratio = face_detector_compute_mouth_ratio(face);
+
+        if (sharpness < ENROLL_SHARPNESS_MIN || brightness < ENROLL_BRIGHTNESS_MIN || brightness > ENROLL_BRIGHTNESS_MAX ||
+            fabsf(yaw) > ENROLL_YAW_MAX_DEG || glare > SCAN_GLARE_RATIO_MAX || mouth_ratio > SCAN_MOUTH_RATIO_MAX) {
+            camera_return_frame(fb);
+            rejected_count++;
+            if (ui_acquire()) {
+                if (mouth_ratio > SCAN_MOUTH_RATIO_MAX) {
+                    ui_show_pose_guidance("Please close mouth / relax face");
+                } else if (glare > SCAN_GLARE_RATIO_MAX) {
+                    ui_show_pose_guidance("Too much glare / direct light");
+                } else if (sharpness < ENROLL_SHARPNESS_MIN) {
+                    ui_show_pose_guidance("Hold still (image blurry)");
+                }
+                ui_release();
+            }
+            vTaskDelay(pdMS_TO_TICKS(30));
+            continue;
+        }
 
         if (ui_acquire()) {
             ui_enrollment_set_face_detected(true);

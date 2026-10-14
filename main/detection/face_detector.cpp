@@ -173,3 +173,52 @@ float face_detector_compute_yaw(detected_face_t *face) {
     float deviation = (nose_x - mid_x) / eye_dist;
     return deviation * 90.0f;
 }
+
+float face_detector_compute_glare_ratio(camera_fb_t *fb, detected_face_t *face) {
+    if (!fb || !fb->buf || !face) return 0.0f;
+    int glare_count = 0;
+    int valid_pixel_count = 0;
+    uint16_t *pixels = (uint16_t *)fb->buf;
+
+    /* Subsample every 2nd pixel horizontally and vertically for minimal CPU overhead */
+    for (int y = 0; y < face->h; y += 2) {
+        int py = face->y + y;
+        if (py < 0 || py >= fb->height) continue;
+        int row_offset = py * fb->width;
+        for (int x = 0; x < face->w; x += 2) {
+            int px = face->x + x;
+            if (px < 0 || px >= fb->width) continue;
+            uint16_t p = pixels[row_offset + px];
+            uint8_t r = (p >> 11) & 0x1F;
+            uint8_t g = (p >> 5) & 0x3F;
+            uint8_t b = p & 0x1F;
+            int luma = (r * 8 * 299 + g * 4 * 587 + b * 8 * 114) / 1000;
+            if (luma > 240) glare_count++;
+            valid_pixel_count++;
+        }
+    }
+    if (valid_pixel_count <= 0) return 0.0f;
+    return (float)glare_count / (float)valid_pixel_count;
+}
+
+float face_detector_compute_mouth_ratio(detected_face_t *face) {
+    if (!face) return 0.0f;
+    /* Landmarks in ESP-DL order:
+     * 0,1: Left Eye; 2,3: Left Mouth; 4,5: Nose; 6,7: Right Eye; 8,9: Right Mouth */
+    float left_eye_x   = face->landmarks[0];
+    float left_eye_y   = face->landmarks[1];
+    float left_mouth_y = face->landmarks[3];
+    float nose_y       = face->landmarks[5];
+    float right_eye_x  = face->landmarks[6];
+    float right_eye_y  = face->landmarks[7];
+    float right_mouth_y= face->landmarks[9];
+
+    float dx = right_eye_x - left_eye_x;
+    float dy = right_eye_y - left_eye_y;
+    float eye_dist = sqrtf(dx * dx + dy * dy);
+    if (eye_dist < 10.0f) return 0.60f; /* Fallback for tiny/degenerate boxes */
+
+    float mouth_mid_y = (left_mouth_y + right_mouth_y) * 0.5f;
+    float nose_to_mouth = mouth_mid_y - nose_y;
+    return nose_to_mouth / eye_dist;
+}

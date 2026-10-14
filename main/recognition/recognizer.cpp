@@ -112,10 +112,14 @@ esp_err_t recognizer_identify(face_embedding_t *query, user_t **user, float *con
              margin, RECOGNITION_THRESHOLD);
 
     bool pass = false;
-    if (best_sim >= RECOGNITION_HIGH_CONF_THRESHOLD) {
-        pass = (margin >= RECOGNITION_MARGIN_HIGH);
-    } else if (best_sim >= RECOGNITION_THRESHOLD) {
-        pass = (margin >= RECOGNITION_MARGIN_MIN);
+    if (best_idx >= 0) {
+        if (best_sim >= RECOGNITION_HIGH_CONF_THRESHOLD) {
+            pass = (margin >= RECOGNITION_MARGIN_HIGH);
+        } else if (best_sim >= RECOGNITION_MID_CONF_THRESHOLD) {
+            pass = (margin >= RECOGNITION_MARGIN_MIN);
+        } else if (best_sim >= RECOGNITION_THRESHOLD) {
+            pass = (margin >= RECOGNITION_MARGIN_LOW);
+        }
     }
 
     if (pass && best_idx >= 0) {
@@ -374,11 +378,18 @@ esp_err_t recognizer_identify_multiframe(
                  vote_counts[winner_t], N_inlier,
                  runner_up ? runner_up->name : "None", runner_up_sim, margin);
 
+        /* The consensus winner MUST be candidate 0 (the Top-1 candidate by fused centroid).
+         * If the inlier voting selects a candidate other than the fused Top-1, the query is
+         * inherently in conflict/ambiguity and must not pass. */
         bool pass = false;
-        if (s_fused_winner >= RECOGNITION_HIGH_CONF_THRESHOLD) {
-            pass = (margin >= RECOGNITION_MARGIN_HIGH);
-        } else if (s_fused_winner >= RECOGNITION_THRESHOLD) {
-            pass = (margin >= RECOGNITION_MARGIN_MIN);
+        if (winner_t == 0 && margin > 0.0f) {
+            if (s_fused_winner >= RECOGNITION_HIGH_CONF_THRESHOLD) {
+                pass = (margin >= RECOGNITION_MARGIN_HIGH);
+            } else if (s_fused_winner >= RECOGNITION_MID_CONF_THRESHOLD) {
+                pass = (margin >= RECOGNITION_MARGIN_MIN);
+            } else if (s_fused_winner >= RECOGNITION_THRESHOLD) {
+                pass = (margin >= RECOGNITION_MARGIN_LOW);
+            }
         }
 
         if (pass) {

@@ -56,10 +56,12 @@ extern "C" {
 /* ==================== Face Recognition Configuration ==================== */
 #define FACE_ALIGN_SIZE             112              // 112x112 aligned face
 #define EMBEDDING_DIM               128              // 128-dimensional embedding
-#define RECOGNITION_THRESHOLD       0.70f            // Cosine similarity threshold for fused query (raised from 0.65f)
+#define RECOGNITION_THRESHOLD       0.70f            // Cosine similarity threshold for fused query
+#define RECOGNITION_MID_CONF_THRESHOLD  0.74f        // Mid-confidence threshold
 #define RECOGNITION_HIGH_CONF_THRESHOLD 0.78f        // High-confidence threshold where margin requirement is relaxed
-#define RECOGNITION_MARGIN_MIN      0.06f            // Minimum separation between Top-1 and Top-2 candidate (prevents lookalike confusion)
-#define RECOGNITION_MARGIN_HIGH     0.03f            // Minimum separation when S >= RECOGNITION_HIGH_CONF_THRESHOLD
+#define RECOGNITION_MARGIN_LOW      0.08f            // Separation required when S in [0.70, 0.74) to prevent cross-identity collision
+#define RECOGNITION_MARGIN_MIN      0.05f            // Separation required when S in [0.74, 0.78)
+#define RECOGNITION_MARGIN_HIGH     0.03f            // Separation required when S >= RECOGNITION_HIGH_CONF_THRESHOLD
 #define EMBEDDING_CACHE_SIZE        500              // Max cached users
 
 /* Face detection thresholds */
@@ -68,6 +70,8 @@ extern "C" {
 #define SCAN_SHARPNESS_MIN          10.0f            // Minimum sharpness to accept frame into scan window
 #define SCAN_BRIGHTNESS_MIN         25.0f            // Min average luminance for scan frame
 #define SCAN_BRIGHTNESS_MAX         230.0f           // Max average luminance for scan frame
+#define SCAN_GLARE_RATIO_MAX        0.08f            // Max fraction of pixels with luma > 240 (glare/overexposure)
+#define SCAN_MOUTH_RATIO_MAX        0.82f            // Max mouth vertical elongation ratio (drops open-mouth/jaw-drop frames)
 
 /* Multi-frame enrollment */
 #define ENROLL_FRAMES_TOTAL         30               // Total frames to capture

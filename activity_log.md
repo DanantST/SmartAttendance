@@ -3608,5 +3608,60 @@ feat(recog): implement top-1 vs top-2 margin gate, 4x4 tile clahe, and quality g
 #### Commit
 docs: record field verification for face recognition overhaul under varying light and facial hair
 
+---
+
+## Session - 2026-10-14 - Illumination Mismatch Mitigation, Open-Mouth & Glare Gating, Tiered Margin Gates
+
+### User Request
+> There is a new development. It was observed that in significant amount of light, when Adesare Adegbagi opened his mouth, he was Identified as Solomon Israel consecutively before returning to a low light environment.
+> We recall that Solomon Israel enrolled in a brightly lit environment while Adesare Adegbagi enrolled in a fairly iluminated environment
+
+### Implementation
+> 1. Root Cause & Database Analysis:
+>    - Analyzed the enrolled embedding database (`attendance.db`). Empirical cosine similarity between Adesare Adegbagi (User 22) and Solomon Israel (User 24) is **0.6495** — the highest cross-identity baseline similarity across the entire database.
+>    - Identified that both templates were enrolled prior to the introduction of the CLAHE normalization pipeline. Solomon enrolled under bright illumination (high specular/teeth contrast baked into embedding), while Adesare enrolled under dim illumination.
+>    - When Adesare enters a bright environment and opens his mouth, exposed teeth and specular skin reflections align his live embedding with Solomon's bright enrollment template ($S \sim 0.707$), while his similarity to his own dim/closed template falls to $\sim 0.65-0.68$.
+> 2. Algorithmic & Consensus Protections:
+>    - Enforced that the multi-frame consensus winner must strictly be candidate 0 (the primary Top-1 fused centroid candidate) with positive margin.
+>    - Implemented a 3-tiered dynamic margin gate:
+>      - $S \in [0.70, 0.74)$: requires margin $\ge 0.08$ (`RECOGNITION_MARGIN_LOW`) to prevent identity swapping between closely aligned profiles.
+>      - $S \in [0.74, 0.78)$: requires margin $\ge 0.05$ (`RECOGNITION_MARGIN_MIN`).
+>      - $S \ge 0.78$: requires margin $\ge 0.03$ (`RECOGNITION_MARGIN_HIGH`).
+>    - Implemented specular glare gating in `face_detector_compute_glare_ratio`: frames with $> 8\%$ pixels saturated ($Y > 240$) are dropped.
+>    - Implemented mouth opening / jaw-drop gating in `face_detector_compute_mouth_ratio`: frames where $\frac{Y_{\text{mouth}} - Y_{\text{nose}}}{\text{eye\_dist}} > 0.82$ are rejected during scan window accumulation and enrollment.
+> 3. Embedded Hardware Verification:
+>    - Compiled and successfully flashed the updated firmware to the ESP32-P4 board on COM3.
+>    - Verified bootloader and system start up cleanly with serial telemetry active.
+
+#### Feature Overview
+- **Glare & Specular Highlight Filter**: Subsampled $O(N/4)$ detection of overexposed skin/teeth highlights ($Y > 240$) preventing flash/sun distortion.
+- **Mouth-Opening / Facial Deformation Gate**: Landmark geometric ratio gating filtering out laughing/talking/yawning frames.
+- **Tiered Dynamic Margin Gate**: Strict separation requirements ($\Delta S \ge 0.08$) for borderline similarity scores preventing cross-identity collisions.
+- **Consensus Inversion Elimination**: Required consensus winner to strictly agree with fused centroid Top-1.
+
+**main/config.h** changes:
+- Defined `RECOGNITION_MID_CONF_THRESHOLD` (0.74f), `RECOGNITION_MARGIN_LOW` (0.08f), `SCAN_GLARE_RATIO_MAX` (0.08f), and `SCAN_MOUTH_RATIO_MAX` (0.82f).
+
+**main/detection/face_detector.h** changes:
+- Declared `face_detector_compute_glare_ratio` and `face_detector_compute_mouth_ratio`.
+
+**main/detection/face_detector.cpp** changes:
+- Implemented `face_detector_compute_glare_ratio` using subsampled 16-bit RGB565 luminance parsing.
+- Implemented `face_detector_compute_mouth_ratio` using landmark geometry.
+
+**main/recognition/recognizer.cpp** changes:
+- Updated `recognizer_identify` with tiered margin checks.
+- Updated `recognizer_identify_multiframe` to enforce `winner_t == 0` and tiered margin gating.
+
+**main/main.c** changes:
+- Added glare and mouth-opening quality gates to the live attendance scan loop.
+- Added glare and mouth-opening quality gates to the enrollment loop with UI guidance.
+
+**telegram_bot/firmware/** changes:
+- Staged updated `SmartAttendance_v1.1.4.bin` and `latest.bin`.
+
+#### Commit
+feat(recog): add glare filter, mouth-opening gate, and tiered margin protection against illumination mismatch
+
 
 

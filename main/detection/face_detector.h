@@ -60,6 +60,18 @@ float face_detector_compute_brightness(camera_fb_t *fb, detected_face_t *face);
  */
 float face_detector_compute_yaw(detected_face_t *face);
 
+/**
+ * @brief Estimate percentage of saturated/glare pixels in face bounding box
+ * @return fraction in range [0.0, 1.0] of pixels with luminance > 240
+ */
+float face_detector_compute_glare_ratio(camera_fb_t *fb, detected_face_t *face);
+
+/**
+ * @brief Estimate mouth opening ratio: (mouth_y - nose_y) / eye_dist
+ * Nominal closed mouth: ~0.50 - 0.70. Wide open / jaw drop: > 0.82.
+ */
+float face_detector_compute_mouth_ratio(detected_face_t *face);
+
 
 #ifdef __cplusplus
 }
