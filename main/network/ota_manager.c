@@ -504,10 +504,12 @@ static void flash_task(void *pvParam) {
     ESP_LOGI(TAG, "Writing to standby partition: %s (offset 0x%08" PRIx32 ", size 0x%08" PRIx32 ")",
              update_partition->label, update_partition->address, update_partition->size);
 
-    if (params->progress_cb) params->progress_cb(5, "Erasing target flash slot...");
+    if (params->progress_cb) params->progress_cb(5, "Preparing target flash slot...");
 
     esp_ota_handle_t ota_handle = 0;
-    esp_err_t err = esp_ota_begin(update_partition, file_size, &ota_handle);
+    /* Use OTA_SIZE_UNKNOWN so esp_ota_begin erases sectors incrementally during esp_ota_write,
+     * preventing huge synchronous blocking flash erase stalls that trigger task watchdogs */
+    esp_err_t err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &ota_handle);
     if (err != ESP_OK) {
         fclose(f);
         ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
@@ -518,9 +520,12 @@ static void flash_task(void *pvParam) {
         return;
     }
 
-    /* Allocate 32 KB chunk buffer */
+    /* Allocate 32 KB chunk buffer in SPIRAM or fallback to internal heap */
     const size_t CHUNK_SIZE = 32768;
-    uint8_t *chunk_buf = (uint8_t *)malloc(CHUNK_SIZE);
+    uint8_t *chunk_buf = (uint8_t *)heap_caps_malloc(CHUNK_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!chunk_buf) {
+        chunk_buf = (uint8_t *)malloc(CHUNK_SIZE);
+    }
     if (!chunk_buf) {
         esp_ota_abort(ota_handle);
         fclose(f);
@@ -563,6 +568,9 @@ static void flash_task(void *pvParam) {
                 params->progress_cb(pct, msg);
             }
         }
+
+        /* Cooperative yield to feed Task Watchdog (TWDT) and prevent starvation of UI/system tasks */
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 
     free(chunk_buf);

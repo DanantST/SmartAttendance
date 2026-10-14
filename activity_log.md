@@ -3428,6 +3428,56 @@ feat(ota): implement resilient resumable firmware downloads and PSRAM stream buf
 #### Commit
 feat(ota): add cloud releases catalog browser and sync contention guard (v1.1.4)
 
+---
+
+## Session - 2026-10-14 - Fix Pre-SNTP 1-Hour Time Offset & SD Card Flashing Watchdog Stall
+
+### User Request
+> the update flashing doesn't seem to work and the time is always 1 hour ahead before syncing with sntp time.
+> The device doesn't seem to flash itself with the update or rollback though it seems like it makes the attempt
+
+### Implementation
+> 1. Diagnosed Pre-SNTP 1-Hour Clock Offset:
+>    - `setenv("TZ", "WAT-1", 1)` was only called inside `sntp_sync_init()` after Wi-Fi established connection.
+>    - During boot, `ds1302_sync_system_time()` read WAT local time (e.g. 13:16) from the RTC chip, but `mktime()` evaluated it under UTC (since `TZ` was unset), setting the system epoch to 13:16 UTC.
+>    - Once Wi-Fi connected and set `TZ = "WAT-1"`, local time conversions added +1 hour to the UTC epoch, causing the clock to jump to 14:16 (1 hour ahead) until SNTP fetched network time.
+>    - **Fix**: Configured `setenv("TZ", "WAT-1", 1); tzset();` at the very beginning of `app_main` in `main.c` before any RTC reading or UI startup.
+> 2. Diagnosed SD Card Flashing Stall & Rollback Failure:
+>    - `esp_ota_begin(update_partition, file_size, ...)` synchronously erased the entire 6 MB partition in a blocking call, causing SPI flash controller locks.
+>    - `flash_task` wrote 32 KB blocks in a tight loop without cooperative yields, starving the Core 0 IDLE task and triggering Task Watchdog Timer (TWDT) resets midway through flashing. Because `esp_ota_set_boot_partition` was never reached before reset, the bootloader rebooted into the original partition.
+>    - `esp_ota_mark_app_valid_cancel_rollback()` was executed late in `app_main` (after ~20 subsystems initialized). Any long startup triggered the bootloader's auto-rollback mechanism (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`).
+>    - In `ui_firmware_mgr.cpp`, touch click callbacks were only attached to the small `action_btn` rather than the whole row card, causing taps in the card body to be ignored.
+>    - **Fixes**:
+>      - Used `OTA_SIZE_UNKNOWN` in `esp_ota_begin()` for incremental sector erase.
+>      - Allocated flash buffer from SPIRAM with internal heap fallback.
+>      - Added `vTaskDelay(pdMS_TO_TICKS(5))` cooperative yields inside the flash write loop.
+>      - Moved `esp_ota_mark_app_valid_cancel_rollback()` to execute early in `app_main` right after NVS initialization.
+>      - Made entire firmware row cards clickable and expanded confirmation modal dimensions.
+> 3. Recompiled firmware `v1.1.4` and re-staged `SmartAttendance_v1.1.4.bin` and `latest.bin`.
+
+#### Feature Overview
+- **Immediate Accurate Time on Boot**: Local time from DS1302 RTC is parsed under `WAT-1` from microsecond 1, eliminating the 1-hour jump before Wi-Fi/SNTP.
+- **Robust Flashing & Rollback**: Incremental flash erase, cooperative yields, and early rollback cancellation ensure firmware writes complete reliably and boot into the chosen slot.
+- **Responsive Firmware UI**: Tapping anywhere on a firmware row immediately opens the confirmation modal.
+
+**main/main.c** changes:
+- Set `TZ` environment variable early in `app_main`.
+- Moved `esp_ota_mark_app_valid_cancel_rollback()` to run early after NVS init.
+
+**main/network/ota_manager.c** changes:
+- Switched `esp_ota_begin` to incremental mode (`OTA_SIZE_UNKNOWN`).
+- Added SPIRAM buffer allocation and cooperative yield per chunk.
+
+**main/ui/ui_firmware_mgr.cpp** changes:
+- Made row cards clickable and increased confirm modal height.
+
+**telegram_bot/firmware/** changes:
+- Updated `SmartAttendance_v1.1.4.bin` and `latest.bin`.
+
+#### Commit
+fix(ota): resolve pre-sntp 1-hour clock offset and sd-card flashing watchdog stalls
+
+
 
 
 

@@ -378,6 +378,22 @@ void app_main(void) {
         return;
     }
 
+    /* Set system timezone early to WAT (West Africa Time - GMT+1, no DST)
+     * so DS1302 RTC synchronization and POSIX local time remain consistent from boot */
+    setenv("TZ", "WAT-1", 1);
+    tzset();
+
+    /* Immediately verify and validate active OTA slot to permanently cancel rollback */
+    const esp_partition_t *running_part = esp_ota_get_running_partition();
+    esp_ota_img_states_t ota_state;
+    if (esp_ota_get_state_partition(running_part, &ota_state) == ESP_OK) {
+        if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
+            ESP_LOGI(TAG, "OTA trial boot detected — marking partition '%s' as VALID to cancel rollback.",
+                     running_part ? running_part->label : "app");
+            esp_ota_mark_app_valid_cancel_rollback();
+        }
+    }
+
     /* Initialize board hardware (backlight, power, I2C) */
     ret = board_init();
     if (ret != ESP_OK) {
@@ -587,16 +603,8 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "All tasks started. System ready.");
 
-    /* Initialize OTA manager and verify firmware health */
+    /* Initialize OTA manager directory structure */
     ota_manager_init();
-    const esp_partition_t *running_part = esp_ota_get_running_partition();
-    esp_ota_img_states_t ota_state;
-    if (esp_ota_get_state_partition(running_part, &ota_state) == ESP_OK) {
-        if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-            ESP_LOGI(TAG, "OTA trial successful! Marking firmware as VALID to cancel rollback.");
-            esp_ota_mark_app_valid_cancel_rollback();
-        }
-    }
 
     /* Setup Wizard Check */
     {

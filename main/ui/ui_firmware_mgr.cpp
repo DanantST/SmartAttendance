@@ -234,7 +234,7 @@ static void show_confirm_modal(const firmware_info_t *info) {
 
     lv_obj_t *card = lv_obj_create(modal);
     lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(card, 560, 310);
+    lv_obj_set_size(card, 580, 350);
     lv_obj_center(card);
     lv_obj_set_style_bg_color(card, lv_color_hex(0x1E293B), 0);
     lv_obj_set_style_border_color(card, lv_color_hex(0xF59E0B), 0);
@@ -759,6 +759,13 @@ static void scan_firmwares_worker_task(void *param) {
                         firmware_info_t *heap_info = (firmware_info_t *)malloc(sizeof(firmware_info_t));
                         if (heap_info) {
                             memcpy(heap_info, item, sizeof(firmware_info_t));
+                            lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+                            lv_obj_add_event_cb(row, [](lv_event_t *e) {
+                                firmware_info_t *info = (firmware_info_t *)lv_event_get_user_data(e);
+                                if (info) {
+                                    show_confirm_modal(info);
+                                }
+                            }, LV_EVENT_CLICKED, heap_info);
                             lv_obj_add_event_cb(action_btn, [](lv_event_t *e) {
                                 firmware_info_t *info = (firmware_info_t *)lv_event_get_user_data(e);
                                 if (info) {
@@ -767,7 +774,7 @@ static void scan_firmwares_worker_task(void *param) {
                             }, LV_EVENT_CLICKED, heap_info);
 
                             /* Auto-free heap_info when row object is deleted */
-                            lv_obj_add_event_cb(action_btn, [](lv_event_t *e) {
+                            lv_obj_add_event_cb(row, [](lv_event_t *e) {
                                 firmware_info_t *info = (firmware_info_t *)lv_event_get_user_data(e);
                                 if (info) free(info);
                             }, LV_EVENT_DELETE, heap_info);
