@@ -3305,6 +3305,34 @@ feat(release): bump version to v1.1.1 and add upgrade action styling in firmware
 #### Commit
 fix(ui): remove diagnostic red circle from setup wizard welcome page
 
+---
+
+## Session - 2026-10-14 - Firmware Release v1.1.2 Dedicated Versioning
+
+### User Request
+> Every update is supposed to have its own version
+
+### Implementation
+> 1. Bumped `PROJECT_VER` to `v1.1.2` in `CMakelists.txt` so the new binary has an independent version identifier in `esp_app_desc_t`.
+> 2. Recompiled firmware using ESP-IDF, producing `SmartAttendance.bin` (v1.1.2, 5,551,616 bytes).
+> 3. Restored `SmartAttendance_v1.1.1.bin` (v1.1.1, 5,551,712 bytes) in `telegram_bot/firmware/` to preserve historical catalog integrity.
+> 4. Generated and staged `SmartAttendance_v1.1.2.bin` and updated `latest.bin` to point to `v1.1.2`.
+> 5. Verified with binary header parsing that `v1.1.0`, `v1.1.1`, and `v1.1.2` all coexist as distinct installable versions in the cloud repository.
+
+#### Feature Overview
+- **Dedicated Release Versioning (v1.1.2)**: Assigns every change (including the setup wizard diagnostic circle removal) its own discrete version number for clear tracking and rollback capability.
+
+**CMakelists.txt** changes:
+- Bumped `PROJECT_VER` from `"v1.1.1"` to `"v1.1.2"`.
+
+**telegram_bot/firmware/** changes:
+- Added `SmartAttendance_v1.1.2.bin` (v1.1.2).
+- Preserved `SmartAttendance_v1.1.1.bin` (v1.1.1).
+- Updated `latest.bin` to point to `v1.1.2`.
+
+#### Commit
+feat(release): bump firmware to v1.1.2 with distinct binary build
+
 
 
 

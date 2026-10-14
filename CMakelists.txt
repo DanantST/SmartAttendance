@@ -1,7 +1,7 @@
 # Top-level CMakeLists.txt for Smart Attendance System
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VER "v1.1.1")
+set(PROJECT_VER "v1.1.2")
 
 # Include necessary components
 set(EXTRA_COMPONENT_DIRS 
