@@ -293,6 +293,7 @@ lv_indev_t* ui_get_touch(void) {
 static void create_status_bar(void) {
     /* Create on top layer so it persists across all screens */
     s_status_bar = lv_obj_create(lv_layer_top());
+    lv_obj_remove_flag(s_status_bar, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(s_status_bar, DISPLAY_WIDTH, 40);
     lv_obj_set_pos(s_status_bar, 0, 0);
     lv_obj_set_style_bg_color(s_status_bar, lv_color_hex(0x1E1E1E), 0);
@@ -516,6 +517,7 @@ static void nav_button_event_handler(lv_event_t* e) {
 
 static void create_navigation_bar(void) {
     s_nav_bar = lv_obj_create(lv_layer_top()); /* Persist across screens */
+    lv_obj_remove_flag(s_nav_bar, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(s_nav_bar, s_current_theme == THEME_LIGHT ? lv_color_hex(0xE8E8E8) : lv_color_hex(0x1E1E1E), 0);
     lv_obj_set_style_bg_opa(s_nav_bar, LV_OPA_80, 0);
     lv_obj_set_style_radius(s_nav_bar, 0, 0);
@@ -619,6 +621,7 @@ static void create_main_content(void) {
 
     /* Grid for App Icons */
     lv_obj_t* grid = lv_obj_create(s_main_screen);
+    lv_obj_remove_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(grid, DISPLAY_WIDTH - 40, 240);
     lv_obj_set_pos(grid, 20, 160);
     lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 0);
@@ -784,6 +787,7 @@ void ui_show_notification(ui_notify_type_t type, const char* title, const char* 
     
     /* Create panel on top layer so it appears above all screens */
     s_notification_panel = lv_obj_create(lv_layer_top());
+    lv_obj_remove_flag(s_notification_panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(s_notification_panel, DISPLAY_WIDTH - 40, 100);
     lv_obj_set_pos(s_notification_panel, 20, 45);
     lv_obj_set_style_radius(s_notification_panel, 12, 0);
@@ -912,6 +916,7 @@ void ui_set_sd_card_status(bool ok) {
     if (!ok && s_main_screen) {
         if (!s_sd_banner) {
             s_sd_banner = lv_obj_create(s_main_screen);
+            lv_obj_remove_flag(s_sd_banner, LV_OBJ_FLAG_SCROLLABLE);
             lv_obj_set_size(s_sd_banner, DISPLAY_WIDTH, 40);
             lv_obj_set_pos(s_sd_banner, 0, 50); /* Just below status bar */
             lv_obj_set_style_bg_color(s_sd_banner, lv_color_hex(0xFF4444), 0);
@@ -943,6 +948,7 @@ void ui_show_keyboard(lv_obj_t* textarea, const char* title) {
     /* Create keyboard panel on the currently active screen.
      * Panel height = 240px, positioned at Y=290 → bottom at Y=530, above nav bar (Y=540). */
     s_keyboard_panel = lv_obj_create(lv_scr_act());
+    lv_obj_remove_flag(s_keyboard_panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(s_keyboard_panel, DISPLAY_WIDTH - 40, 240);
     lv_obj_set_pos(s_keyboard_panel, 20, 290);
     lv_obj_set_style_bg_color(s_keyboard_panel, s_current_theme == THEME_LIGHT ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x2A2A2A), 0);
@@ -1040,6 +1046,8 @@ lv_obj_t* ui_create_button(lv_obj_t* parent, const char* text, int width, int he
 
 lv_obj_t* ui_create_card(lv_obj_t* parent, int width, int height) {
     lv_obj_t* card = lv_obj_create(parent);
+    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(card, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_size(card, width, height);
     lv_obj_set_style_bg_color(card, s_current_theme == THEME_LIGHT ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x2A2A2A), 0);
     lv_obj_set_style_radius(card, 16, 0);
@@ -1109,6 +1117,7 @@ void ui_show_pin_prompt(bool for_admin_change, void (*callback)(bool success)) {
     /* Create a modal background that covers only the safe area (below status bar,
      * above nav bar): Y=40, height=500 so bottom is at Y=540. */
     s_pin_panel = lv_obj_create(lv_scr_act());
+    lv_obj_remove_flag(s_pin_panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(s_pin_panel, DISPLAY_WIDTH, 500);
     lv_obj_set_pos(s_pin_panel, 0, 40);
     lv_obj_set_style_bg_color(s_pin_panel, lv_color_hex(0x000000), 0);
@@ -1225,6 +1234,7 @@ void ui_show_keyboard_input(const char* title, const char* initial_text, bool is
     
     /* Overlay covers only the safe area: Y=40, h=500 → bottom at Y=540. */
     s_kb_input_panel = lv_obj_create(lv_scr_act());
+    lv_obj_remove_flag(s_kb_input_panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(s_kb_input_panel, DISPLAY_WIDTH, 500);
     lv_obj_set_pos(s_kb_input_panel, 0, 40);
     lv_obj_set_style_bg_color(s_kb_input_panel, lv_color_hex(0x000000), 0);
@@ -1287,6 +1297,7 @@ void ui_show_quick_settings(void) {
     }
     
     s_qs_panel = lv_obj_create(lv_layer_top());
+    lv_obj_remove_flag(s_qs_panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(s_qs_panel, DISPLAY_WIDTH - 40, 490);
     lv_obj_set_pos(s_qs_panel, 20, 45);
     lv_obj_set_style_bg_color(s_qs_panel, lv_color_hex(0x222222), 0);
@@ -1378,9 +1389,15 @@ void ui_show_quick_settings(void) {
     lv_obj_set_size(bri_slider, DISPLAY_WIDTH - 120, 20);
     lv_obj_set_pos(bri_slider, 20, 190);
     lv_obj_add_event_cb(bri_slider, [](lv_event_t* e) {
+        lv_event_code_t code = lv_event_get_code(e);
         int val = (int)lv_slider_get_value((lv_obj_t*)lv_event_get_target(e));
-        ui_set_brightness(val);
-    }, LV_EVENT_VALUE_CHANGED, NULL);
+        if (val < 10) val = 10;
+        if (code == LV_EVENT_VALUE_CHANGED) {
+            board_backlight_set((uint8_t)val);
+        } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_DEFOCUSED) {
+            ui_save_brightness_nvs(val);
+        }
+    }, LV_EVENT_ALL, NULL);
     
     /* Notifications Header */
     lv_obj_t* notify_hdr = lv_label_create(s_qs_panel);
@@ -1391,6 +1408,7 @@ void ui_show_quick_settings(void) {
 
     /* Notification List Container */
     lv_obj_t* notify_box = lv_obj_create(s_qs_panel);
+    lv_obj_remove_flag(notify_box, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(notify_box, DISPLAY_WIDTH - 120, 110);
     lv_obj_set_pos(notify_box, 20, 260);
     lv_obj_set_style_bg_color(notify_box, lv_color_hex(0x1A1A1A), 0);
@@ -1409,6 +1427,8 @@ void ui_show_quick_settings(void) {
         for (int i = 0; i < s_notify_count; i++) {
             lv_obj_t* item = lv_label_create(notify_box);
             lv_label_set_text_fmt(item, "[%s] %s", s_notify_history[i].title, s_notify_history[i].message);
+            lv_obj_set_width(item, DISPLAY_WIDTH - 140);
+            lv_label_set_long_mode(item, LV_LABEL_LONG_DOT);
             lv_obj_set_style_text_color(item, lv_color_hex(0xDDDDDD), 0);
             lv_obj_set_style_text_font(item, &lv_font_montserrat_14, 0);
         }
@@ -1466,6 +1486,7 @@ void ui_show_recent_apps(void) {
     }
     
     s_recents_panel = lv_obj_create(s_main_screen);
+    lv_obj_remove_flag(s_recents_panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(s_recents_panel, 800, 360);
     lv_obj_center(s_recents_panel);
     lv_obj_set_style_bg_color(s_recents_panel, lv_color_hex(0x1F1F1F), 0);

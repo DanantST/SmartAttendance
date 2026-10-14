@@ -83,6 +83,7 @@ static void create_schedules_screen(void) {
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(content, 15, 0);
+    lv_obj_set_scroll_dir(content, LV_DIR_VER);
 
     /* Query schedules from database */
     db_schedule_t *schedules = NULL;
@@ -105,6 +106,8 @@ static void create_schedules_screen(void) {
             char course_text[128];
             snprintf(course_text, sizeof(course_text), "📚  %s - %s", s->course_code, s->course_name);
             lv_label_set_text(course_lbl, course_text);
+            lv_obj_set_width(course_lbl, DISPLAY_WIDTH - 70);
+            lv_label_set_long_mode(course_lbl, LV_LABEL_LONG_DOT);
             lv_obj_set_style_text_color(course_lbl, lv_color_hex(0x00A8FF), 0);
             lv_obj_set_style_text_font(course_lbl, &lv_font_montserrat_16, 0);
 
@@ -113,6 +116,8 @@ static void create_schedules_screen(void) {
             char lecturer_text[128];
             snprintf(lecturer_text, sizeof(lecturer_text), "👤  Lecturer: %s", s->lecturer_name);
             lv_label_set_text(lecturer_lbl, lecturer_text);
+            lv_obj_set_width(lecturer_lbl, DISPLAY_WIDTH - 70);
+            lv_label_set_long_mode(lecturer_lbl, LV_LABEL_LONG_DOT);
             lv_obj_set_style_text_color(lecturer_lbl, ui_theme_get_text_color(), 0);
             lv_obj_set_style_text_font(lecturer_lbl, &lv_font_montserrat_12, 0);
 
@@ -138,6 +143,8 @@ static void create_schedules_screen(void) {
             }
             
             lv_label_set_text(time_lbl, time_text);
+            lv_obj_set_width(time_lbl, DISPLAY_WIDTH - 70);
+            lv_label_set_long_mode(time_lbl, LV_LABEL_LONG_DOT);
             lv_obj_set_style_text_color(time_lbl, ui_theme_get_text_muted_color(), 0);
             lv_obj_set_style_text_font(time_lbl, &lv_font_montserrat_12, 0);
         }

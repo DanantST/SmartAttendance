@@ -3189,6 +3189,66 @@ fix(ota): prevent SDMMC bus contention between SD card and ESP-Hosted Wi-Fi SDIO
 #### Commit
 feat(ota): implement semantic versioning, multi-version catalog, and version-specific cloud downloads
 
+---
+
+## Session - 2026-10-14 - Fix UI Card Overflow Scrolling & Brightness Slider Reboot Crash
+
+### User Request
+> there has been an issue in the ui with how the device handles text that look like they exceed their card's size. the text and other components like smaller cards become scrollable in a card where they shouldn't scroll. adjusting the screen brightness level also triggered a reboot.
+
+### Implementation
+> 1. Diagnosed unwanted scrolling: In LVGL 8/9, containers created via `lv_obj_create()` enable `LV_OBJ_FLAG_SCROLLABLE` by default. When text labels or child components slightly touch or overflow the inner bounds of a card, the card turns into an internal scrollable view. Added `lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE)` and `lv_obj_set_scrollbar_mode(card, LV_SCROLLBAR_MODE_OFF)` to `ui_create_card()` in `ui_main.cpp`. Audited and removed `LV_OBJ_FLAG_SCROLLABLE` across all modals, bars, containers, and badges (`s_status_bar`, `s_nav_bar`, `s_notification_panel`, `s_keyboard_panel`, `s_pin_panel`, `s_kb_input_panel`, `s_qs_panel`, `s_recents_panel`, `sec_badge`, `left_col`, `info_col`).
+> 2. Added explicit label widths and `LV_LABEL_LONG_DOT` mode to prevent long texts (names, courses, schedule details, notifications) from expanding parent container bounds.
+> 3. Restricted list containers (`content` in `ui_settings.cpp`, `ui_reports.cpp`, `ui_schedules.cpp`, `s_user_list`, `s_list_container`) to strictly vertical scrolling via `lv_obj_set_scroll_dir(..., LV_DIR_VER)`.
+> 4. Fixed brightness slider reboot crash: Dragging the brightness slider was triggering `LV_EVENT_VALUE_CHANGED` dozens of times per second. `ui_set_brightness()` was opening NVS (`nvs_open`), writing to SPI flash, and committing (`nvs_commit`) on every single slider tick during active DMA/rendering tasks, causing SPI flash cache invalidation / watchdog panics. Separated real-time hardware PWM adjustment (`board_backlight_set`) on `LV_EVENT_VALUE_CHANGED` from persistent storage write (`ui_save_brightness_nvs`) deferred to `LV_EVENT_RELEASED` / `LV_EVENT_DEFOCUSED`.
+> 5. Clamped slider minimum brightness to 10% to prevent screen blackout.
+> 6. Recompiled `SmartAttendance.bin` (v1.1.0) and staged updated binaries into the server's firmware catalog. Started COM3 serial monitor daemon to capture live device telemetry during OTA update.
+
+#### Feature Overview
+- **Zero Accidental Card Scrolling**: Fixed cards, headers, toolbars, badges, and modal overlays no longer scroll or display internal scrollbars when children touch edges.
+- **Graceful Label Truncation**: Overlong text automatically formats with dot ellipsis (`LV_LABEL_LONG_DOT`) without distorting parent cards.
+- **Smooth, Safe Brightness Adjustment**: Real-time LEDC PWM adjustment during drag with zero flash writes, committing to NVS only upon finger release. Zero reboot crashes.
+- **Dynamic Version Reporting**: Settings About card automatically displays the runtime firmware version and build timestamp from `esp_app_get_description()`.
+
+**`main/ui/ui_main.cpp`** changes:
+- Added `lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE)` and `lv_obj_set_scrollbar_mode(card, LV_SCROLLBAR_MODE_OFF)` in `ui_create_card()`.
+- Removed scrollable flag from `s_status_bar`, `s_nav_bar`, `grid`, `s_notification_panel`, `s_sd_banner`, `s_keyboard_panel`, `s_pin_panel`, `s_kb_input_panel`, `s_qs_panel`, `s_recents_panel`, and `notify_box`.
+- Updated quick settings brightness slider to update hardware PWM on `LV_EVENT_VALUE_CHANGED` and save to NVS on `LV_EVENT_RELEASED` / `LV_EVENT_DEFOCUSED`.
+
+**`main/ui/ui_settings.cpp`** changes:
+- Added `esp_app_desc.h` inclusion and dynamic version reporting on `about_card`.
+- Separated `ui_save_brightness_nvs()` from real-time `board_backlight_set()` in `brightness_slider_event`.
+- Clamped minimum brightness to 10%.
+- Resized card dimensions and child positions in `brightness_card`, `wifi_card`, `telegram_card`, `sync_card`, and `device_card` to ensure ample inner padding and zero element boundary collision.
+- Set `lv_obj_set_scroll_dir(content, LV_DIR_VER)`.
+
+**`main/ui/ui_settings.h` & `main/ui/ui_main.h`** changes:
+- Declared `void ui_save_brightness_nvs(int percent)`.
+
+**`main/ui/ui_schedules.cpp`** changes:
+- Added `lv_obj_set_scroll_dir(content, LV_DIR_VER)`.
+- Set explicit width and `LV_LABEL_LONG_DOT` on `course_lbl`, `lecturer_lbl`, and `time_lbl`.
+
+**`main/ui/ui_reports.cpp`** changes:
+- Added `lv_obj_set_scroll_dir(content, LV_DIR_VER)`.
+
+**`main/ui/ui_user_manager.cpp`** changes:
+- Added `lv_obj_set_scroll_dir(s_user_list, LV_DIR_VER)`.
+- Removed scrollable flag from `info_col`.
+- Set explicit width and `LV_LABEL_LONG_DOT` on user name, details, and course labels.
+
+**`main/ui/ui_firmware_mgr.cpp`** changes:
+- Removed scrollable flag from `left_col`, `sec_badge`, `cloud_divider`, `empty_card`, and modal cards.
+- Set width and `LV_LABEL_LONG_DOT` on `badge_sub`.
+- Set `lv_obj_set_scroll_dir(s_list_container, LV_DIR_VER)`.
+
+**`main/ui/ui_setup_wizard.cpp`** changes:
+- Removed scrollable flag from `s_steps_container` and debug circle.
+
+#### Commit
+fix(ui): eliminate card scroll overflow and resolve brightness slider reboot crash
+
+
 
 
 

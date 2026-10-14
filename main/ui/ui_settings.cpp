@@ -16,6 +16,7 @@
 #include "ui_user_manager.h"
 #include "ui_admin_setup.h"
 #include "ui_firmware_mgr.h"
+#include "esp_app_desc.h"
 #include <cstring>
 
 /* C function declarations */
@@ -163,6 +164,7 @@ static void create_settings_screen(void) {
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_scroll_dir(content, LV_DIR_VER);
     
     /* Brightness slider */
     lv_obj_t* brightness_card = ui_create_card(content, DISPLAY_WIDTH - 40, 100);
@@ -171,16 +173,17 @@ static void create_settings_screen(void) {
     lv_obj_t* brightness_title = lv_label_create(brightness_card);
     lv_label_set_text(brightness_title, "Screen Brightness");
     lv_obj_set_style_text_font(brightness_title, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(brightness_title, 15, 12);
     
     s_brightness_slider = lv_slider_create(brightness_card);
-    lv_obj_set_size(s_brightness_slider, DISPLAY_WIDTH - 100, 10);
-    lv_obj_set_pos(s_brightness_slider, 15, 40);
-    lv_slider_set_range(s_brightness_slider, 0, 100);
+    lv_obj_set_size(s_brightness_slider, DISPLAY_WIDTH - 150, 12);
+    lv_obj_set_pos(s_brightness_slider, 15, 45);
+    lv_slider_set_range(s_brightness_slider, 10, 100);
     lv_slider_set_value(s_brightness_slider, ui_get_brightness(), LV_ANIM_OFF);
-    lv_obj_add_event_cb(s_brightness_slider, brightness_slider_event, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(s_brightness_slider, brightness_slider_event, LV_EVENT_ALL, NULL);
     
     s_brightness_label = lv_label_create(brightness_card);
-    lv_obj_set_pos(s_brightness_label, DISPLAY_WIDTH - 80, 35);
+    lv_obj_set_pos(s_brightness_label, DISPLAY_WIDTH - 120, 42);
     char buf[16];
     snprintf(buf, sizeof(buf), "%d%%", ui_get_brightness());
     lv_label_set_text(s_brightness_label, buf);
@@ -193,12 +196,12 @@ static void create_settings_screen(void) {
     lv_obj_set_pos(theme_title, 15, 20);
     
     s_theme_switch = lv_switch_create(theme_card);
-    lv_obj_set_pos(s_theme_switch, DISPLAY_WIDTH - 90, 15);
+    lv_obj_set_pos(s_theme_switch, DISPLAY_WIDTH - 120, 15);
     lv_obj_set_state(s_theme_switch, LV_STATE_CHECKED, (ui_get_theme() == THEME_DARK));
     lv_obj_add_event_cb(s_theme_switch, theme_switch_event, LV_EVENT_VALUE_CHANGED, NULL);
     
     /* Wi-Fi section */
-    lv_obj_t* wifi_card = ui_create_card(content, DISPLAY_WIDTH - 40, 220);
+    lv_obj_t* wifi_card = ui_create_card(content, DISPLAY_WIDTH - 40, 340);
     
     lv_obj_t* wifi_title = lv_label_create(wifi_card);
     lv_label_set_text(wifi_title, "Wi-Fi Configuration");
@@ -209,7 +212,7 @@ static void create_settings_screen(void) {
     lv_obj_set_pos(ssid_label, 15, 45);
     
     s_wifi_ssid_input = lv_textarea_create(wifi_card);
-    lv_obj_set_size(s_wifi_ssid_input, DISPLAY_WIDTH - 100, 40);
+    lv_obj_set_size(s_wifi_ssid_input, DISPLAY_WIDTH - 120, 40);
     lv_obj_set_pos(s_wifi_ssid_input, 15, 70);
     lv_textarea_set_one_line(s_wifi_ssid_input, true);
     lv_obj_add_event_cb(s_wifi_ssid_input, textarea_click_event_cb, LV_EVENT_CLICKED, (void*)"WiFi SSID");
@@ -219,7 +222,7 @@ static void create_settings_screen(void) {
     lv_obj_set_pos(pass_label, 15, 120);
     
     s_wifi_pass_input = lv_textarea_create(wifi_card);
-    lv_obj_set_size(s_wifi_pass_input, DISPLAY_WIDTH - 160, 40);
+    lv_obj_set_size(s_wifi_pass_input, DISPLAY_WIDTH - 180, 40);
     lv_obj_set_pos(s_wifi_pass_input, 15, 145);
     lv_textarea_set_one_line(s_wifi_pass_input, true);
     lv_textarea_set_password_mode(s_wifi_pass_input, true);
@@ -228,7 +231,7 @@ static void create_settings_screen(void) {
     /* Show / Hide password toggle button */
     lv_obj_t* pass_eye_btn = lv_btn_create(wifi_card);
     lv_obj_set_size(pass_eye_btn, 50, 40);
-    lv_obj_set_pos(pass_eye_btn, DISPLAY_WIDTH - 140, 145);
+    lv_obj_set_pos(pass_eye_btn, DISPLAY_WIDTH - 150, 145);
     lv_obj_set_style_bg_color(pass_eye_btn, lv_color_hex(0x3A6EA5), 0);
     lv_obj_set_style_radius(pass_eye_btn, 8, 0);
     lv_obj_add_event_cb(pass_eye_btn, show_hide_pass_cb, LV_EVENT_CLICKED, (void*)s_wifi_pass_input);
@@ -245,19 +248,17 @@ static void create_settings_screen(void) {
     lv_obj_add_event_cb(scan_btn, wifi_scan_btn_event, LV_EVENT_CLICKED, NULL);
     
     s_wifi_status_label = lv_label_create(wifi_card);
-    lv_obj_set_pos(s_wifi_status_label, 15, 240);
+    lv_obj_set_pos(s_wifi_status_label, 15, 245);
     lv_label_set_text(s_wifi_status_label, "Not connected");
     lv_obj_set_style_text_color(s_wifi_status_label, ui_theme_get_text_muted_color(), 0);
     
     s_known_networks_btn = ui_create_button(wifi_card, "Known Networks", 180, 40);
-    lv_obj_set_pos(s_known_networks_btn, 15, 270);
+    lv_obj_set_pos(s_known_networks_btn, 15, 275);
     lv_obj_set_style_bg_color(s_known_networks_btn, lv_color_hex(0x336699), 0);
     lv_obj_add_event_cb(s_known_networks_btn, known_networks_btn_event, LV_EVENT_CLICKED, NULL);
     
-    lv_obj_set_height(wifi_card, 330);
-    
     /* Telegram section */
-    lv_obj_t* telegram_card = ui_create_card(content, DISPLAY_WIDTH - 40, 330);
+    lv_obj_t* telegram_card = ui_create_card(content, DISPLAY_WIDTH - 40, 340);
     
     lv_obj_t* telegram_title = lv_label_create(telegram_card);
     lv_label_set_text(telegram_title, "Cloud Sync & Telegram Configuration");
@@ -268,7 +269,7 @@ static void create_settings_screen(void) {
     lv_obj_set_pos(token_label, 15, 45);
     
     s_telegram_token_input = lv_textarea_create(telegram_card);
-    lv_obj_set_size(s_telegram_token_input, DISPLAY_WIDTH - 100, 40);
+    lv_obj_set_size(s_telegram_token_input, DISPLAY_WIDTH - 120, 40);
     lv_obj_set_pos(s_telegram_token_input, 15, 70);
     lv_textarea_set_one_line(s_telegram_token_input, true);
     lv_obj_add_event_cb(s_telegram_token_input, textarea_click_event_cb, LV_EVENT_CLICKED, (void*)"Telegram Bot Token");
@@ -278,7 +279,7 @@ static void create_settings_screen(void) {
     lv_obj_set_pos(chat_label, 15, 120);
     
     s_telegram_chat_input = lv_textarea_create(telegram_card);
-    lv_obj_set_size(s_telegram_chat_input, DISPLAY_WIDTH - 100, 40);
+    lv_obj_set_size(s_telegram_chat_input, DISPLAY_WIDTH - 120, 40);
     lv_obj_set_pos(s_telegram_chat_input, 15, 145);
     lv_textarea_set_one_line(s_telegram_chat_input, true);
     lv_obj_add_event_cb(s_telegram_chat_input, textarea_click_event_cb, LV_EVENT_CLICKED, (void*)"Telegram Chat ID");
@@ -288,7 +289,7 @@ static void create_settings_screen(void) {
     lv_obj_set_pos(endpoint_label, 15, 195);
 
     s_api_endpoint_input = lv_textarea_create(telegram_card);
-    lv_obj_set_size(s_api_endpoint_input, DISPLAY_WIDTH - 100, 40);
+    lv_obj_set_size(s_api_endpoint_input, DISPLAY_WIDTH - 120, 40);
     lv_obj_set_pos(s_api_endpoint_input, 15, 220);
     lv_textarea_set_one_line(s_api_endpoint_input, true);
     lv_obj_add_event_cb(s_api_endpoint_input, textarea_click_event_cb, LV_EVENT_CLICKED, (void*)"Cloud Server URL");
@@ -317,10 +318,8 @@ static void create_settings_screen(void) {
         }
     }, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_set_height(telegram_card, 330);
-
     /* Sync interval dropdown */
-    lv_obj_t* sync_card = ui_create_card(content, DISPLAY_WIDTH - 40, 100);
+    lv_obj_t* sync_card = ui_create_card(content, DISPLAY_WIDTH - 40, 110);
     
     lv_obj_t* sync_title = lv_label_create(sync_card);
     lv_label_set_text(sync_title, "Cloud Sync Interval");
@@ -359,7 +358,7 @@ static void create_settings_screen(void) {
 
     
     /* Device Management section */
-    lv_obj_t* device_card = ui_create_card(content, DISPLAY_WIDTH - 40, 150);
+    lv_obj_t* device_card = ui_create_card(content, DISPLAY_WIDTH - 40, 160);
     
     lv_obj_t* device_title = lv_label_create(device_card);
     lv_label_set_text(device_title, "Device Management");
@@ -399,37 +398,55 @@ static void create_settings_screen(void) {
     }, LV_EVENT_CLICKED, NULL);
 
     s_factory_reset_btn = ui_create_button(device_card, "Factory Reset", 180, 40);
-    lv_obj_set_pos(s_factory_reset_btn, 15, 95);
+    lv_obj_set_pos(s_factory_reset_btn, 15, 100);
     lv_obj_set_style_bg_color(s_factory_reset_btn, lv_color_hex(0xCC3333), 0);
     lv_obj_add_event_cb(s_factory_reset_btn, factory_reset_btn_event, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t* firmware_btn = ui_create_button(device_card, "Firmware & Updates", 200, 40);
-    lv_obj_set_pos(firmware_btn, 210, 95);
+    lv_obj_set_pos(firmware_btn, 210, 100);
     lv_obj_set_style_bg_color(firmware_btn, lv_color_hex(0x10B981), 0);
     lv_obj_add_event_cb(firmware_btn, [](lv_event_t* e) {
         ui_show_firmware_mgr_screen();
     }, LV_EVENT_CLICKED, NULL);
     
     /* About section */
-    lv_obj_t* about_card = ui_create_card(content, DISPLAY_WIDTH - 40, 120);
+    lv_obj_t* about_card = ui_create_card(content, DISPLAY_WIDTH - 40, 130);
     
     lv_obj_t* about_title = lv_label_create(about_card);
     lv_label_set_text(about_title, "About");
     lv_obj_set_pos(about_title, 15, 10);
     
     s_about_label = lv_label_create(about_card);
-    lv_label_set_text(s_about_label, "Smart Attendance System\nVersion 1.0.0\nCrowPanel Advanced 7\" ESP32-P4");
-    lv_obj_set_pos(s_about_label, 15, 45);
+    const esp_app_desc_t *app_desc = esp_app_get_description();
+    char about_buf[160];
+    snprintf(about_buf, sizeof(about_buf),
+             "Smart Attendance System\nVersion: %s (%s %s)\nCrowPanel Advanced 7\" ESP32-P4",
+             app_desc ? app_desc->version : "v1.1.0",
+             app_desc ? app_desc->date : __DATE__,
+             app_desc ? app_desc->time : __TIME__);
+    lv_label_set_text(s_about_label, about_buf);
+    lv_obj_set_pos(s_about_label, 15, 40);
     lv_obj_set_style_text_color(s_about_label, ui_theme_get_text_muted_color(), 0);
 }
 
 static void brightness_slider_event(lv_event_t* e) {
+    lv_event_code_t code = lv_event_get_code(e);
     lv_obj_t* slider = (lv_obj_t*)lv_event_get_target(e);
     int value = lv_slider_get_value(slider);
-    ui_set_brightness(value);
-    char buf[8];
-    snprintf(buf, sizeof(buf), "%d%%", value);
-    lv_label_set_text(s_brightness_label, buf);
+    if (value < 10) value = 10;
+
+    if (code == LV_EVENT_VALUE_CHANGED) {
+        /* Instant hardware PWM update and UI label update — NO flash/NVS write during drag! */
+        board_backlight_set((uint8_t)value);
+        if (s_brightness_label) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%d%%", value);
+            lv_label_set_text(s_brightness_label, buf);
+        }
+    } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_DEFOCUSED) {
+        /* Commit to NVS ONLY once when user releases the slider handle */
+        ui_save_brightness_nvs(value);
+    }
 }
 
 int ui_get_brightness(void) {
@@ -439,18 +456,27 @@ int ui_get_brightness(void) {
         nvs_get_u8(nvs, "brightness", &value);
         nvs_close(nvs);
     }
+    if (value < 10) value = 10;
+    if (value > 100) value = 100;
     return (int)value;
 }
 
-void ui_set_brightness(int percent) {
-    board_backlight_set(percent);
-    
+void ui_save_brightness_nvs(int percent) {
+    if (percent < 10) percent = 10;
+    if (percent > 100) percent = 100;
     nvs_handle_t nvs;
     if (nvs_open("storage", NVS_READWRITE, &nvs) == ESP_OK) {
         nvs_set_u8(nvs, "brightness", (uint8_t)percent);
         nvs_commit(nvs);
         nvs_close(nvs);
     }
+}
+
+void ui_set_brightness(int percent) {
+    if (percent < 10) percent = 10;
+    if (percent > 100) percent = 100;
+    board_backlight_set((uint8_t)percent);
+    ui_save_brightness_nvs(percent);
 }
 
 static void theme_switch_event(lv_event_t* e) {

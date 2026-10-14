@@ -30,11 +30,16 @@ void ui_close_settings_screen(void);
 int ui_get_brightness(void);
 
 /**
- * @brief Set brightness (updates hardware)
- * @param percent brightness (0-100)
+ * @brief Set brightness (updates hardware and persists to NVS)
+ * @param percent brightness (10-100)
  */
 void ui_set_brightness(int percent);
 
+/**
+ * @brief Commit brightness setting to NVS (deferred to avoid flash thrashing during slider drag)
+ * @param percent brightness (10-100)
+ */
+void ui_save_brightness_nvs(int percent);
 
 #ifdef __cplusplus
 }

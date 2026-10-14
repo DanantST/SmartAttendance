@@ -360,6 +360,7 @@ int ui_get_brightness(void);
  * @param percent brightness (0-100)
  */
 void ui_set_brightness(int percent);
+void ui_save_brightness_nvs(int percent);
 
 /*====================
    Reports Screen

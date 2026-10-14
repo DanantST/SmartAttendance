@@ -48,6 +48,7 @@ void ui_show_setup_wizard(void) {
     lv_obj_set_style_bg_color(s_setup_screen, lv_color_hex(0x0A0A0A), 0);
     
     s_steps_container = lv_obj_create(s_setup_screen);
+    lv_obj_remove_flag(s_steps_container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(s_steps_container, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     lv_obj_set_style_bg_opa(s_steps_container, 0, 0);
     lv_obj_set_style_border_width(s_steps_container, 0, 0);
@@ -69,6 +70,7 @@ static lv_obj_t* create_welcome_page(lv_obj_t* parent) {
     
     /* DEBUG: Add a big red circle to verify object rendering */
     lv_obj_t* circle = lv_obj_create(parent);
+    lv_obj_remove_flag(circle, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(circle, 100, 100);
     lv_obj_set_style_radius(circle, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(circle, lv_color_hex(0xFF0000), 0);
@@ -205,6 +207,7 @@ static void next_btn_event_handler(lv_event_t* e) {
        so the button's event handler doesn't crash from being deleted mid-event. */
     lv_obj_t* old_container = s_steps_container;
     s_steps_container = lv_obj_create(s_setup_screen);
+    lv_obj_remove_flag(s_steps_container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(s_steps_container, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     lv_obj_set_style_bg_opa(s_steps_container, 0, 0);
     lv_obj_set_style_border_width(s_steps_container, 0, 0);

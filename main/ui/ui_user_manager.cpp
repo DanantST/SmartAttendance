@@ -137,6 +137,7 @@ static void create_user_manager_screen(void) {
     lv_obj_set_flex_flow(s_user_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_user_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_scrollbar_mode(s_user_list, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_scroll_dir(s_user_list, LV_DIR_VER);
 
     /* ---- Loading spinner while background task fetches DB ---- */
     lv_obj_t* spinner = lv_spinner_create(s_user_list);
@@ -248,6 +249,7 @@ static void user_mgr_populate_task(void* arg) {
                 ESP_LOGE(TAG, "info_col alloc failed — rolling back card");
                 lv_obj_delete(item); continue;
             }
+            lv_obj_remove_flag(info_col, LV_OBJ_FLAG_SCROLLABLE);
             lv_obj_set_size(info_col, DISPLAY_WIDTH - 200, LV_SIZE_CONTENT);
             lv_obj_set_style_bg_opa(info_col, 0, 0);
             lv_obj_set_style_border_width(info_col, 0, 0);
@@ -267,6 +269,8 @@ static void user_mgr_populate_task(void* arg) {
             if (role_upper[0] >= 'a' && role_upper[0] <= 'z') role_upper[0] -= 32;
             snprintf(name_buf, sizeof(name_buf), "%s  (%s)", r->u.name, role_upper);
             lv_label_set_text(name, name_buf);
+            lv_obj_set_width(name, DISPLAY_WIDTH - 220);
+            lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
             lv_obj_set_style_text_font(name, &lv_font_montserrat_16, 0);
             lv_obj_set_style_text_color(name, ui_theme_get_text_color(), 0);
 
@@ -287,6 +291,8 @@ static void user_mgr_populate_task(void* arg) {
                          r->u.telegram_id[0]   ? r->u.telegram_id   : "Not Linked");
             }
             lv_label_set_text(details, details_text);
+            lv_obj_set_width(details, DISPLAY_WIDTH - 220);
+            lv_label_set_long_mode(details, LV_LABEL_LONG_DOT);
             lv_obj_set_style_text_font(details, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(details, ui_theme_get_text_muted_color(), 0);
             lv_obj_set_style_margin_top(details, 2, 0);
@@ -298,6 +304,8 @@ static void user_mgr_populate_task(void* arg) {
                 lv_obj_delete(item); continue;
             }
             lv_label_set_text(course_lbl, r->courses_text);
+            lv_obj_set_width(course_lbl, DISPLAY_WIDTH - 220);
+            lv_label_set_long_mode(course_lbl, LV_LABEL_LONG_DOT);
             lv_obj_set_style_text_font(course_lbl, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(course_lbl, lv_color_hex(0x3B82F6), 0);
             lv_obj_set_style_margin_top(course_lbl, 2, 0);

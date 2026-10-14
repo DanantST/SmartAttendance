@@ -110,6 +110,7 @@ static void create_reports_screen(void) {
     lv_obj_set_style_border_width(content, 0, 0);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_scroll_dir(content, LV_DIR_VER);
 
     /* ── Course selection card ── */
     lv_obj_t* course_card = ui_create_card(content, DISPLAY_WIDTH - 40, 110);

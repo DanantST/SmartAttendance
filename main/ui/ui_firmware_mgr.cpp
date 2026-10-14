@@ -149,6 +149,7 @@ static void show_progress_modal(const char *title, const char *initial_msg) {
 
     /* Modal Card */
     lv_obj_t *card = lv_obj_create(s_progress_modal);
+    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(card, 540, 260);
     lv_obj_center(card);
     lv_obj_set_style_bg_color(card, lv_color_hex(0x1E293B), 0); /* Dark slate */
@@ -227,6 +228,7 @@ static void show_confirm_modal(const firmware_info_t *info) {
     lv_obj_remove_flag(modal, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *card = lv_obj_create(modal);
+    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(card, 560, 310);
     lv_obj_center(card);
     lv_obj_set_style_bg_color(card, lv_color_hex(0x1E293B), 0);
@@ -360,6 +362,7 @@ static void scan_firmwares_worker_task(void *param) {
 
             if (count <= 0) {
                 lv_obj_t *empty_card = lv_obj_create(s_list_container);
+                lv_obj_remove_flag(empty_card, LV_OBJ_FLAG_SCROLLABLE);
                 lv_obj_set_size(empty_card, 590, 160);
                 lv_obj_set_style_bg_color(empty_card, lv_color_hex(0x1E293B), 0);
                 lv_obj_set_style_border_color(empty_card, lv_color_hex(0x334155), 0);
@@ -544,6 +547,7 @@ static void create_firmware_screen(void) {
 
     /* === Left Column (System Status & Cloud Update) === */
     lv_obj_t *left_col = lv_obj_create(content);
+    lv_obj_remove_flag(left_col, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(left_col, 340, 444);
     lv_obj_align(left_col, LV_ALIGN_TOP_LEFT, 0, 0);
     lv_obj_set_style_bg_color(left_col, lv_color_hex(0x1E293B), 0);
@@ -579,6 +583,7 @@ static void create_firmware_screen(void) {
 
     /* Rollback Badge */
     lv_obj_t *sec_badge = lv_obj_create(left_col);
+    lv_obj_remove_flag(sec_badge, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(sec_badge, 305, 46);
     lv_obj_align(sec_badge, LV_ALIGN_TOP_LEFT, 0, 98);
     lv_obj_set_style_bg_color(sec_badge, lv_color_hex(0x064E3B), 0);
@@ -594,12 +599,15 @@ static void create_firmware_screen(void) {
 
     lv_obj_t *badge_sub = lv_label_create(sec_badge);
     lv_label_set_text(badge_sub, "Automatic rollback protects against boot failures");
+    lv_obj_set_width(badge_sub, 290);
+    lv_label_set_long_mode(badge_sub, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_color(badge_sub, lv_color_hex(0xA7F3D0), 0);
     lv_obj_set_style_text_font(badge_sub, &lv_font_montserrat_12, 0);
     lv_obj_align(badge_sub, LV_ALIGN_BOTTOM_LEFT, 5, 0);
 
     /* Cloud OTA Section */
     lv_obj_t *cloud_divider = lv_obj_create(left_col);
+    lv_obj_remove_flag(cloud_divider, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(cloud_divider, 305, 1);
     lv_obj_align(cloud_divider, LV_ALIGN_TOP_LEFT, 0, 158);
     lv_obj_set_style_bg_color(cloud_divider, lv_color_hex(0x334155), 0);
@@ -677,6 +685,7 @@ static void create_firmware_screen(void) {
     lv_obj_set_style_pad_all(s_list_container, 5, 0);
     lv_obj_set_flex_flow(s_list_container, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_scrollbar_mode(s_list_container, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_scroll_dir(s_list_container, LV_DIR_VER);
 
     /* Initial Async Scan */
     refresh_sd_firmwares_async();
