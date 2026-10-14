@@ -3088,6 +3088,39 @@ feat(server): add OTA firmware serving endpoints and fix fw_scan task heap alloc
 #### Commit
 fix(server): prioritize /api/firmware/version route over dynamic filename path param
 
+---
+
+## Session - 2026-10-14 - Fix LVGL Builtin sprintf Crash During SD Card Firmware List Rendering
+
+### User Request
+> check the monitor session now
+
+### Implementation
+> 1. **Live Serial Monitor Analysis on COM3**:
+>    - Diagnosed the device logs after cloud OTA download: `https://danantst-smart-attendance-bot.hf.space/firmware/latest.bin` (5,550,832 bytes) was successfully downloaded and saved to `/sdcard/firmware/SmartAttendance_latest.bin`.
+>    - However, immediately upon scanning the downloaded binary, the screen triggered a panic: `Core 1 panic'ed (Load access fault)` at `MEPC 0x40058864` (`lv_sprintf_builtin.c:721` via `lv_label_set_text_fmt`).
+> 2. **Root Cause Identification**:
+>    - LVGL 9's builtin `lv_sprintf_builtin.c` does not implement floating-point format specifiers (`%f`).
+>    - `lv_label_set_text_fmt` with `"Version: %s • %.2f MB • %s %s"` caused variadic register misalignment because the 8-byte double argument was not properly consumed by `lv_sprintf`, shifting subsequent string pointers (`compile_date`, `compile_time`) to invalid memory addresses (`MTVAL: 0x00100000`).
+> 3. **Resolution**:
+>    - Replaced `lv_label_set_text_fmt` in `ui_firmware_mgr.cpp` with standard libc `snprintf()` and integer arithmetic (`mb_whole` and `mb_dec`) for megabyte formatting.
+>    - Formatted string passed safely to `lv_label_set_text()`.
+>    - Recompiled firmware (`SmartAttendance.bin`, 5.55 MB) and updated `telegram_bot/firmware/latest.bin`.
+
+#### Feature Overview
+- **Stable Firmware Item Rendering**: Firmware metadata in SD Card list rendered cleanly without floating-point sprintf crashes.
+- **OTA Download Verified**: End-to-end 5.55 MB OTA download from Hugging Face Space verified working on hardware.
+
+**`main/ui/ui_firmware_mgr.cpp`** changes:
+- Formatted file metadata string using libc `snprintf` and integer MB calculation before passing to `lv_label_set_text()`.
+
+**`telegram_bot/firmware/latest.bin`** changes:
+- Updated cloud binary with the latest stable build.
+
+#### Commit
+fix(ui): eliminate lv_sprintf Load access fault by using snprintf for firmware metadata rendering
+
+
 
 
 

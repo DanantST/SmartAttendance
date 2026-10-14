@@ -400,10 +400,14 @@ static void scan_firmwares_worker_task(void *param) {
                     lv_obj_align(lbl_title, LV_ALIGN_TOP_LEFT, 0, 0);
 
                     /* Version and size metadata */
+                    char meta_buf[128];
+                    uint32_t mb_whole = (uint32_t)(item->size_bytes / (1024 * 1024));
+                    uint32_t mb_dec = (uint32_t)(((item->size_bytes % (1024 * 1024)) * 100) / (1024 * 1024));
+                    snprintf(meta_buf, sizeof(meta_buf), "Version: %s | %lu.%02lu MB | %s %s",
+                             item->version, (unsigned long)mb_whole, (unsigned long)mb_dec,
+                             item->compile_date, item->compile_time);
                     lv_obj_t *lbl_sub = lv_label_create(row);
-                    lv_label_set_text_fmt(lbl_sub, "Version: %s • %.2f MB • %s %s",
-                                          item->version, (double)item->size_bytes / (1024.0 * 1024.0),
-                                          item->compile_date, item->compile_time);
+                    lv_label_set_text(lbl_sub, meta_buf);
                     lv_obj_set_style_text_font(lbl_sub, &lv_font_montserrat_12, 0);
                     lv_obj_set_style_text_color(lbl_sub, lv_color_hex(0x94A3B8), 0);
                     lv_obj_align(lbl_sub, LV_ALIGN_BOTTOM_LEFT, 0, 0);
