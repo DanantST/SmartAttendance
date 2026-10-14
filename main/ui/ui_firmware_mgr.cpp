@@ -19,6 +19,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include "esp_http_client.h"
+#include "esp_crt_bundle.h"
+#include "cJSON.h"
 
 static const char *TAG = "UI_FW_MGR";
 
@@ -48,6 +52,7 @@ static void show_progress_modal(const char *title, const char *initial_msg);
 static void hide_progress_modal(void);
 static void start_flash_process(void);
 static void start_cloud_download(const char *url, const char *ver);
+static void show_cloud_catalog_modal(void);
 
 /* ------------------------------------------------------------------ */
 /*  Public Screen Navigation API                                      */
@@ -324,6 +329,306 @@ static void start_cloud_download(const char *url, const char *ver) {
     if (err != ESP_OK) {
         hide_progress_modal();
         ui_show_notification(NOTIFY_ERROR, "Download Failed", "Could not start download task", 3000);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Cloud Firmware Catalog Browser Modal                              */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    char url[256];
+    char version[32];
+    lv_obj_t *modal;
+} cloud_dl_param_t;
+
+typedef struct {
+    char endpoint[128];
+    lv_obj_t *modal;
+    lv_obj_t *list_box;
+    lv_obj_t *status_lbl;
+    lv_obj_t *spinner;
+} catalog_worker_param_t;
+
+static void fetch_cloud_catalog_worker_task(void *pvParam) {
+    catalog_worker_param_t *params = (catalog_worker_param_t *)pvParam;
+    char url[256];
+    snprintf(url, sizeof(url), "%s/api/firmware/list", params->endpoint);
+
+    ESP_LOGI(TAG, "Querying cloud firmware catalog from: %s", url);
+
+    esp_http_client_config_t config = {};
+    config.url = url;
+    config.crt_bundle_attach = esp_crt_bundle_attach;
+    config.timeout_ms = 15000;
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) {
+        if (ui_lock()) {
+            if (params->status_lbl && lv_obj_is_valid(params->status_lbl)) {
+                lv_label_set_text(params->status_lbl, "Failed to initialize HTTP client");
+            }
+            if (params->spinner && lv_obj_is_valid(params->spinner)) {
+                lv_obj_add_flag(params->spinner, LV_OBJ_FLAG_HIDDEN);
+            }
+            ui_unlock();
+        }
+        free(params);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to connect to cloud catalog: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        if (ui_lock()) {
+            if (params->status_lbl && lv_obj_is_valid(params->status_lbl)) {
+                lv_label_set_text_fmt(params->status_lbl, "Failed to connect to server (%s)", esp_err_to_name(err));
+            }
+            if (params->spinner && lv_obj_is_valid(params->spinner)) {
+                lv_obj_add_flag(params->spinner, LV_OBJ_FLAG_HIDDEN);
+            }
+            ui_unlock();
+        }
+        free(params);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    int content_len = esp_http_client_fetch_headers(client);
+    int buf_size = (content_len > 0 && content_len < 32768) ? (content_len + 512) : 16384;
+    char *json_buf = (char *)malloc(buf_size);
+    if (!json_buf) {
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        free(params);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    int total_read = 0;
+    while (total_read < buf_size - 1) {
+        int r = esp_http_client_read(client, json_buf + total_read, buf_size - 1 - total_read);
+        if (r <= 0) break;
+        total_read += r;
+    }
+    json_buf[total_read] = '\0';
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+
+    cJSON *root = cJSON_Parse(json_buf);
+    free(json_buf);
+
+    if (ui_lock()) {
+        if (params->modal && lv_obj_is_valid(params->modal)) {
+            if (params->spinner && lv_obj_is_valid(params->spinner)) {
+                lv_obj_add_flag(params->spinner, LV_OBJ_FLAG_HIDDEN);
+            }
+
+            cJSON *firmwares = root ? cJSON_GetObjectItem(root, "firmwares") : NULL;
+            int count = (firmwares && cJSON_IsArray(firmwares)) ? cJSON_GetArraySize(firmwares) : 0;
+
+            if (count == 0) {
+                if (params->status_lbl && lv_obj_is_valid(params->status_lbl)) {
+                    lv_label_set_text(params->status_lbl, "No firmware releases available on server.");
+                }
+            } else {
+                if (params->status_lbl && lv_obj_is_valid(params->status_lbl)) {
+                    lv_obj_add_flag(params->status_lbl, LV_OBJ_FLAG_HIDDEN);
+                }
+
+                for (int i = 0; i < count; i++) {
+                    cJSON *item = cJSON_GetArrayItem(firmwares, i);
+                    if (!item) continue;
+
+                    const char *ver = cJSON_GetObjectItem(item, "version") ? cJSON_GetObjectItem(item, "version")->valuestring : "Unknown";
+                    const char *fname = cJSON_GetObjectItem(item, "filename") ? cJSON_GetObjectItem(item, "filename")->valuestring : "";
+                    const char *dl_url = cJSON_GetObjectItem(item, "download_url") ? cJSON_GetObjectItem(item, "download_url")->valuestring : "";
+                    const char *cdate = cJSON_GetObjectItem(item, "compile_date") ? cJSON_GetObjectItem(item, "compile_date")->valuestring : "";
+                    const char *ctime = cJSON_GetObjectItem(item, "compile_time") ? cJSON_GetObjectItem(item, "compile_time")->valuestring : "";
+                    double sz_mb = 0.0;
+                    cJSON *sz_item = cJSON_GetObjectItem(item, "size_bytes");
+                    if (sz_item && cJSON_IsNumber(sz_item)) {
+                        sz_mb = sz_item->valuedouble / (1024.0 * 1024.0);
+                    }
+
+                    char sd_check_path[256];
+                    snprintf(sd_check_path, sizeof(sd_check_path), "%s/SmartAttendance_%s.bin", OTA_FIRMWARE_DIR, ver);
+                    struct stat st;
+                    bool on_sd = (stat(sd_check_path, &st) == 0 && st.st_size > 1024);
+
+                    /* Card Item Container */
+                    lv_obj_t *item_box = lv_obj_create(params->list_box);
+                    lv_obj_remove_flag(item_box, LV_OBJ_FLAG_SCROLLABLE);
+                    lv_obj_set_size(item_box, 630, 68);
+                    lv_obj_set_style_bg_color(item_box, lv_color_hex(0x0F172A), 0);
+                    lv_obj_set_style_border_color(item_box, lv_color_hex(0x334155), 0);
+                    lv_obj_set_style_border_width(item_box, 1, 0);
+                    lv_obj_set_style_radius(item_box, 10, 0);
+                    lv_obj_set_style_pad_all(item_box, 10, 0);
+
+                    /* Left: Version + info */
+                    lv_obj_t *ver_lbl = lv_label_create(item_box);
+                    lv_label_set_text_fmt(ver_lbl, "%s", ver);
+                    lv_obj_set_style_text_font(ver_lbl, &lv_font_montserrat_16, 0);
+                    lv_obj_set_style_text_color(ver_lbl, lv_color_hex(0x38BDF8), 0);
+                    lv_obj_align(ver_lbl, LV_ALIGN_TOP_LEFT, 10, 0);
+
+                    lv_obj_t *sub_lbl = lv_label_create(item_box);
+                    lv_label_set_text_fmt(sub_lbl, "%s  •  %.2f MB  •  %s %s", fname, sz_mb, cdate, ctime);
+                    lv_obj_set_style_text_font(sub_lbl, &lv_font_montserrat_12, 0);
+                    lv_obj_set_style_text_color(sub_lbl, lv_color_hex(0x94A3B8), 0);
+                    lv_obj_align(sub_lbl, LV_ALIGN_BOTTOM_LEFT, 10, 0);
+
+                    /* Right: Status / Download Button */
+                    if (on_sd) {
+                        lv_obj_t *sd_badge = lv_label_create(item_box);
+                        lv_label_set_text(sd_badge, LV_SYMBOL_OK " On SD Card");
+                        lv_obj_set_style_text_font(sd_badge, &lv_font_montserrat_14, 0);
+                        lv_obj_set_style_text_color(sd_badge, lv_color_hex(0x10B981), 0);
+                        lv_obj_align(sd_badge, LV_ALIGN_RIGHT_MID, -15, 0);
+                    } else {
+                        lv_obj_t *dl_btn = lv_btn_create(item_box);
+                        lv_obj_set_size(dl_btn, 130, 36);
+                        lv_obj_align(dl_btn, LV_ALIGN_RIGHT_MID, -10, 0);
+                        lv_obj_set_style_bg_color(dl_btn, lv_color_hex(0x7C3AED), 0);
+                        lv_obj_set_style_radius(dl_btn, 6, 0);
+
+                        lv_obj_t *dl_lbl = lv_label_create(dl_btn);
+                        lv_label_set_text(dl_lbl, LV_SYMBOL_DOWNLOAD " Download");
+                        lv_obj_set_style_text_font(dl_lbl, &lv_font_montserrat_12, 0);
+                        lv_obj_center(dl_lbl);
+
+                        cloud_dl_param_t *dl_p = (cloud_dl_param_t *)malloc(sizeof(cloud_dl_param_t));
+                        if (dl_p) {
+                            snprintf(dl_p->url, sizeof(dl_p->url), "%s%s", params->endpoint, dl_url);
+                            strncpy(dl_p->version, ver, sizeof(dl_p->version) - 1);
+                            dl_p->modal = params->modal;
+
+                            lv_obj_add_event_cb(dl_btn, [](lv_event_t *e) {
+                                lv_event_code_t code = lv_event_get_code(e);
+                                cloud_dl_param_t *p = (cloud_dl_param_t *)lv_event_get_user_data(e);
+                                if (!p) return;
+                                if (code == LV_EVENT_CLICKED) {
+                                    char full_url[256];
+                                    char ver_tag[32];
+                                    strncpy(full_url, p->url, sizeof(full_url) - 1);
+                                    strncpy(ver_tag, p->version, sizeof(ver_tag) - 1);
+                                    lv_obj_t *m = p->modal;
+                                    lv_obj_delete_async(m);
+                                    start_cloud_download(full_url, ver_tag);
+                                } else if (code == LV_EVENT_DELETE) {
+                                    free(p);
+                                }
+                            }, LV_EVENT_ALL, dl_p);
+                        }
+                    }
+                }
+            }
+        }
+        ui_unlock();
+    }
+
+    if (root) cJSON_Delete(root);
+    free(params);
+    vTaskDelete(NULL);
+}
+
+static void show_cloud_catalog_modal(void) {
+    char endpoint[128] = {0};
+    nvs_handle_t nvs;
+    if (nvs_open("telegram", NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof(endpoint);
+        nvs_get_str(nvs, "endpoint", endpoint, &len);
+        nvs_close(nvs);
+    }
+
+    if (strlen(endpoint) == 0) {
+        ui_show_notification(NOTIFY_WARNING, "No Cloud Endpoint",
+                             "Please set Cloud Server URL in Settings first.", 3500);
+        return;
+    }
+
+    lv_obj_t *modal = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(modal, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    lv_obj_set_pos(modal, 0, 0);
+    lv_obj_set_style_bg_color(modal, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(modal, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(modal, 0, 0);
+    lv_obj_set_style_pad_all(modal, 0, 0);
+    lv_obj_remove_flag(modal, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *card = lv_obj_create(modal);
+    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(card, 700, 440);
+    lv_obj_center(card);
+    lv_obj_set_style_bg_color(card, lv_color_hex(0x1E293B), 0);
+    lv_obj_set_style_border_color(card, lv_color_hex(0x3B82F6), 0);
+    lv_obj_set_style_border_width(card, 2, 0);
+    lv_obj_set_style_radius(card, 16, 0);
+    lv_obj_set_style_pad_all(card, 20, 0);
+
+    /* Title */
+    lv_obj_t *title = lv_label_create(card);
+    lv_label_set_text(title, LV_SYMBOL_DOWNLOAD " Cloud Firmware Releases Catalog");
+    lv_obj_set_style_text_color(title, lv_color_white(), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t *sub = lv_label_create(card);
+    lv_label_set_text(sub, "Select any version to download directly to your SD card:");
+    lv_obj_set_style_text_color(sub, lv_color_hex(0x94A3B8), 0);
+    lv_obj_set_style_text_font(sub, &lv_font_montserrat_12, 0);
+    lv_obj_align(sub, LV_ALIGN_TOP_LEFT, 0, 24);
+
+    /* Close Button */
+    lv_obj_t *close_btn = lv_btn_create(card);
+    lv_obj_set_size(close_btn, 100, 34);
+    lv_obj_align(close_btn, LV_ALIGN_TOP_RIGHT, 0, -5);
+    lv_obj_set_style_bg_color(close_btn, lv_color_hex(0x475569), 0);
+    lv_obj_set_style_radius(close_btn, 6, 0);
+    lv_obj_t *close_lbl = lv_label_create(close_btn);
+    lv_label_set_text(close_lbl, LV_SYMBOL_CLOSE " Close");
+    lv_obj_set_style_text_font(close_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_center(close_lbl);
+    lv_obj_add_event_cb(close_btn, [](lv_event_t *e) {
+        lv_obj_t *m = (lv_obj_t *)lv_event_get_user_data(e);
+        lv_obj_delete_async(m);
+    }, LV_EVENT_CLICKED, modal);
+
+    /* Scrollable List Container */
+    lv_obj_t *list_box = lv_obj_create(card);
+    lv_obj_set_size(list_box, 660, 345);
+    lv_obj_align(list_box, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(list_box, lv_color_hex(0x0F172A), 0);
+    lv_obj_set_style_border_color(list_box, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(list_box, 1, 0);
+    lv_obj_set_style_radius(list_box, 10, 0);
+    lv_obj_set_style_pad_all(list_box, 10, 0);
+    lv_obj_set_scroll_dir(list_box, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(list_box, LV_SCROLLBAR_MODE_AUTO);
+
+    /* Loading Spinner */
+    lv_obj_t *spinner = lv_spinner_create(list_box);
+    lv_obj_set_size(spinner, 40, 40);
+    lv_obj_center(spinner);
+    lv_obj_set_style_arc_color(spinner, lv_color_hex(0x3B82F6), LV_PART_INDICATOR);
+
+    lv_obj_t *status_lbl = lv_label_create(list_box);
+    lv_label_set_text(status_lbl, "Querying releases catalog from cloud server...");
+    lv_obj_set_style_text_color(status_lbl, lv_color_hex(0x94A3B8), 0);
+    lv_obj_set_style_text_font(status_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_align(status_lbl, LV_ALIGN_CENTER, 0, 45);
+
+    catalog_worker_param_t *params = (catalog_worker_param_t *)malloc(sizeof(catalog_worker_param_t));
+    if (params) {
+        strncpy(params->endpoint, endpoint, sizeof(params->endpoint) - 1);
+        params->modal = modal;
+        params->list_box = list_box;
+        params->status_lbl = status_lbl;
+        params->spinner = spinner;
+        xTaskCreate(fetch_cloud_catalog_worker_task, "cat_fetch", 8192, params, 5, NULL);
     }
 }
 
@@ -632,14 +937,14 @@ static void create_firmware_screen(void) {
     lv_obj_set_style_text_font(cloud_desc, &lv_font_montserrat_12, 0);
     lv_obj_align(cloud_desc, LV_ALIGN_TOP_LEFT, 0, 200);
 
-    /* Download Cloud OTA Button */
+    /* Button 1: Download Latest Release */
     lv_obj_t *cloud_btn = lv_btn_create(left_col);
-    lv_obj_set_size(cloud_btn, 305, 42);
-    lv_obj_align(cloud_btn, LV_ALIGN_BOTTOM_MID, 0, -5);
+    lv_obj_set_size(cloud_btn, 305, 38);
+    lv_obj_align(cloud_btn, LV_ALIGN_BOTTOM_MID, 0, -48);
     lv_obj_set_style_bg_color(cloud_btn, lv_color_hex(0x7C3AED), 0); /* Vibrant Violet */
     lv_obj_set_style_radius(cloud_btn, 8, 0);
     lv_obj_t *cloud_lbl = lv_label_create(cloud_btn);
-    lv_label_set_text(cloud_lbl, LV_SYMBOL_DOWNLOAD " Download from Server");
+    lv_label_set_text(cloud_lbl, LV_SYMBOL_DOWNLOAD " Download Latest Release");
     lv_obj_set_style_text_font(cloud_lbl, &lv_font_montserrat_12, 0);
     lv_obj_center(cloud_lbl);
 
@@ -662,6 +967,21 @@ static void create_firmware_screen(void) {
             snprintf(ota_url, sizeof(ota_url), "%s/firmware/latest.bin", endpoint);
             start_cloud_download(ota_url, "latest");
         }
+    }, LV_EVENT_CLICKED, NULL);
+
+    /* Button 2: Browse All Cloud Releases */
+    lv_obj_t *catalog_btn = lv_btn_create(left_col);
+    lv_obj_set_size(catalog_btn, 305, 38);
+    lv_obj_align(catalog_btn, LV_ALIGN_BOTTOM_MID, 0, -4);
+    lv_obj_set_style_bg_color(catalog_btn, lv_color_hex(0x2563EB), 0); /* Blue */
+    lv_obj_set_style_radius(catalog_btn, 8, 0);
+    lv_obj_t *catalog_lbl = lv_label_create(catalog_btn);
+    lv_label_set_text(catalog_lbl, LV_SYMBOL_LIST " Browse Cloud Releases");
+    lv_obj_set_style_text_font(catalog_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_center(catalog_lbl);
+
+    lv_obj_add_event_cb(catalog_btn, [](lv_event_t *e) {
+        show_cloud_catalog_modal();
     }, LV_EVENT_CLICKED, NULL);
 
     /* === Right Column (SD Card Archived Firmwares) === */

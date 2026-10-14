@@ -222,28 +222,33 @@ static void download_task(void *pvParam) {
             .keep_alive_enable = true,
         };
 
-        esp_http_client_handle_t client = esp_http_client_init(&config);
-        if (!client) {
-            ESP_LOGE(TAG, "HTTP client initialization failed");
-            vTaskDelay(pdMS_TO_TICKS(1500));
-            continue;
-        }
-
-        /* If resuming, send Range request header */
-        if (existing_bytes > 0) {
-            char range_hdr[64];
-            snprintf(range_hdr, sizeof(range_hdr), "bytes=%d-", existing_bytes);
-            esp_http_client_set_header(client, "Range", range_hdr);
-        }
-
-        /* Retry opening connection up to MAX_CONNECT_RETRIES times with backoff */
+        /* Attempt connection with fresh client per try */
+        esp_http_client_handle_t client = NULL;
         esp_err_t err = ESP_FAIL;
+
         for (int conn_try = 1; conn_try <= MAX_CONNECT_RETRIES; conn_try++) {
+            client = esp_http_client_init(&config);
+            if (!client) {
+                ESP_LOGE(TAG, "HTTP client initialization failed");
+                vTaskDelay(pdMS_TO_TICKS(1500));
+                continue;
+            }
+
+            if (existing_bytes > 0) {
+                char range_hdr[64];
+                snprintf(range_hdr, sizeof(range_hdr), "bytes=%d-", existing_bytes);
+                esp_http_client_set_header(client, "Range", range_hdr);
+            }
+
             err = esp_http_client_open(client, 0);
             if (err == ESP_OK) break;
 
             ESP_LOGW(TAG, "Connection attempt %d/%d failed (%s), retrying in %d s...",
                      conn_try, MAX_CONNECT_RETRIES, esp_err_to_name(err), conn_try * 2);
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            client = NULL;
+
             if (params->progress_cb) {
                 char msg[64];
                 snprintf(msg, sizeof(msg), "Connecting to server... (try %d/%d)", conn_try, MAX_CONNECT_RETRIES);
@@ -253,9 +258,8 @@ static void download_task(void *pvParam) {
             vTaskDelay(pdMS_TO_TICKS(conn_try * 2000));
         }
 
-        if (err != ESP_OK) {
+        if (err != ESP_OK || !client) {
             ESP_LOGE(TAG, "Failed to connect to server after %d attempts: %s", MAX_CONNECT_RETRIES, esp_err_to_name(err));
-            esp_http_client_cleanup(client);
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
         }
@@ -635,4 +639,8 @@ esp_err_t ota_manager_start(const char *url) {
 
 int ota_manager_get_progress(void) {
     return s_ota_progress;
+}
+
+bool ota_manager_is_busy(void) {
+    return s_ota_busy;
 }

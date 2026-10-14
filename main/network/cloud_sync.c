@@ -88,6 +88,11 @@ esp_err_t cloud_sync_init(void) {
 }
 
 esp_err_t cloud_sync_start(void) {
+    if (ota_manager_is_busy()) {
+        ESP_LOGW(TAG, "OTA operation active — postponing cloud sync to prevent network/socket contention");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (s_sync_status == SYNC_STATUS_IN_PROGRESS) {
         ESP_LOGW(TAG, "Sync already in progress");
         return ESP_ERR_INVALID_STATE;
@@ -136,6 +141,13 @@ time_t cloud_sync_get_last_timestamp(void) {
 /* ==================== Sync Task ==================== */
 
 static void cloud_sync_task(void* param) {
+    if (ota_manager_is_busy()) {
+        ESP_LOGW(TAG, "OTA operation active — aborting sync task to prevent contention");
+        s_sync_status = SYNC_STATUS_IDLE;
+        s_sync_task_handle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
     s_sync_status = SYNC_STATUS_IN_PROGRESS;
     esp_err_t overall_result = ESP_OK;
 

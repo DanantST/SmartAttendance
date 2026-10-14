@@ -3374,6 +3374,61 @@ feat(release): bump firmware to v1.1.2 with distinct binary build
 #### Commit
 feat(ota): implement resilient resumable firmware downloads and PSRAM stream buffering (v1.1.3)
 
+---
+
+## Session - 2026-10-14 - Granular Cloud Firmware Version Catalog Browser & Download Contention Guard (v1.1.4)
+
+### User Request
+> What if the user wants to download a specific firmware version that isn't presently on the device, probably even a previous version? Can you implement that feature in v1.1.4 and push it to the server?
+> What usually makes the download process fail or disconnect midway or what is it this time? Because the download for v1.1.3 tat I just attempted could not complete...
+
+### Implementation
+> 1. Investigated monitor logs during the v1.1.3 download attempt:
+>    - Diagnosed the root cause of the mid-download failure at byte 5,002,229: periodic background `cloud_sync` woke up and launched multiple simultaneous HTTPS API requests (`/api/sync_schedules`, `/api/get_course_enrollments`, `/api/get_report_requests`).
+>    - Over the 10 MHz SDIO bridge to the ESP32-C6 Wi-Fi co-processor, the concurrent TLS handshakes exhausted the socket pool (`HTTP_CLIENT: Connection failed, sock < 0`) and caused SDIO bus buffer overflow (`H_SDIO_DRV: sdio_get_tx_buffer_num: err: 265`).
+>    - Additionally, the retry loop in `ota_manager.c` attempted to reuse the existing `esp_http_client` handle after a failed connection without closing and destroying it first, permanently leaking the socket slot.
+> 2. Added mutual exclusion between OTA downloads and background cloud synchronization:
+>    - Exported `ota_manager_is_busy(void)` from `main/network/ota_manager.c` / `ota_manager.h`.
+>    - Added guard clauses in `cloud_sync_start()` and `cloud_sync_task()` in `main/network/cloud_sync.c` to postpone/abort sync cycles whenever an OTA download is active, giving 100% of socket and SDIO bus bandwidth to firmware downloads.
+>    - Fixed `download_task` connection retry loop to properly close and re-initialize a fresh client on every reconnect attempt, preventing socket pool exhaustion.
+> 3. Implemented Cloud Releases Catalog Browser in Firmware Manager UI:
+>    - Added "Browse Cloud Releases" modal dialog in `main/ui/ui_firmware_mgr.cpp` that fetches `/api/firmware/list` asynchronously.
+>    - Formats dynamic cards displaying release version name, file size in MB, build date, and status indicators:
+>      - Indicates `✓ On SD Card` if the file already exists locally in `/sdcard/firmware/`.
+>      - Shows a `↓ Download` button for releases not present locally, enabling selective downloads of any release (including previous or legacy versions).
+>    - Hooked "Browse Cloud Releases" and "Download Latest Release" into the left sidebar of the Firmware Manager app.
+> 4. Bumped project version to `v1.1.4` in `CMakeLists.txt`, rebuilt the firmware, and staged `SmartAttendance_v1.1.4.bin` and `latest.bin` in `telegram_bot/firmware/`.
+
+#### Feature Overview
+- **Selective Firmware Catalog**: Users can view all server-hosted releases (new and legacy) directly from the device screen and download any specific version to SD card.
+- **OTA Socket & SDIO Protection**: Background cloud sync automatically pauses while an OTA download is in progress, preventing socket exhaustion and SDIO packet drops.
+- **Clean Connection Retries**: Client handle recreation ensures failed connections cleanly release their sockets before retrying.
+
+**main/network/ota_manager.h** & **main/network/ota_manager.c** changes:
+- Exported `bool ota_manager_is_busy(void)`.
+- Replaced in-place client handle reuse in connection retry loop with clean re-initialization and termination per attempt.
+
+**main/network/cloud_sync.c** changes:
+- Added `ota_manager_is_busy()` guard to skip background sync while OTA download is running.
+
+**main/ui/ui_firmware_mgr.cpp** changes:
+- Created `show_cloud_catalog_modal()` and background task `fetch_cloud_catalog_worker_task()`.
+- Fetched `/api/firmware/list` from server, parsed JSON, checked local SD card presence, and added one-tap download action.
+- Added "Browse Cloud Releases" button to the UI sidebar.
+
+**main/CMakeLists.txt** changes:
+- Added `cjson` to component dependencies.
+
+**CMakelists.txt** changes:
+- Bumped `PROJECT_VER` to `"v1.1.4"`.
+
+**telegram_bot/firmware/** changes:
+- Added `SmartAttendance_v1.1.4.bin` and updated `latest.bin`.
+
+#### Commit
+feat(ota): add cloud releases catalog browser and sync contention guard (v1.1.4)
+
+
 
 
 

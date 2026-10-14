@@ -76,6 +76,7 @@ esp_err_t ota_manager_flash_from_sd_async(const char *filepath,
  */
 esp_err_t ota_manager_start(const char *url);
 int ota_manager_get_progress(void);
+bool ota_manager_is_busy(void);
 
 #ifdef __cplusplus
 }
