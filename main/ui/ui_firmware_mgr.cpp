@@ -447,11 +447,13 @@ static void fetch_cloud_catalog_worker_task(void *pvParam) {
                     const char *dl_url = cJSON_GetObjectItem(item, "download_url") ? cJSON_GetObjectItem(item, "download_url")->valuestring : "";
                     const char *cdate = cJSON_GetObjectItem(item, "compile_date") ? cJSON_GetObjectItem(item, "compile_date")->valuestring : "";
                     const char *ctime = cJSON_GetObjectItem(item, "compile_time") ? cJSON_GetObjectItem(item, "compile_time")->valuestring : "";
-                    double sz_mb = 0.0;
+                    uint32_t sz_bytes = 0;
                     cJSON *sz_item = cJSON_GetObjectItem(item, "size_bytes");
                     if (sz_item && cJSON_IsNumber(sz_item)) {
-                        sz_mb = sz_item->valuedouble / (1024.0 * 1024.0);
+                        sz_bytes = (uint32_t)sz_item->valuedouble;
                     }
+                    uint32_t mb_whole = sz_bytes / (1024 * 1024);
+                    uint32_t mb_dec = ((sz_bytes % (1024 * 1024)) * 100) / (1024 * 1024);
 
                     char sd_check_path[256];
                     snprintf(sd_check_path, sizeof(sd_check_path), "%s/SmartAttendance_%s.bin", OTA_FIRMWARE_DIR, ver);
@@ -470,13 +472,16 @@ static void fetch_cloud_catalog_worker_task(void *pvParam) {
 
                     /* Left: Version + info */
                     lv_obj_t *ver_lbl = lv_label_create(item_box);
-                    lv_label_set_text_fmt(ver_lbl, "%s", ver);
+                    lv_label_set_text(ver_lbl, ver);
                     lv_obj_set_style_text_font(ver_lbl, &lv_font_montserrat_16, 0);
                     lv_obj_set_style_text_color(ver_lbl, lv_color_hex(0x38BDF8), 0);
                     lv_obj_align(ver_lbl, LV_ALIGN_TOP_LEFT, 10, 0);
 
+                    char meta_buf[128];
+                    snprintf(meta_buf, sizeof(meta_buf), "%s | %lu.%02lu MB | %s %s",
+                             fname, (unsigned long)mb_whole, (unsigned long)mb_dec, cdate, ctime);
                     lv_obj_t *sub_lbl = lv_label_create(item_box);
-                    lv_label_set_text_fmt(sub_lbl, "%s  •  %.2f MB  •  %s %s", fname, sz_mb, cdate, ctime);
+                    lv_label_set_text(sub_lbl, meta_buf);
                     lv_obj_set_style_text_font(sub_lbl, &lv_font_montserrat_12, 0);
                     lv_obj_set_style_text_color(sub_lbl, lv_color_hex(0x94A3B8), 0);
                     lv_obj_align(sub_lbl, LV_ALIGN_BOTTOM_LEFT, 10, 0);

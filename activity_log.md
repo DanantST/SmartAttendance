@@ -3477,6 +3477,35 @@ feat(ota): add cloud releases catalog browser and sync contention guard (v1.1.4)
 #### Commit
 fix(ota): resolve pre-sntp 1-hour clock offset and sd-card flashing watchdog stalls
 
+---
+
+## Session - 2026-10-14 - Fix Load Access Fault Panic in Cloud Release Catalog Renderer
+
+### User Request
+> the device crashed again when i clicked the browse release button
+
+### Implementation
+> 1. Analyzed crash dump from serial monitor:
+>    - Exception was `Guru Meditation Error: Core 0 panic'ed (Load access fault)` at `MEPC: 0x40059d24` (`_strnlen_s` in `lv_sprintf_builtin.c`).
+>    - Disassembled stack trace via `addr2line`: Root trigger was `lv_label_set_text_fmt(sub_lbl, "%s • %.2f MB • %s %s", ...)` in `fetch_cloud_catalog_worker_task` (`ui_firmware_mgr.cpp:479`).
+>    - In LVGL 9, `lv_sprintf_builtin.c` lacks support for 64-bit floating point format specifiers (`%f`). Passing an 8-byte `double` misaligned the 32-bit variadic registers on RISC-V, corrupting adjacent string pointers (`cdate`, `ctime`) and triggering a load access fault when strlen evaluated them.
+> 2. Fixed string formatting:
+>    - Replaced `lv_label_set_text_fmt` and `%.2f` with integer megabyte arithmetic (`mb_whole` and `mb_dec`) using standard libc `snprintf()`, followed by `lv_label_set_text()`.
+> 3. Recompiled firmware and flashed update to the device via USB on COM3. Staged binaries in `telegram_bot/firmware/`.
+
+#### Feature Overview
+- **Crash-Free Cloud Catalog**: "Browse Cloud Releases" modal safely parses and renders all server-hosted builds without sprintf register corruption.
+
+**main/ui/ui_firmware_mgr.cpp** changes:
+- Switched metadata string generation from `lv_label_set_text_fmt` with `%f` to `snprintf` with integer MB breakdown.
+
+**telegram_bot/firmware/** changes:
+- Updated `SmartAttendance_v1.1.4.bin` and `latest.bin`.
+
+#### Commit
+fix(ui): eliminate lv_sprintf float formatting crash in cloud catalog browser
+
+
 
 
 
