@@ -3280,6 +3280,31 @@ fix(ui): eliminate card scroll overflow and resolve brightness slider reboot cra
 #### Commit
 feat(release): bump version to v1.1.1 and add upgrade action styling in firmware manager
 
+---
+
+## Session - 2026-10-14 - Remove Diagnostic Red Circle from Setup Wizard
+
+### User Request
+> There is a red circle that appears at a top corner of the screen when the user is setting up the device as a new device also after a restore factory action. I want you to trace that circle in the codebase and remove it. The circle is a diagnostic element we forgot to remove after we wrer done with it.
+
+### Implementation
+> 1. Traced the red circle to `create_welcome_page()` in `main/ui/ui_setup_wizard.cpp` (lines 71-77).
+> 2. Removed the `circle` LVGL object which was hardcoded with `LV_RADIUS_CIRCLE`, size 100x100, color `0xFF0000`, aligned `LV_ALIGN_TOP_LEFT`.
+> 3. Verified clean recompilation of `SmartAttendance.bin` using `idf.py build`.
+> 4. Staged updated `SmartAttendance_v1.1.1.bin` and `latest.bin` in `telegram_bot/firmware/` for cloud deployment and OTA delivery.
+
+#### Feature Overview
+- **Clean First-Boot UI**: Eliminates leftover rendering debug circle from the initial onboarding / factory reset welcome page.
+
+**main/ui/ui_setup_wizard.cpp** changes:
+- Removed obsolete debug `circle` object in `create_welcome_page()`.
+
+**telegram_bot/firmware/** changes:
+- Updated `SmartAttendance_v1.1.1.bin` and `latest.bin` with the cleaned build.
+
+#### Commit
+fix(ui): remove diagnostic red circle from setup wizard welcome page
+
 
 
 

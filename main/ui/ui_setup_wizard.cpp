@@ -68,13 +68,6 @@ static lv_obj_t* create_welcome_page(lv_obj_t* parent) {
     lv_obj_set_style_text_color(title, lv_color_hex(0x00A8FF), 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 60);
     
-    /* DEBUG: Add a big red circle to verify object rendering */
-    lv_obj_t* circle = lv_obj_create(parent);
-    lv_obj_remove_flag(circle, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(circle, 100, 100);
-    lv_obj_set_style_radius(circle, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(circle, lv_color_hex(0xFF0000), 0);
-    lv_obj_align(circle, LV_ALIGN_TOP_LEFT, 20, 20);
     
     lv_obj_t* desc = lv_label_create(parent);
     lv_label_set_text(desc, "Let's set up your device for the first time.\\n"
