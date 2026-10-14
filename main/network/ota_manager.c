@@ -265,6 +265,7 @@ static void download_task(void *pvParam) {
         }
 
         total_read += read_bytes;
+        vTaskDelay(pdMS_TO_TICKS(5)); /* Yield to prevent SDMMC bus contention between SD card and SDIO Wi-Fi */
         if (content_length > 0) {
             int pct = (total_read * 100) / content_length;
             if (pct != last_reported_pct) {

@@ -3120,6 +3120,36 @@ fix(server): prioritize /api/firmware/version route over dynamic filename path p
 #### Commit
 fix(ui): eliminate lv_sprintf Load access fault by using snprintf for firmware metadata rendering
 
+---
+
+## Session - 2026-10-14 - Fix SDMMC Bus Contention in OTA Download Loop
+
+### User Request
+> looks like it is stuck
+
+### Implementation
+> 1. **Live Serial Monitor Analysis on COM3**:
+>    - Diagnosed the device logs during a second OTA download test: after starting download, the serial output began flooding with `E (399158) sdmmc_io: sdmmc_io_rw_extended: sdmmc_send_cmd returned 0x109` and `E (399158) H_SDIO_DRV: sdio_get_tx_buffer_num: err: 265` in an endless loop.
+> 2. **Root Cause Identification**:
+>    - On the CrowPanel ESP32-P4, both the SD Card (Slot 0) and the ESP-Hosted Wi-Fi co-processor (Slot 1) share the single underlying SDMMC hardware controller.
+>    - In `ota_manager.c`, `ota_manager_download_worker` executed `fwrite(buffer, 1, read_bytes, f)` in a tight unyielded `while(1)` loop, hogging the SDMMC controller and starving Slot 1. This caused the ESP-Hosted SDIO driver to hit `ESP_ERR_TIMEOUT` (0x109 / 265) and enter a relentless retry loop.
+> 3. **Resolution**:
+>    - Added `vTaskDelay(pdMS_TO_TICKS(5))` inside the download loop in `ota_manager.c` after each chunk write to yield controller access to Slot 1.
+>    - Recompiled firmware (`SmartAttendance.bin`, 5.55 MB) and updated `telegram_bot/firmware/latest.bin`.
+
+#### Feature Overview
+- **Shared SDMMC Controller Stability**: High-speed SD card downloads now yield to ESP-Hosted Wi-Fi SDIO traffic, eliminating bus starvation timeouts.
+
+**`main/network/ota_manager.c`** changes:
+- Added 5ms yield delay in `ota_manager_download_worker` loop.
+
+**`telegram_bot/firmware/latest.bin`** changes:
+- Updated cloud binary with the latest stable build.
+
+#### Commit
+fix(ota): prevent SDMMC bus contention between SD card and ESP-Hosted Wi-Fi SDIO
+
+
 
 
 
