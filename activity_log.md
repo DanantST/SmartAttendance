@@ -3538,3 +3538,51 @@ fix(ui): eliminate lv_sprintf float formatting crash in cloud catalog browser
 #### Commit
 fix(ui): enable flex column layout in cloud release catalog modal to prevent card overlap
 
+---
+
+## Session - 2026-10-14 - Face Recognition Precision & Illumination Invariance Overhaul
+
+### User Request
+> Are there any possible improvements to the face recognition logic? The model seems to be mis-identifying some slightly similar faces with high level of confidence especially confusing Adesare Adegbagi for Solomon Israel and sometimes get it right depending on the available environmental luminance
+> Proceed
+
+### Implementation
+> 1. Diagnosed root cause of lookalike misidentification:
+>    - Lack of Top-1 vs. Top-2 margin analysis: when two individuals have similar facial features, both scores cleared the previous `0.65` threshold (e.g. 0.73 vs 0.71). With only 0.02 delta, small variations in lighting or pose flipped the winner.
+>    - Global histogram equalization in `face_alignment_normalize_brightness()` did not compensate for directional lighting (side shadows) and amplified dark noise up to 3.0x.
+>    - Lack of scan-time quality bounds allowed severely blurry (<10 sharpness) or extreme glare/shadow frames into temporal voting.
+> 2. Implemented algorithmic enhancements:
+>    - **Confidence Margin Gate**: In `recognizer_identify()` and `recognizer_identify_multiframe()`, track Top-1 and Top-2 runner-up. Enforce $\Delta S = S_{Top1} - S_{Top2} \ge 0.06$ (or $\ge 0.03$ for $S \ge 0.78$). Reject ambiguous matches.
+>    - **Threshold Increase**: Raised baseline `RECOGNITION_THRESHOLD` from $0.65$ to $0.70$ in `config.h`.
+>    - **4×4 Tile-Based CLAHE**: Rewrote `face_alignment_normalize_brightness()` to compute local histograms across 16 tiles (28×28 px) with clip limit redistribution, bilinear interpolation between tile CDFs, and max gain clamped to $1.8\times$ (down from $3.0\times$).
+>    - **Scan Quality Gating & Early-Exit Unanimity**: Added sharpness (`>= 10.0`) and luminance (`[25, 230]`) bounds in `main.c`, and tracked unanimity streak across frames 1..3.
+> 3. Recompiled firmware, updated binaries in `telegram_bot/firmware/`, and flashed update to the board on COM3.
+
+#### Feature Overview
+- **Disambiguation of Similar Faces**: Rejects ambiguous lookalikes if score separation between candidates is $< 0.06$.
+- **Shadow and Lighting Invariance**: True tile-based CLAHE eliminates directional facial shadows without amplifying sensor noise.
+- **Tighter False Acceptance Protection**: Baseline threshold raised to 0.70 with dual-tier confidence gating.
+
+**main/config.h** changes:
+- Raised `RECOGNITION_THRESHOLD` to 0.70f. Added margin thresholds `RECOGNITION_MARGIN_MIN` (0.06f) and `RECOGNITION_MARGIN_HIGH` (0.03f).
+- Added scan quality bounds `SCAN_SHARPNESS_MIN` (10.0f), `SCAN_BRIGHTNESS_MIN` (25.0f), `SCAN_BRIGHTNESS_MAX` (230.0f).
+
+**main/recognition/recognizer.cpp** changes:
+- Added runner-up candidate tracking and margin evaluation in `recognizer_identify()`.
+- Added sorted Top-3 candidate extraction on fused vector and margin gate in `recognizer_identify_multiframe()`.
+
+**main/detection/face_alignment.c** changes:
+- Replaced global histogram equalization with 4×4 tile grid CLAHE and bilinear tile interpolation.
+- Clamped max brightness scaling to 1.8x to prevent dark noise amplification.
+
+**main/main.c** changes:
+- Added scan frame sharpness and brightness quality filters.
+- Fixed early-exit streak evaluation across consecutive window frames.
+
+**telegram_bot/firmware/** changes:
+- Staged updated `SmartAttendance_v1.1.4.bin` and `latest.bin`.
+
+#### Commit
+feat(recog): implement top-1 vs top-2 margin gate, 4x4 tile clahe, and quality gating
+
+

@@ -56,12 +56,18 @@ extern "C" {
 /* ==================== Face Recognition Configuration ==================== */
 #define FACE_ALIGN_SIZE             112              // 112x112 aligned face
 #define EMBEDDING_DIM               128              // 128-dimensional embedding
-#define RECOGNITION_THRESHOLD       0.65f            // Cosine similarity threshold for fused query (S_fused gate)
+#define RECOGNITION_THRESHOLD       0.70f            // Cosine similarity threshold for fused query (raised from 0.65f)
+#define RECOGNITION_HIGH_CONF_THRESHOLD 0.78f        // High-confidence threshold where margin requirement is relaxed
+#define RECOGNITION_MARGIN_MIN      0.06f            // Minimum separation between Top-1 and Top-2 candidate (prevents lookalike confusion)
+#define RECOGNITION_MARGIN_HIGH     0.03f            // Minimum separation when S >= RECOGNITION_HIGH_CONF_THRESHOLD
 #define EMBEDDING_CACHE_SIZE        500              // Max cached users
 
 /* Face detection thresholds */
 #define FACE_DETECT_CONFIDENCE_MIN  0.6f             // Minimum detection confidence
 #define FACE_MIN_SIZE_PX            30               // Minimum face bounding box size in pixels
+#define SCAN_SHARPNESS_MIN          10.0f            // Minimum sharpness to accept frame into scan window
+#define SCAN_BRIGHTNESS_MIN         25.0f            // Min average luminance for scan frame
+#define SCAN_BRIGHTNESS_MAX         230.0f           // Max average luminance for scan frame
 
 /* Multi-frame enrollment */
 #define ENROLL_FRAMES_TOTAL         30               // Total frames to capture
@@ -76,7 +82,7 @@ extern "C" {
 #define SCAN_WINDOW_SIZE            6                // Max embedding frames per scan window
 #define SCAN_EARLY_EXIT_FRAMES      3                // Frames required for early-exit (3-frame unanimous path)
 #define SCAN_EARLY_EXIT_SIM_MIN     0.80f            // Per-frame raw similarity to trigger early exit
-#define SCAN_VOTE_THRESHOLD         0.55f            // Per-frame vote threshold (relaxed vs S_fused gate)
+#define SCAN_VOTE_THRESHOLD         0.58f            // Per-frame vote threshold (relaxed vs S_fused gate)
 #define SCAN_TOP_CANDIDATES         3                // Number of top DB candidates for fast voting
 #define SCAN_WINDOW_TIMEOUT_MS      1500             // Max ms between valid frames before window reset
 #define SCAN_WINDOW_LIFETIME_MS     2000             // Max total ms a window can live before forced reset

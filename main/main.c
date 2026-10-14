@@ -780,6 +780,19 @@ static void detection_recognition_task(void *pvParameters) {
             continue;
         }
 
+        /* Quality Gate: reject severely blurry or extreme illumination frames */
+        float this_sharpness = face_detector_compute_sharpness(&frame.fb, face);
+        if (this_sharpness < SCAN_SHARPNESS_MIN) {
+            camera_return_frame(&frame.fb);
+            continue;
+        }
+
+        float this_brightness = face_detector_compute_brightness(&frame.fb, face);
+        if (this_brightness < SCAN_BRIGHTNESS_MIN || this_brightness > SCAN_BRIGHTNESS_MAX) {
+            camera_return_frame(&frame.fb);
+            continue;
+        }
+
         int64_t now_ms = esp_timer_get_time() / 1000LL;
 
         /* -------------------------------------------------------------------
@@ -852,7 +865,6 @@ static void detection_recognition_task(void *pvParameters) {
         }
 
         /* Track best-sharpness frame for UI bounding box */
-        float this_sharpness = face_detector_compute_sharpness(&frame.fb, face);
         if (this_sharpness > win.best_sharpness) {
             win.best_sharpness = this_sharpness;
             win.best_ui_x = (frame.fb.width  > 0) ? (face->x * 480 / frame.fb.width)  : face->x;
@@ -890,7 +902,11 @@ static void detection_recognition_task(void *pvParameters) {
          * passed as hint_candidate into recognizer_identify_multiframe(),
          * which skips its own full DB scan on q_fused.
          * ------------------------------------------------------------------- */
-        if (win.count == SCAN_EARLY_EXIT_FRAMES) {
+        /* -------------------------------------------------------------------
+         * Early-exit 3-frame unanimity check (fast path ~410ms)
+         * Evaluate on frames 1..SCAN_EARLY_EXIT_FRAMES to track consecutive unanimity.
+         * ------------------------------------------------------------------- */
+        if (win.count <= SCAN_EARLY_EXIT_FRAMES) {
             user_t *this_user = NULL;
             float   this_conf = 0.0f;
             recognizer_identify(&embedding, &this_user, &this_conf);
@@ -907,7 +923,7 @@ static void detection_recognition_task(void *pvParameters) {
                 win.unanimous_streak    = 0;
             }
 
-            if (win.unanimous_streak >= SCAN_EARLY_EXIT_FRAMES) {
+            if (win.count == SCAN_EARLY_EXIT_FRAMES && win.unanimous_streak >= SCAN_EARLY_EXIT_FRAMES) {
                 ESP_LOGI(TAG, "Early-exit: %d unanimous frames for %s @%.2f — invoking multiframe(N=3, hint)",
                          win.unanimous_streak, win.unanimous_candidate->name, this_conf);
                 goto run_multiframe;

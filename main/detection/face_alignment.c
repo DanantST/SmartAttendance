@@ -193,87 +193,137 @@ void face_alignment_free(aligned_face_t *aligned) {
     }
 }
 
+#define CLAHE_TILES_X 4
+#define CLAHE_TILES_Y 4
+#define CLAHE_TILE_W  (FACE_ALIGN_SIZE / CLAHE_TILES_X)  /* 112 / 4 = 28 */
+#define CLAHE_TILE_H  (FACE_ALIGN_SIZE / CLAHE_TILES_Y)  /* 112 / 4 = 28 */
+#define CLAHE_TILE_N  (CLAHE_TILE_W * CLAHE_TILE_H)     /* 784 pixels */
+
 void face_alignment_normalize_brightness(aligned_face_t *aligned) {
-    if (!aligned || !aligned->data || aligned->width <= 0 || aligned->height <= 0) return;
+    if (!aligned || !aligned->data || aligned->width != FACE_ALIGN_SIZE || aligned->height != FACE_ALIGN_SIZE) return;
 
     uint16_t *buf = (uint16_t *)aligned->data;
     int num_pixels = aligned->width * aligned->height;
 
-    /* Allocate temp buffer for 8-bit luminance to protect FreeRTOS task stack */
+    /* Allocate temp buffer for 8-bit luminance */
     uint8_t *luma = (uint8_t *)heap_caps_malloc(num_pixels, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!luma) {
         luma = (uint8_t *)malloc(num_pixels);
     }
     if (!luma) return;
 
-    int hist[256] = {0};
-
-    /* 1. Calculate 8-bit Luminance (0..255) for each pixel */
+    /* 1. Calculate 8-bit Luminance (0..255) for each pixel: Y = 0.299R + 0.587G + 0.114B */
     for (int i = 0; i < num_pixels; i++) {
         uint16_t p = buf[i];
         uint32_t r8 = ((p >> 11) & 0x1F) * 255 / 31;
         uint32_t g8 = ((p >> 5) & 0x3F) * 255 / 63;
         uint32_t b8 = (p & 0x1F) * 255 / 31;
-        /* Standard YUV Luminance: Y = 0.299R + 0.587G + 0.114B */
-        uint8_t y = (uint8_t)((r8 * 299 + g8 * 587 + b8 * 114) / 1000);
-        luma[i] = y;
-        hist[y]++;
+        luma[i] = (uint8_t)((r8 * 299 + g8 * 587 + b8 * 114) / 1000);
     }
 
-    /* 2. Contrast-Limited Histogram Equalization (CLAHE):
-     * Clip histogram peak to 3.0x average bin count to prevent noise amplification */
-    int clip_limit = (int)(3.0f * ((float)num_pixels / 256.0f));
-    if (clip_limit < 4) clip_limit = 4;
-    int excess = 0;
+    /* 2. Compute 4x4 Grid Tile CLAHE CDF mappings */
+    uint8_t (*tile_maps)[CLAHE_TILES_X][256] = (uint8_t (*)[CLAHE_TILES_X][256])heap_caps_malloc(
+        sizeof(uint8_t) * CLAHE_TILES_Y * CLAHE_TILES_X * 256, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!tile_maps) {
+        tile_maps = (uint8_t (*)[CLAHE_TILES_X][256])malloc(sizeof(uint8_t) * CLAHE_TILES_Y * CLAHE_TILES_X * 256);
+    }
+    if (!tile_maps) {
+        free(luma);
+        return;
+    }
 
-    for (int i = 0; i < 256; i++) {
-        if (hist[i] > clip_limit) {
-            excess += (hist[i] - clip_limit);
-            hist[i] = clip_limit;
+    int clip_limit = (int)(2.5f * ((float)CLAHE_TILE_N / 256.0f));
+    if (clip_limit < 4) clip_limit = 4;
+
+    for (int ty = 0; ty < CLAHE_TILES_Y; ty++) {
+        for (int tx = 0; tx < CLAHE_TILES_X; tx++) {
+            int hist[256] = {0};
+            int y_start = ty * CLAHE_TILE_H;
+            int x_start = tx * CLAHE_TILE_W;
+
+            for (int y = y_start; y < y_start + CLAHE_TILE_H; y++) {
+                int row_offset = y * aligned->width;
+                for (int x = x_start; x < x_start + CLAHE_TILE_W; x++) {
+                    hist[luma[row_offset + x]]++;
+                }
+            }
+
+            int excess = 0;
+            for (int i = 0; i < 256; i++) {
+                if (hist[i] > clip_limit) {
+                    excess += (hist[i] - clip_limit);
+                    hist[i] = clip_limit;
+                }
+            }
+
+            int bonus = excess / 256;
+            for (int i = 0; i < 256; i++) {
+                hist[i] += bonus;
+            }
+
+            uint32_t cdf = 0;
+            for (int i = 0; i < 256; i++) {
+                cdf += hist[i];
+                uint32_t val = (cdf * 255) / CLAHE_TILE_N;
+                if (val > 255) val = 255;
+                tile_maps[ty][tx][i] = (uint8_t)val;
+            }
         }
     }
 
-    /* Evenly redistribute clipped excess counts across all 256 bins */
-    int bonus = excess / 256;
-    for (int i = 0; i < 256; i++) {
-        hist[i] += bonus;
+    /* 3. Bilinear Interpolation across tile centers for each pixel */
+    for (int y = 0; y < aligned->height; y++) {
+        float ty_f = ((float)y - (float)CLAHE_TILE_H * 0.5f) / (float)CLAHE_TILE_H;
+        int y1 = (int)floorf(ty_f);
+        int y2 = y1 + 1;
+        float wy = ty_f - (float)y1;
+
+        if (y1 < 0) { y1 = 0; y2 = 0; wy = 0.0f; }
+        if (y2 >= CLAHE_TILES_Y) { y1 = CLAHE_TILES_Y - 1; y2 = CLAHE_TILES_Y - 1; wy = 0.0f; }
+
+        int row_offset = y * aligned->width;
+        for (int x = 0; x < aligned->width; x++) {
+            float tx_f = ((float)x - (float)CLAHE_TILE_W * 0.5f) / (float)CLAHE_TILE_W;
+            int x1 = (int)floorf(tx_f);
+            int x2 = x1 + 1;
+            float wx = tx_f - (float)x1;
+
+            if (x1 < 0) { x1 = 0; x2 = 0; wx = 0.0f; }
+            if (x2 >= CLAHE_TILES_X) { x1 = CLAHE_TILES_X - 1; x2 = CLAHE_TILES_X - 1; wx = 0.0f; }
+
+            uint8_t y_old = luma[row_offset + x];
+            if (y_old == 0) continue;
+
+            uint8_t v11 = tile_maps[y1][x1][y_old];
+            uint8_t v12 = tile_maps[y1][x2][y_old];
+            uint8_t v21 = tile_maps[y2][x1][y_old];
+            uint8_t v22 = tile_maps[y2][x2][y_old];
+
+            float y_top = (1.0f - wx) * (float)v11 + wx * (float)v12;
+            float y_bot = (1.0f - wx) * (float)v21 + wx * (float)v22;
+            float y_new = (1.0f - wy) * y_top + wy * y_bot;
+
+            float scale = y_new / (float)y_old;
+            if (scale < 0.4f) scale = 0.4f;
+            if (scale > 1.8f) scale = 1.8f;
+
+            uint16_t p = buf[row_offset + x];
+            uint32_t r5 = (p >> 11) & 0x1F;
+            uint32_t g6 = (p >> 5) & 0x3F;
+            uint32_t b5 = p & 0x1F;
+
+            uint32_t new_r5 = (uint32_t)(r5 * scale + 0.5f);
+            uint32_t new_g6 = (uint32_t)(g6 * scale + 0.5f);
+            uint32_t new_b5 = (uint32_t)(b5 * scale + 0.5f);
+
+            if (new_r5 > 31) new_r5 = 31;
+            if (new_g6 > 63) new_g6 = 63;
+            if (new_b5 > 31) new_b5 = 31;
+
+            buf[row_offset + x] = (uint16_t)((new_r5 << 11) | (new_g6 << 5) | new_b5);
+        }
     }
 
-    /* 3. Compute Cumulative Distribution Function (CDF) mapping [0..255] -> [0..255] */
-    uint8_t map[256];
-    uint32_t cdf = 0;
-    for (int i = 0; i < 256; i++) {
-        cdf += hist[i];
-        uint32_t val = (cdf * 255) / num_pixels;
-        if (val > 255) val = 255;
-        map[i] = (uint8_t)val;
-    }
-
-    /* 4. Scale RGB565 channels by y_new / y_old ratio to preserve natural skin tone */
-    for (int i = 0; i < num_pixels; i++) {
-        uint16_t p = buf[i];
-        uint32_t r5 = (p >> 11) & 0x1F;
-        uint32_t g6 = (p >> 5) & 0x3F;
-        uint32_t b5 = p & 0x1F;
-
-        uint8_t y_old = luma[i];
-        if (y_old == 0) continue;
-
-        uint8_t y_new = map[y_old];
-        float scale = (float)y_new / (float)y_old;
-        if (scale < 0.3f) scale = 0.3f;
-        if (scale > 3.0f) scale = 3.0f;
-
-        uint32_t new_r5 = (uint32_t)(r5 * scale + 0.5f);
-        uint32_t new_g6 = (uint32_t)(g6 * scale + 0.5f);
-        uint32_t new_b5 = (uint32_t)(b5 * scale + 0.5f);
-
-        if (new_r5 > 31) new_r5 = 31;
-        if (new_g6 > 63) new_g6 = 63;
-        if (new_b5 > 31) new_b5 = 31;
-
-        buf[i] = (uint16_t)((new_r5 << 11) | (new_g6 << 5) | new_b5);
-    }
-
+    free(tile_maps);
     free(luma);
 }

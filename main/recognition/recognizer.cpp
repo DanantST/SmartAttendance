@@ -88,28 +88,44 @@ esp_err_t recognizer_identify(face_embedding_t *query, user_t **user, float *con
 
     float best_sim = -1.0f;
     int best_idx = -1;
+    float second_sim = -1.0f;
+    int second_idx = -1;
 
     for (int i = 0; i < s_cache_size; i++) {
         float sim = cosine_similarity(query, &s_user_cache[i].embedding);
-        ESP_LOGI(TAG, "Compare with cached user %s (id=%d): sim=%.3f, embedding sample=%d %d %d %d %d",
-                 s_user_cache[i].name, (int)s_user_cache[i].id, sim,
-                 s_user_cache[i].embedding.values[0],
-                 s_user_cache[i].embedding.values[1],
-                 s_user_cache[i].embedding.values[2],
-                 s_user_cache[i].embedding.values[3],
-                 s_user_cache[i].embedding.values[4]);
         if (sim > best_sim) {
+            second_sim = best_sim;
+            second_idx = best_idx;
             best_sim = sim;
             best_idx = i;
+        } else if (sim > second_sim) {
+            second_sim = sim;
+            second_idx = i;
         }
     }
 
-    ESP_LOGI(TAG, "Best match: idx=%d (user=%s), sim=%.3f (threshold=%.3f)",
-             best_idx, (best_idx >= 0) ? s_user_cache[best_idx].name : "None", best_sim, RECOGNITION_THRESHOLD);
+    float margin = (second_idx >= 0) ? (best_sim - second_sim) : 1.0f;
 
-    if (best_sim >= RECOGNITION_THRESHOLD) {
+    ESP_LOGI(TAG, "Best match: idx=%d (user=%s), sim=%.3f, runner_up=%s (sim=%.3f, margin=%.3f, threshold=%.3f)",
+             best_idx, (best_idx >= 0) ? s_user_cache[best_idx].name : "None", best_sim,
+             (second_idx >= 0) ? s_user_cache[second_idx].name : "None", second_sim,
+             margin, RECOGNITION_THRESHOLD);
+
+    bool pass = false;
+    if (best_sim >= RECOGNITION_HIGH_CONF_THRESHOLD) {
+        pass = (margin >= RECOGNITION_MARGIN_HIGH);
+    } else if (best_sim >= RECOGNITION_THRESHOLD) {
+        pass = (margin >= RECOGNITION_MARGIN_MIN);
+    }
+
+    if (pass && best_idx >= 0) {
         *user = &s_user_cache[best_idx];
         *confidence = best_sim;
+    } else if (best_idx >= 0 && best_sim >= RECOGNITION_THRESHOLD) {
+        ESP_LOGW(TAG, "recognizer_identify: Ambiguous match rejected! Top1: %s (%.3f) vs Top2: %s (%.3f), margin=%.3f < required",
+                 s_user_cache[best_idx].name, best_sim,
+                 (second_idx >= 0) ? s_user_cache[second_idx].name : "None", second_sim,
+                 margin);
     }
 
     return ESP_OK;
@@ -274,40 +290,26 @@ esp_err_t recognizer_identify_multiframe(
     user_t *top_candidates[SCAN_TOP_CANDIDATES] = {NULL, NULL, NULL};
     float   top_sims[SCAN_TOP_CANDIDATES]       = {-1.0f, -1.0f, -1.0f};
 
-    if (hint_candidate != NULL) {
-        /* Early-exit fast path: hint is already the top-1 candidate */
-        top_candidates[0] = hint_candidate;
-        top_sims[0]       = cosine_similarity(&q_fused, &hint_candidate->embedding);
-        /* Fill top-2/top-3 from cache head (cheaply) */
-        int filled = 1;
-        for (int i = 0; i < s_cache_size && filled < SCAN_TOP_CANDIDATES; i++) {
-            if (&s_user_cache[i] == hint_candidate) continue;
-            top_candidates[filled] = &s_user_cache[i];
-            top_sims[filled]       = cosine_similarity(&q_fused, &s_user_cache[i].embedding);
-            filled++;
-        }
-        ESP_LOGI(TAG, "multiframe: hint-path candidate=%s S_fused=%.3f", hint_candidate->name, top_sims[0]);
-    } else {
-        /* Full-window path: one full DB scan on q_fused */
-        for (int i = 0; i < s_cache_size; i++) {
-            float sim = cosine_similarity(&q_fused, &s_user_cache[i].embedding);
-            /* Insert into sorted top-3 list (descending) */
-            for (int t = 0; t < SCAN_TOP_CANDIDATES; t++) {
-                if (sim > top_sims[t]) {
-                    /* Shift lower entries down */
-                    for (int r = SCAN_TOP_CANDIDATES - 1; r > t; r--) {
-                        top_sims[r]       = top_sims[r-1];
-                        top_candidates[r] = top_candidates[r-1];
-                    }
-                    top_sims[t]       = sim;
-                    top_candidates[t] = &s_user_cache[i];
-                    break;
+    /* Full scan over cached users to extract true Top-3 candidates */
+    for (int i = 0; i < s_cache_size; i++) {
+        float sim = cosine_similarity(&q_fused, &s_user_cache[i].embedding);
+        /* Insert into sorted top-3 list (descending) */
+        for (int t = 0; t < SCAN_TOP_CANDIDATES; t++) {
+            if (sim > top_sims[t]) {
+                /* Shift lower entries down */
+                for (int r = SCAN_TOP_CANDIDATES - 1; r > t; r--) {
+                    top_sims[r]       = top_sims[r-1];
+                    top_candidates[r] = top_candidates[r-1];
                 }
+                top_sims[t]       = sim;
+                top_candidates[t] = &s_user_cache[i];
+                break;
             }
         }
-        ESP_LOGI(TAG, "multiframe: full-scan top-1=%s S_fused=%.3f",
-                 top_candidates[0] ? top_candidates[0]->name : "None", top_sims[0]);
     }
+    ESP_LOGI(TAG, "multiframe: top-1=%s (S_fused=%.3f), top-2=%s (S_fused=%.3f)",
+             top_candidates[0] ? top_candidates[0]->name : "None", top_sims[0],
+             top_candidates[1] ? top_candidates[1]->name : "None", top_sims[1]);
 
     /* ------------------------------------------------------------------ */
     /* Step 5 & 6: Inlier-only consensus voting                            */
@@ -348,20 +350,50 @@ esp_err_t recognizer_identify_multiframe(
     }
 
     /* ------------------------------------------------------------------ */
-    /* Step 7: Fused acceptance gate — S_fused(k*) >= RECOGNITION_THRESHOLD */
+    /* Step 7: Fused acceptance gate with Top-1 vs Top-2 Margin Check       */
     /* ------------------------------------------------------------------ */
     if (winner_t >= 0 && top_candidates[winner_t] != NULL) {
-        float s_fused_winner = cosine_similarity(&q_fused, &top_candidates[winner_t]->embedding);
-        ESP_LOGI(TAG, "multiframe: winner=%s S_fused=%.3f votes=%d (gate=%.2f, need_votes=%d)",
+        float s_fused_winner = top_sims[winner_t];
+
+        /* Find runner-up (the best candidate other than winner_t) */
+        float runner_up_sim = -1.0f;
+        user_t *runner_up = NULL;
+        for (int t = 0; t < SCAN_TOP_CANDIDATES; t++) {
+            if (t != winner_t && top_candidates[t] != NULL) {
+                if (top_sims[t] > runner_up_sim) {
+                    runner_up_sim = top_sims[t];
+                    runner_up = top_candidates[t];
+                }
+            }
+        }
+
+        float margin = (runner_up != NULL) ? (s_fused_winner - runner_up_sim) : 1.0f;
+
+        ESP_LOGI(TAG, "multiframe: winner=%s S_fused=%.3f votes=%d/%d, runner_up=%s (sim=%.3f, margin=%.3f)",
                  top_candidates[winner_t]->name, s_fused_winner,
-                 vote_counts[winner_t], RECOGNITION_THRESHOLD, min_votes);
-        if (s_fused_winner >= RECOGNITION_THRESHOLD) {
+                 vote_counts[winner_t], N_inlier,
+                 runner_up ? runner_up->name : "None", runner_up_sim, margin);
+
+        bool pass = false;
+        if (s_fused_winner >= RECOGNITION_HIGH_CONF_THRESHOLD) {
+            pass = (margin >= RECOGNITION_MARGIN_HIGH);
+        } else if (s_fused_winner >= RECOGNITION_THRESHOLD) {
+            pass = (margin >= RECOGNITION_MARGIN_MIN);
+        }
+
+        if (pass) {
             *out_user             = top_candidates[winner_t];
             *out_fused_confidence = s_fused_winner;
             *out_consensus_votes  = vote_counts[winner_t];
         } else {
-            ESP_LOGI(TAG, "multiframe: winner rejected — S_fused=%.3f below threshold=%.2f",
-                     s_fused_winner, RECOGNITION_THRESHOLD);
+            if (s_fused_winner < RECOGNITION_THRESHOLD) {
+                ESP_LOGI(TAG, "multiframe: winner %s rejected — S_fused=%.3f below threshold=%.2f",
+                         top_candidates[winner_t]->name, s_fused_winner, RECOGNITION_THRESHOLD);
+            } else {
+                ESP_LOGW(TAG, "multiframe: winner %s REJECTED due to ambiguity! S_fused=%.3f, margin=%.3f < required (runner_up=%s @%.3f)",
+                         top_candidates[winner_t]->name, s_fused_winner, margin,
+                         runner_up ? runner_up->name : "None", runner_up_sim);
+            }
         }
     } else {
         ESP_LOGI(TAG, "multiframe: no consensus winner (min_votes=%d, N_inlier=%d)", min_votes, N_inlier);
