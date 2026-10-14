@@ -386,35 +386,6 @@ async def get_course_enrollments(since: int = 0):
 FIRMWARE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "firmware")
 os.makedirs(FIRMWARE_DIR, exist_ok=True)
 
-@web_app.get("/firmware/{filename}")
-@web_app.get("/api/firmware/{filename}")
-async def serve_firmware_binary(filename: str):
-    """
-    Serves .bin firmware binaries directly to the ESP32-P4 device.
-    Supports /firmware/latest.bin as a dynamic alias to the newest .bin available.
-    """
-    safe_name = os.path.basename(filename)
-    if not safe_name.endswith(".bin"):
-        return JSONResponse(status_code=400, content={"status": "error", "message": "Only .bin files are served"})
-
-    file_path = os.path.join(FIRMWARE_DIR, safe_name)
-    if not os.path.exists(file_path):
-        if safe_name == "latest.bin":
-            bin_files = sorted([f for f in os.listdir(FIRMWARE_DIR) if f.endswith(".bin")], reverse=True)
-            if bin_files:
-                file_path = os.path.join(FIRMWARE_DIR, bin_files[0])
-            else:
-                return JSONResponse(status_code=404, content={"status": "error", "message": "No firmware binary found on server"})
-        else:
-            return JSONResponse(status_code=404, content={"status": "error", "message": f"Firmware file {safe_name} not found"})
-
-    logger.info(f"Serving firmware binary {os.path.basename(file_path)} ({os.path.getsize(file_path)} bytes) to device.")
-    return FileResponse(
-        path=file_path,
-        media_type="application/octet-stream",
-        filename=os.path.basename(file_path)
-    )
-
 @web_app.get("/api/firmware/version")
 @web_app.get("/api/firmware/info")
 async def get_firmware_info():
@@ -458,6 +429,35 @@ async def get_firmware_info():
         "download_url": f"/firmware/{latest_file}",
         "latest_url": "/firmware/latest.bin"
     })
+
+@web_app.get("/firmware/{filename}")
+@web_app.get("/api/firmware/{filename}")
+async def serve_firmware_binary(filename: str):
+    """
+    Serves .bin firmware binaries directly to the ESP32-P4 device.
+    Supports /firmware/latest.bin as a dynamic alias to the newest .bin available.
+    """
+    safe_name = os.path.basename(filename)
+    if not safe_name.endswith(".bin"):
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Only .bin files are served"})
+
+    file_path = os.path.join(FIRMWARE_DIR, safe_name)
+    if not os.path.exists(file_path):
+        if safe_name == "latest.bin":
+            bin_files = sorted([f for f in os.listdir(FIRMWARE_DIR) if f.endswith(".bin")], reverse=True)
+            if bin_files:
+                file_path = os.path.join(FIRMWARE_DIR, bin_files[0])
+            else:
+                return JSONResponse(status_code=404, content={"status": "error", "message": "No firmware binary found on server"})
+        else:
+            return JSONResponse(status_code=404, content={"status": "error", "message": f"Firmware file {safe_name} not found"})
+
+    logger.info(f"Serving firmware binary {os.path.basename(file_path)} ({os.path.getsize(file_path)} bytes) to device.")
+    return FileResponse(
+        path=file_path,
+        media_type="application/octet-stream",
+        filename=os.path.basename(file_path)
+    )
 
 @web_app.post("/api/firmware/upload")
 async def upload_firmware_binary(request: Request):

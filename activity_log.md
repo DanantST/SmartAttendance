@@ -3082,11 +3082,11 @@ feat(server): add OTA firmware serving endpoints and fix fw_scan task heap alloc
 **`.github/workflows/hf_sync.yml`** changes:
 - Added Git LFS installation, tracking for `*.bin`, and credential helper for Hugging Face Spaces deployment.
 
-**`telegram_bot/firmware/latest.bin`** changes:
-- Updated binary with newly compiled build.
+**`telegram_bot/bot.py`** changes:
+- Reordered FastAPI route handlers so `/api/firmware/version` and `/api/firmware/info` precede `/firmware/{filename}` and `/api/firmware/{filename}`, preventing route shadowing.
 
 #### Commit
-feat(ui): implement fail-proof navigation, refined UI layout, and Git LFS cloud OTA sync
+fix(server): prioritize /api/firmware/version route over dynamic filename path param
 
 
 
