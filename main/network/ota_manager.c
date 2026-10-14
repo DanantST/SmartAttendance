@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include "esp_heap_caps.h"
 
 static const char *TAG = "OTA_MGR";
 
@@ -182,114 +183,201 @@ static void download_task(void *pvParam) {
              OTA_FIRMWARE_DIR, params->version);
     snprintf(temp_path, sizeof(temp_path), "%s.tmp", target_path);
 
-    ESP_LOGI(TAG, "Starting firmware download: %s -> %s", params->url, temp_path);
+    ESP_LOGI(TAG, "Starting resilient firmware download: %s -> %s", params->url, temp_path);
     if (params->progress_cb) params->progress_cb(0, "Connecting to update server...");
 
-    FILE *f = fopen(temp_path, "wb");
-    if (!f) {
-        ESP_LOGE(TAG, "Failed to open temporary file %s for writing", temp_path);
-        if (params->done_cb) params->done_cb(ESP_FAIL, "Failed to create file on SD card");
-        free(params);
-        s_ota_busy = false;
-        vTaskDelete(NULL);
-        return;
-    }
-
-    esp_http_client_config_t config = {
-        .url = params->url,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .timeout_ms = 15000,
-        .keep_alive_enable = true,
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) {
-        fclose(f);
-        unlink(temp_path);
-        if (params->done_cb) params->done_cb(ESP_FAIL, "HTTP client initialization failed");
-        free(params);
-        s_ota_busy = false;
-        vTaskDelete(NULL);
-        return;
-    }
-
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
-        esp_http_client_cleanup(client);
-        fclose(f);
-        unlink(temp_path);
-        if (params->done_cb) params->done_cb(err, "Failed to connect to server");
-        free(params);
-        s_ota_busy = false;
-        vTaskDelete(NULL);
-        return;
-    }
-
-    int content_length = esp_http_client_fetch_headers(client);
-    ESP_LOGI(TAG, "Remote binary content length: %d bytes", content_length);
-
+    const int MAX_DOWNLOAD_RETRIES = 5;
+    const int MAX_CONNECT_RETRIES  = 3;
+    bool download_finished = false;
     char *buffer = (char *)malloc(8192);
+    char *stream_buf = (char *)heap_caps_malloc(32768, MALLOC_CAP_SPIRAM);
+
     if (!buffer) {
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        fclose(f);
-        unlink(temp_path);
+        ESP_LOGE(TAG, "Out of memory for download buffer");
         if (params->done_cb) params->done_cb(ESP_ERR_NO_MEM, "Out of memory");
+        if (stream_buf) free(stream_buf);
         free(params);
         s_ota_busy = false;
         vTaskDelete(NULL);
         return;
     }
 
-    int total_read = 0;
     int last_reported_pct = -1;
-    bool success = true;
+    int total_expected = -1;
 
-    while (1) {
-        int read_bytes = esp_http_client_read(client, buffer, 8192);
-        if (read_bytes < 0) {
-            ESP_LOGE(TAG, "HTTP read error");
-            success = false;
-            break;
-        } else if (read_bytes == 0) {
-            /* Download finished */
+    for (int retry = 0; retry < MAX_DOWNLOAD_RETRIES && !download_finished; retry++) {
+        /* Check existing downloaded size for resume */
+        struct stat st;
+        int existing_bytes = 0;
+        if (stat(temp_path, &st) == 0 && st.st_size > 0) {
+            existing_bytes = (int)st.st_size;
+            ESP_LOGI(TAG, "Resuming download from byte offset %d (attempt %d/%d)",
+                     existing_bytes, retry + 1, MAX_DOWNLOAD_RETRIES);
+        }
+
+        esp_http_client_config_t config = {
+            .url = params->url,
+            .crt_bundle_attach = esp_crt_bundle_attach,
+            .timeout_ms = 30000, /* 30-second timeout for large transfers over SDIO */
+            .keep_alive_enable = true,
+        };
+
+        esp_http_client_handle_t client = esp_http_client_init(&config);
+        if (!client) {
+            ESP_LOGE(TAG, "HTTP client initialization failed");
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            continue;
+        }
+
+        /* If resuming, send Range request header */
+        if (existing_bytes > 0) {
+            char range_hdr[64];
+            snprintf(range_hdr, sizeof(range_hdr), "bytes=%d-", existing_bytes);
+            esp_http_client_set_header(client, "Range", range_hdr);
+        }
+
+        /* Retry opening connection up to MAX_CONNECT_RETRIES times with backoff */
+        esp_err_t err = ESP_FAIL;
+        for (int conn_try = 1; conn_try <= MAX_CONNECT_RETRIES; conn_try++) {
+            err = esp_http_client_open(client, 0);
+            if (err == ESP_OK) break;
+
+            ESP_LOGW(TAG, "Connection attempt %d/%d failed (%s), retrying in %d s...",
+                     conn_try, MAX_CONNECT_RETRIES, esp_err_to_name(err), conn_try * 2);
+            if (params->progress_cb) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Connecting to server... (try %d/%d)", conn_try, MAX_CONNECT_RETRIES);
+                int current_pct = (existing_bytes > 0 && total_expected > 0) ? ((existing_bytes * 100) / total_expected) : 0;
+                params->progress_cb(current_pct, msg);
+            }
+            vTaskDelay(pdMS_TO_TICKS(conn_try * 2000));
+        }
+
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to connect to server after %d attempts: %s", MAX_CONNECT_RETRIES, esp_err_to_name(err));
+            esp_http_client_cleanup(client);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            continue;
+        }
+
+        int chunk_content_len = esp_http_client_fetch_headers(client);
+        int status_code = esp_http_client_get_status_code(client);
+        ESP_LOGI(TAG, "Server HTTP status: %d, chunk content length: %d bytes", status_code, chunk_content_len);
+
+        FILE *f = NULL;
+        int current_file_bytes = 0;
+
+        if (status_code == 206) {
+            /* 206 Partial Content: Server accepted Range request, append to temp file */
+            f = fopen(temp_path, "ab");
+            current_file_bytes = existing_bytes;
+            if (chunk_content_len > 0) {
+                total_expected = existing_bytes + chunk_content_len;
+            }
+            ESP_LOGI(TAG, "HTTP 206 Partial Content: Appending from byte %d (expected total: %d bytes)",
+                     current_file_bytes, total_expected);
+        } else if (status_code == 200) {
+            /* 200 OK: Full content sent, restart from beginning */
+            f = fopen(temp_path, "wb");
+            current_file_bytes = 0;
+            total_expected = chunk_content_len;
+            ESP_LOGI(TAG, "HTTP 200 OK: Downloading from byte 0 (total: %d bytes)", total_expected);
+        } else if (status_code == 416) {
+            /* Range not satisfiable (perhaps already fully downloaded or invalid) */
+            ESP_LOGW(TAG, "HTTP 416 Range Not Satisfiable: Restarting download from byte 0");
+            unlink(temp_path);
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            continue;
+        } else {
+            ESP_LOGE(TAG, "Unexpected HTTP status: %d", status_code);
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            continue;
+        }
+
+        if (!f) {
+            ESP_LOGE(TAG, "Failed to open temporary file %s", temp_path);
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
             break;
         }
 
-        size_t written = fwrite(buffer, 1, read_bytes, f);
-        if (written != (size_t)read_bytes) {
-            ESP_LOGE(TAG, "SD card write failed (disk full?)");
-            success = false;
-            break;
+        /* Use large 32KB stream buffer in PSRAM to eliminate SDMMC bus contention with SDIO Wi-Fi */
+        if (stream_buf) {
+            setvbuf(f, stream_buf, _IOFBF, 32768);
         }
 
-        total_read += read_bytes;
-        vTaskDelay(pdMS_TO_TICKS(5)); /* Yield to prevent SDMMC bus contention between SD card and SDIO Wi-Fi */
-        if (content_length > 0) {
-            int pct = (total_read * 100) / content_length;
-            if (pct != last_reported_pct) {
-                last_reported_pct = pct;
-                s_ota_progress = pct;
-                if (params->progress_cb) {
-                    char msg[64];
-                    snprintf(msg, sizeof(msg), "Downloading: %d%% (%d / %d KB)",
-                             pct, total_read / 1024, content_length / 1024);
-                    params->progress_cb(pct, msg);
+        bool stream_success = true;
+        while (1) {
+            int read_bytes = esp_http_client_read(client, buffer, 8192);
+            if (read_bytes < 0) {
+                ESP_LOGW(TAG, "HTTP read error (%d) at %d bytes", read_bytes, current_file_bytes);
+                stream_success = false;
+                break;
+            } else if (read_bytes == 0) {
+                /* Stream finished */
+                break;
+            }
+
+            size_t written = fwrite(buffer, 1, read_bytes, f);
+            if (written != (size_t)read_bytes) {
+                ESP_LOGE(TAG, "SD card write error at byte %d", current_file_bytes);
+                stream_success = false;
+                break;
+            }
+
+            current_file_bytes += read_bytes;
+
+            /* Yield 10ms to allow ESP-Hosted SDIO Wi-Fi driver time on SDMMC bus */
+            vTaskDelay(pdMS_TO_TICKS(10));
+
+            if (total_expected > 0) {
+                int pct = (current_file_bytes * 100) / total_expected;
+                if (pct != last_reported_pct) {
+                    last_reported_pct = pct;
+                    s_ota_progress = pct;
+                    if (params->progress_cb) {
+                        char msg[64];
+                        snprintf(msg, sizeof(msg), "Downloading: %d%% (%d / %d KB)",
+                                 pct, current_file_bytes / 1024, total_expected / 1024);
+                        params->progress_cb(pct, msg);
+                    }
                 }
             }
         }
+
+        fflush(f);
+        fclose(f);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+
+        if (stream_success) {
+            if (total_expected > 0 && current_file_bytes >= total_expected) {
+                download_finished = true;
+                break;
+            } else if (total_expected <= 0 && current_file_bytes > 1024*1024) {
+                download_finished = true;
+                break;
+            }
+        }
+
+        ESP_LOGW(TAG, "Download interrupted at %d bytes. Preparing to resume...", current_file_bytes);
+        if (params->progress_cb) {
+            char resume_msg[64];
+            snprintf(resume_msg, sizeof(resume_msg), "Resuming from %d KB...", current_file_bytes / 1024);
+            params->progress_cb(last_reported_pct > 0 ? last_reported_pct : 0, resume_msg);
+        }
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 
     free(buffer);
-    fclose(f);
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
+    if (stream_buf) free(stream_buf);
 
-    if (!success || total_read < 1024) {
-        unlink(temp_path);
-        ESP_LOGE(TAG, "Download failed or incomplete (read %d bytes)", total_read);
-        if (params->done_cb) params->done_cb(ESP_FAIL, "Download interrupted or network error");
+    if (!download_finished) {
+        ESP_LOGE(TAG, "Download failed after all retry attempts");
+        if (params->done_cb) params->done_cb(ESP_FAIL, "Download interrupted. Please tap Download again to resume.");
     } else {
         /* Verify header of newly downloaded file */
         firmware_info_t test_info;
@@ -345,7 +433,7 @@ esp_err_t ota_manager_download_to_sd_async(const char *url, const char *version,
     s_ota_busy = true;
     s_ota_progress = 0;
 
-    BaseType_t ret = xTaskCreate(download_task, "ota_down", 8192, params, 5, NULL);
+    BaseType_t ret = xTaskCreate(download_task, "ota_down", 10240, params, 5, NULL);
     if (ret != pdPASS) {
         free(params);
         s_ota_busy = false;

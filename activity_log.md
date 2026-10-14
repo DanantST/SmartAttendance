@@ -3333,6 +3333,48 @@ fix(ui): remove diagnostic red circle from setup wizard welcome page
 #### Commit
 feat(release): bump firmware to v1.1.2 with distinct binary build
 
+---
+
+## Session - 2026-10-14 - Resilient Resumable OTA Downloads & SDIO Buffer Protection (v1.1.3)
+
+### User Request
+> monitor the device. It sometimes stops downloading midway and sometimes returns failed to connecto the server
+
+### Implementation
+> 1. Diagnosed root causes for OTA download halts and "Failed to connect to server":
+>    - **Lack of Resumability**: When downloading 5.5 MB over the 10 MHz SDIO bridge to the ESP32-C6 Wi-Fi co-processor, transient read timeouts or socket jitter caused immediate aborts and file deletion.
+>    - **SDMMC Bus Contention**: High-frequency unbuffered 8 KB disk writes to FATFS on the SD card locked the SDMMC host controller, starving the ESP32-C6 SDIO slave TX queue (`H_SDIO_DRV: err: 265`), leading to connection drops.
+>    - **Connection Timeouts**: A 15-second timeout with no connection retry caused immediate failure when DNS or Cloudflare TLS negotiation lagged.
+> 2. Added HTTP `Range` request support (HTTP 206 Partial Content, `Accept-Ranges: bytes`) in `telegram_bot/bot.py` (`serve_firmware_binary`).
+> 3. Refactored `download_task` in `main/network/ota_manager.c`:
+>    - **Resumable Downloads**: Sends `Range: bytes={existing_bytes}-` if temporary file exists; appends to the file and resumes uninterrupted instead of starting over.
+>    - **Connection Retries**: Retries up to 3 times with exponential backoff on connection drops.
+>    - **Read Retries**: Retries up to 5 times on read interruption before failing.
+>    - **PSRAM FATFS Stream Buffer**: Configured a 32 KB I/O stream buffer via `setvbuf` in PSRAM to batch SD card writes and prevent SDMMC bus starvation on SDIO Wi-Fi.
+>    - **Timeout Extended**: Increased client timeout from 15 s to 30 s and added a 10 ms cooperative yield per 8 KB chunk.
+> 4. Bumped firmware version to `v1.1.3` in `CMakeLists.txt` and recompiled `SmartAttendance.bin`.
+> 5. Staged `SmartAttendance_v1.1.3.bin` and updated `latest.bin` in `telegram_bot/firmware/`.
+
+#### Feature Overview
+- **Bulletproof Resumable OTA**: Downloads automatically resume from their exact byte offset if interrupted by network or Wi-Fi hiccups.
+- **SDIO Hardware Protection**: 32 KB PSRAM stream buffering prevents SDMMC DMA bus contention, eliminating `H_SDIO_DRV` queue overflows.
+
+**telegram_bot/bot.py** changes:
+- Supported `Range` header requests for partial content streaming (status 206).
+
+**main/network/ota_manager.c** changes:
+- Implemented `download_task` retry loop, byte-offset resumption, 30 s timeout, and PSRAM stream buffering.
+
+**CMakelists.txt** changes:
+- Bumped `PROJECT_VER` to `"v1.1.3"`.
+
+**telegram_bot/firmware/** changes:
+- Added `SmartAttendance_v1.1.3.bin` and updated `latest.bin`.
+
+#### Commit
+feat(ota): implement resilient resumable firmware downloads and PSRAM stream buffering (v1.1.3)
+
+
 
 
 

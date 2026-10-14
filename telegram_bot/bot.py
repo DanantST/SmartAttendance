@@ -16,7 +16,7 @@ if hasattr(time, "tzset"):
     time.tzset()
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, Response, StreamingResponse
 import uvicorn
 from telegram import (
     Update,
@@ -484,11 +484,12 @@ async def get_firmware_info():
 
 @web_app.get("/firmware/{filename}")
 @web_app.get("/api/firmware/{filename}")
-async def serve_firmware_binary(filename: str):
+async def serve_firmware_binary(filename: str, request: Request):
     """
     Serves .bin firmware binaries directly to the ESP32-P4 device.
     Supports /firmware/latest.bin as a dynamic alias to the newest .bin available,
     or /firmware/SmartAttendance_vX.X.X.bin for specific archived releases.
+    Supports HTTP Range requests for resuming interrupted OTA downloads.
     """
     safe_name = os.path.basename(filename)
     if not safe_name.endswith(".bin"):
@@ -505,11 +506,48 @@ async def serve_firmware_binary(filename: str):
         else:
             return JSONResponse(status_code=404, content={"status": "error", "message": f"Firmware file {safe_name} not found"})
 
-    logger.info(f"Serving firmware binary {os.path.basename(file_path)} ({os.path.getsize(file_path)} bytes) to device.")
+    total_size = os.path.getsize(file_path)
+    range_header = request.headers.get("range")
+
+    if range_header and range_header.startswith("bytes="):
+        range_val = range_header[6:].strip()
+        parts = range_val.split("-")
+        try:
+            start = int(parts[0]) if parts[0] else 0
+            end = int(parts[1]) if len(parts) > 1 and parts[1] else total_size - 1
+            if start >= total_size:
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{total_size}"})
+            end = min(end, total_size - 1)
+            chunk_length = end - start + 1
+
+            def iterfile():
+                with open(file_path, "rb") as f:
+                    f.seek(start)
+                    remaining = chunk_length
+                    while remaining > 0:
+                        chunk = f.read(min(remaining, 65536))
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                        yield chunk
+
+            headers = {
+                "Accept-Ranges": "bytes",
+                "Content-Range": f"bytes {start}-{end}/{total_size}",
+                "Content-Length": str(chunk_length),
+                "Content-Disposition": f'attachment; filename="{os.path.basename(file_path)}"'
+            }
+            logger.info(f"Serving Range bytes {start}-{end}/{total_size} ({chunk_length} bytes) of {os.path.basename(file_path)} to device.")
+            return StreamingResponse(iterfile(), status_code=206, headers=headers, media_type="application/octet-stream")
+        except ValueError:
+            pass
+
+    logger.info(f"Serving full firmware binary {os.path.basename(file_path)} ({total_size} bytes) to device.")
     return FileResponse(
         path=file_path,
         media_type="application/octet-stream",
-        filename=os.path.basename(file_path)
+        filename=os.path.basename(file_path),
+        headers={"Accept-Ranges": "bytes"}
     )
 
 @web_app.post("/api/firmware/upload")
