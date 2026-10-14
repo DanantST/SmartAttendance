@@ -298,10 +298,27 @@ static void download_task(void *pvParam) {
             ESP_LOGE(TAG, "Downloaded file has invalid ESP32 firmware header");
             if (params->done_cb) params->done_cb(ESP_FAIL, "Invalid firmware binary header");
         } else {
-            /* Replace existing target file if present, rename tmp */
-            unlink(target_path);
-            rename(temp_path, target_path);
-            ESP_LOGI(TAG, "Firmware successfully saved to: %s", target_path);
+            char final_path[256];
+            char clean_ver[32];
+            strncpy(clean_ver, test_info.version, sizeof(clean_ver) - 1);
+            clean_ver[sizeof(clean_ver) - 1] = '\0';
+            for (int i = 0; clean_ver[i] != '\0'; i++) {
+                if (clean_ver[i] == '/' || clean_ver[i] == ' ' || clean_ver[i] == '\\') {
+                    clean_ver[i] = '_';
+                }
+            }
+
+            if (strlen(clean_ver) > 0 && strcmp(params->version, "latest") == 0) {
+                snprintf(final_path, sizeof(final_path), "%s/SmartAttendance_%s.bin",
+                         OTA_FIRMWARE_DIR, clean_ver);
+            } else {
+                strncpy(final_path, target_path, sizeof(final_path) - 1);
+                final_path[sizeof(final_path) - 1] = '\0';
+            }
+
+            unlink(final_path);
+            rename(temp_path, final_path);
+            ESP_LOGI(TAG, "Firmware successfully saved to: %s", final_path);
             if (params->done_cb) params->done_cb(ESP_OK, "Firmware downloaded successfully to SD card!");
         }
     }

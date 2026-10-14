@@ -3149,6 +3149,47 @@ fix(ui): eliminate lv_sprintf Load access fault by using snprintf for firmware m
 #### Commit
 fix(ota): prevent SDMMC bus contention between SD card and ESP-Hosted Wi-Fi SDIO
 
+---
+
+## Session - 2026-10-14 - Semantic Versioning & Multi-Version Cloud Firmware Catalog
+
+### User Request
+> I think we should be specific about the version naming. It shoulsn't just be latest but something like v1.1, v1.2, etc
+> how does the server handle the bbinary files? does it overwrite the previous one and overrite the version name or it adds the new one ass another file? How does the device know which version is the latest? can the user download a specific version of firmware?
+
+### Implementation
+> 1. **Semantic Project Versioning**:
+>    - Configured explicit `set(PROJECT_VER "v1.1.0")` in top-level `CMakeLists.txt` so the semantic release version is embedded directly into the binary's `esp_app_desc_t` header at compile time.
+> 2. **Multi-Version Archiving on the Server**:
+>    - Updated `telegram_bot/bot.py` to archive every release as an independent file (`SmartAttendance_v1.1.0.bin`, `SmartAttendance_v1.2.0.bin`, etc.) in `telegram_bot/firmware/`, while maintaining `latest.bin` as a pointer. Older versions are never overwritten.
+>    - Implemented `GET /api/firmware/list`: Returns a JSON catalog of all archived firmware builds with their semantic version, compile date/time, file size, and direct download URLs.
+>    - Enhanced `POST /api/firmware/upload`: Inspects the 32-byte header of newly uploaded binaries, automatically identifies the embedded version, and saves the file under `SmartAttendance_<version>.bin`.
+>    - Enhanced `GET /firmware/{filename}`: Directly serves any specific archived version (e.g. `/firmware/SmartAttendance_v1.1.0.bin`) or `/firmware/latest.bin`.
+> 3. **Device Semantic Storage & Verification**:
+>    - In `ota_manager.c`, upon completing a download (even from `/firmware/latest.bin`), the device inspects the downloaded binary's `esp_app_desc_t` header, extracts the true semantic version (e.g. `v1.1.0`), and automatically saves it to SD card as `/sdcard/firmware/SmartAttendance_v1.1.0.bin`.
+>    - The SD card firmware manager displays all installed and archived versions for multi-version rollback.
+
+#### Feature Overview
+- **Multi-Version Catalog**: Cloud server keeps and serves all past and present versions.
+- **Specific Version Downloads**: Users can download any specific version via its direct URL or retrieve the newest build via `/firmware/latest.bin`.
+- **Automated Semantic Tagging**: Binaries automatically named and verified by internal `esp_app_desc_t` metadata.
+
+**`CMakeLists.txt`** changes:
+- Added `set(PROJECT_VER "v1.1.0")`.
+
+**`main/network/ota_manager.c`** changes:
+- Auto-renames downloaded binaries to `SmartAttendance_<version>.bin` based on parsed header metadata.
+
+**`telegram_bot/bot.py`** changes:
+- Added `parse_esp_binary_header()`, `GET /api/firmware/list`, multi-version header resolution in `get_firmware_info()`, and auto-versioned file naming in `upload_firmware_binary()`.
+
+**`telegram_bot/firmware/SmartAttendance_v1.1.0.bin`**:
+- Added compiled v1.1.0 release binary.
+
+#### Commit
+feat(ota): implement semantic versioning, multi-version catalog, and version-specific cloud downloads
+
+
 
 
 

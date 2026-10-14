@@ -386,6 +386,66 @@ async def get_course_enrollments(since: int = 0):
 FIRMWARE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "firmware")
 os.makedirs(FIRMWARE_DIR, exist_ok=True)
 
+def parse_esp_binary_header(file_path: str) -> dict:
+    """
+    Parses esp_app_desc_t at offset 0x20 in an ESP-IDF v5 application binary.
+    Magic word: 0xABCD5432 (little endian: b'\x32\x54\xcd\xab')
+    """
+    info = {
+        "version": "unknown",
+        "project_name": "SmartAttendance",
+        "compile_date": "",
+        "compile_time": "",
+        "valid": False
+    }
+    try:
+        if not os.path.exists(file_path):
+            return info
+        with open(file_path, "rb") as f:
+            f.seek(32)
+            header = f.read(256)
+            if len(header) >= 112 and header[0:4] == b'\x32\x54\xcd\xab':
+                info["version"] = header[16:48].split(b'\x00')[0].decode('utf-8', errors='ignore')
+                info["project_name"] = header[48:80].split(b'\x00')[0].decode('utf-8', errors='ignore')
+                info["compile_time"] = header[80:96].split(b'\x00')[0].decode('utf-8', errors='ignore')
+                info["compile_date"] = header[96:112].split(b'\x00')[0].decode('utf-8', errors='ignore')
+                info["valid"] = True
+    except Exception as e:
+        logger.warning(f"Error parsing header of {file_path}: {e}")
+    return info
+
+@web_app.get("/api/firmware/list")
+async def list_available_firmwares():
+    """
+    Returns an archived list of all available firmware versions stored on the server.
+    Allows clients to inspect and download specific historical builds.
+    """
+    bin_files = [f for f in os.listdir(FIRMWARE_DIR) if f.endswith(".bin") and f != "latest.bin"]
+    firmwares = []
+
+    for fname in sorted(bin_files, reverse=True):
+        fpath = os.path.join(FIRMWARE_DIR, fname)
+        stat = os.stat(fpath)
+        hdr = parse_esp_binary_header(fpath)
+        firmwares.append({
+            "filename": fname,
+            "version": hdr["version"],
+            "project_name": hdr["project_name"],
+            "compile_date": hdr["compile_date"],
+            "compile_time": hdr["compile_time"],
+            "size_bytes": stat.st_size,
+            "download_url": f"/firmware/{fname}"
+        })
+
+    latest_hdr = parse_esp_binary_header(os.path.join(FIRMWARE_DIR, "latest.bin"))
+    return JSONResponse(status_code=200, content={
+        "status": "ok",
+        "count": len(firmwares),
+        "latest_version": latest_hdr.get("version", "unknown"),
+        "latest_download_url": "/firmware/latest.bin",
+        "firmwares": firmwares
+    })
+
 @web_app.get("/api/firmware/version")
 @web_app.get("/api/firmware/info")
 async def get_firmware_info():
@@ -400,33 +460,25 @@ async def get_firmware_info():
     latest_file = "latest.bin" if "latest.bin" in bin_files else bin_files[0]
     file_path = os.path.join(FIRMWARE_DIR, latest_file)
     stat = os.stat(file_path)
+    hdr = parse_esp_binary_header(file_path)
 
-    version = "1.0.0"
-    project_name = "SmartAttendance"
-    compile_time = ""
-    compile_date = ""
-
-    try:
-        with open(file_path, "rb") as f:
-            f.seek(32)  # offset of esp_app_desc_t in ESP-IDF v5 binaries
-            header = f.read(256)
-            if len(header) >= 112 and header[0:4] == b'\x32\x54\xcd\xab':
-                version = header[16:48].split(b'\x00')[0].decode('utf-8', errors='ignore')
-                project_name = header[48:80].split(b'\x00')[0].decode('utf-8', errors='ignore')
-                compile_time = header[80:96].split(b'\x00')[0].decode('utf-8', errors='ignore')
-                compile_date = header[96:112].split(b'\x00')[0].decode('utf-8', errors='ignore')
-    except Exception as e:
-        logger.warning(f"Failed to parse binary header: {e}")
+    # Resolve specific versioned filename if available
+    specific_file = latest_file
+    if latest_file == "latest.bin":
+        for f in bin_files:
+            if f != "latest.bin" and hdr["version"] in f:
+                specific_file = f
+                break
 
     return JSONResponse(status_code=200, content={
         "status": "ok",
-        "filename": latest_file,
-        "version": version,
-        "project_name": project_name,
-        "compile_date": compile_date,
-        "compile_time": compile_time,
+        "filename": specific_file,
+        "version": hdr["version"],
+        "project_name": hdr["project_name"],
+        "compile_date": hdr["compile_date"],
+        "compile_time": hdr["compile_time"],
         "size_bytes": stat.st_size,
-        "download_url": f"/firmware/{latest_file}",
+        "download_url": f"/firmware/{specific_file}",
         "latest_url": "/firmware/latest.bin"
     })
 
@@ -435,7 +487,8 @@ async def get_firmware_info():
 async def serve_firmware_binary(filename: str):
     """
     Serves .bin firmware binaries directly to the ESP32-P4 device.
-    Supports /firmware/latest.bin as a dynamic alias to the newest .bin available.
+    Supports /firmware/latest.bin as a dynamic alias to the newest .bin available,
+    or /firmware/SmartAttendance_vX.X.X.bin for specific archived releases.
     """
     safe_name = os.path.basename(filename)
     if not safe_name.endswith(".bin"):
@@ -464,34 +517,47 @@ async def upload_firmware_binary(request: Request):
     """
     Uploads a raw firmware binary to the server.
     Body should be raw binary (application/octet-stream).
-    Query parameter ?filename=SmartAttendance_vX.X.X.bin is optional.
+    Automatically inspects binary header to store under its semantic version name.
     """
     try:
-        filename = request.query_params.get("filename", "latest.bin")
-        safe_name = os.path.basename(filename)
-        if not safe_name.endswith(".bin"):
-            safe_name += ".bin"
-
         body = await request.body()
         if len(body) < 1024:
             return JSONResponse(status_code=400, content={"status": "error", "message": "Binary data too small"})
 
-        target_path = os.path.join(FIRMWARE_DIR, safe_name)
-        with open(target_path, "wb") as f:
+        # Write to temporary file to inspect header
+        temp_path = os.path.join(FIRMWARE_DIR, "_upload_temp.bin")
+        with open(temp_path, "wb") as f:
             f.write(body)
 
-        # Also update latest.bin alias
-        latest_path = os.path.join(FIRMWARE_DIR, "latest.bin")
-        if target_path != latest_path:
-            with open(latest_path, "wb") as f:
-                f.write(body)
+        hdr = parse_esp_binary_header(temp_path)
+        version_tag = hdr["version"] if hdr["valid"] and hdr["version"] != "unknown" else "custom"
+        
+        # Determine canonical filename
+        query_filename = request.query_params.get("filename")
+        if query_filename:
+            safe_name = os.path.basename(query_filename)
+            if not safe_name.endswith(".bin"):
+                safe_name += ".bin"
+        else:
+            safe_name = f"SmartAttendance_{version_tag}.bin"
 
-        logger.info(f"Successfully uploaded firmware {safe_name} ({len(body)} bytes)")
+        target_path = os.path.join(FIRMWARE_DIR, safe_name)
+        os.replace(temp_path, target_path)
+
+        # Update latest.bin pointer
+        latest_path = os.path.join(FIRMWARE_DIR, "latest.bin")
+        with open(latest_path, "wb") as f:
+            f.write(body)
+
+        logger.info(f"Successfully uploaded firmware {safe_name} (Version: {version_tag}, {len(body)} bytes)")
         return JSONResponse(status_code=200, content={
             "status": "ok",
-            "message": f"Firmware {safe_name} uploaded successfully",
+            "message": f"Firmware {safe_name} archived successfully",
+            "version": version_tag,
+            "filename": safe_name,
             "size_bytes": len(body),
-            "download_url": f"/firmware/{safe_name}"
+            "download_url": f"/firmware/{safe_name}",
+            "latest_url": "/firmware/latest.bin"
         })
     except Exception as e:
         logger.error(f"Firmware upload failed: {e}")
