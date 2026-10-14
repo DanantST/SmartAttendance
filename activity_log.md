@@ -3248,6 +3248,39 @@ feat(ota): implement semantic versioning, multi-version catalog, and version-spe
 #### Commit
 fix(ui): eliminate card scroll overflow and resolve brightness slider reboot crash
 
+---
+
+## Session - 2026-10-14 - Release Firmware v1.1.1 & Distinguish Upgrade vs Rollback
+
+### User Request
+> te previous firmware was also v1.1.0 and thedevice isnot displaying the newly downloaded firmware
+
+### Implementation
+> 1. Diagnosed why the downloaded firmware was not displayed as a separate installable version:
+>    The currently running firmware on the device flash was built with `PROJECT_VER "v1.1.0"`. When the newly compiled firmware was also tagged with `v1.1.0`, downloading it overwrote `/sdcard/firmware/SmartAttendance_v1.1.0.bin` and matched the running binary's version. Furthermore, in `ui_firmware_mgr.cpp`, matching binaries only rendered a green `CURRENT` badge without an action button.
+> 2. Bumped project version to `v1.1.1` in top-level `CMakeLists.txt`.
+> 3. Updated `ui_firmware_mgr.cpp` action button logic: compares each SD card binary version against the running version (`running_info.version`). Newer versions render a blue **"▲ Upgrade"** button (`LV_SYMBOL_UP`), while older versions render an amber **"↺ Rollback"** button (`LV_SYMBOL_REFRESH`).
+> 4. Recompiled `SmartAttendance.bin` (v1.1.1, size 5,551,712 bytes) and staged both `telegram_bot/firmware/SmartAttendance_v1.1.1.bin` and `telegram_bot/firmware/latest.bin`. Archived `SmartAttendance_v1.1.0.bin` remains preserved in the catalog.
+> 5. Pushed commit to GitHub to automatically trigger Hugging Face deployment via GitHub Actions.
+
+#### Feature Overview
+- **Distinct v1.1.1 Version Tag**: Distinguishes the new UI/stability release from the running `v1.1.0` binary.
+- **Smart Upgrade vs. Rollback UI**: Buttons automatically adapt their label and color depending on whether a build is an upgrade or a rollback.
+- **Cloud & SD Multi-Version Sync**: Archived `v1.1.0` and new `v1.1.1` coexist peacefully in the catalog and on SD card.
+
+**`CMakeLists.txt`** changes:
+- Set `PROJECT_VER "v1.1.1"`.
+
+**`main/ui/ui_firmware_mgr.cpp`** changes:
+- Added `is_upgrade` check comparing candidate version with `running_info.version`, styling the button with `LV_SYMBOL_UP " Upgrade"` (blue) vs `LV_SYMBOL_REFRESH " Rollback"` (amber).
+
+**`telegram_bot/firmware/`**:
+- Added `SmartAttendance_v1.1.1.bin` and updated `latest.bin`.
+
+#### Commit
+feat(release): bump version to v1.1.1 and add upgrade action styling in firmware manager
+
+
 
 
 

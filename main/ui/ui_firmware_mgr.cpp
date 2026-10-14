@@ -432,15 +432,21 @@ static void scan_firmwares_worker_task(void *param) {
                         lv_obj_set_style_text_font(badge_lbl, &lv_font_montserrat_12, 0);
                         lv_obj_center(badge_lbl);
                     } else {
-                        /* Rollback / Install Action Button */
+                        /* Action Button (Upgrade or Rollback) */
                         lv_obj_t *action_btn = lv_btn_create(row);
                         lv_obj_set_size(action_btn, 130, 36);
                         lv_obj_align(action_btn, LV_ALIGN_RIGHT_MID, 0, 0);
-                        lv_obj_set_style_bg_color(action_btn, lv_color_hex(0xD97706), 0); /* Amber */
                         lv_obj_set_style_radius(action_btn, 6, 0);
 
+                        bool is_upgrade = (strcmp(item->version, running_info.version) > 0);
+                        if (is_upgrade) {
+                            lv_obj_set_style_bg_color(action_btn, lv_color_hex(0x2563EB), 0); /* Blue for upgrade */
+                        } else {
+                            lv_obj_set_style_bg_color(action_btn, lv_color_hex(0xD97706), 0); /* Amber for rollback */
+                        }
+
                         lv_obj_t *btn_lbl = lv_label_create(action_btn);
-                        lv_label_set_text(btn_lbl, LV_SYMBOL_REFRESH " Rollback");
+                        lv_label_set_text(btn_lbl, is_upgrade ? LV_SYMBOL_UP " Upgrade" : LV_SYMBOL_REFRESH " Rollback");
                         lv_obj_set_style_text_font(btn_lbl, &lv_font_montserrat_12, 0);
                         lv_obj_center(btn_lbl);
 
