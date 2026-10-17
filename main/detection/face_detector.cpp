@@ -7,6 +7,8 @@
 #include "config.h"
 #include "esp_log.h"
 #include "human_face_detect.hpp"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <vector>
 #include <list>
 #include <math.h>
@@ -14,10 +16,15 @@
 
 static const char* TAG = "FACE_DET";
 static HumanFaceDetect* s_detector = nullptr;
+static SemaphoreHandle_t s_detector_mux = nullptr;
 
 esp_err_t face_detector_init(void) {
     ESP_LOGI(TAG, "Initializing face detector");
     
+    if (!s_detector_mux) {
+        s_detector_mux = xSemaphoreCreateMutex();
+    }
+
     /* Create face detector instance */
     s_detector = new HumanFaceDetect();
     
@@ -33,6 +40,11 @@ esp_err_t face_detector_init(void) {
 esp_err_t face_detector_run(camera_fb_t *fb, detection_result_t *result) {
     if (!s_detector || !fb || !result) return ESP_ERR_INVALID_ARG;
     
+    if (s_detector_mux && xSemaphoreTake(s_detector_mux, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        ESP_LOGW(TAG, "Face detector mutex timeout");
+        return ESP_ERR_TIMEOUT;
+    }
+
     /* Prepare input tensor from camera frame */
     /* The frame is RGB565 */
     dl::image::img_t input_img;
@@ -59,18 +71,11 @@ esp_err_t face_detector_run(camera_fb_t *fb, detection_result_t *result) {
         
         /* Extract landmarks (if model provides them) */
         if (d.keypoint.size() >= 10) {
-            /* Map from model order [Left Eye (0,1), Right Eye (2,3), Nose (4,5), Left Mouth (6,7), Right Mouth (8,9)]
-             * to expected pipeline order [Left Eye, Left Mouth, Nose, Right Eye, Right Mouth] */
-            result->faces[result->face_count].landmarks[0] = d.keypoint[0]; // Left Eye X
-            result->faces[result->face_count].landmarks[1] = d.keypoint[1]; // Left Eye Y
-            result->faces[result->face_count].landmarks[2] = d.keypoint[6]; // Left Mouth X
-            result->faces[result->face_count].landmarks[3] = d.keypoint[7]; // Left Mouth Y
-            result->faces[result->face_count].landmarks[4] = d.keypoint[4]; // Nose X
-            result->faces[result->face_count].landmarks[5] = d.keypoint[5]; // Nose Y
-            result->faces[result->face_count].landmarks[6] = d.keypoint[2]; // Right Eye X
-            result->faces[result->face_count].landmarks[7] = d.keypoint[3]; // Right Eye Y
-            result->faces[result->face_count].landmarks[8] = d.keypoint[8]; // Right Mouth X
-            result->faces[result->face_count].landmarks[9] = d.keypoint[9]; // Right Mouth Y
+            /* ESP-DL HumanFaceDetect outputs keypoints natively in canonical order:
+             * 0,1: Left Eye | 2,3: Left Mouth | 4,5: Nose | 6,7: Right Eye | 8,9: Right Mouth */
+            for (int k = 0; k < 10; k++) {
+                result->faces[result->face_count].landmarks[k] = (float)d.keypoint[k];
+            }
         } else {
             /* Fallback: approximate landmarks from bounding box in expected order */
             int w = d.box[2] - d.box[0];
@@ -95,6 +100,7 @@ esp_err_t face_detector_run(camera_fb_t *fb, detection_result_t *result) {
         result->face_count++;
     }
     
+    if (s_detector_mux) xSemaphoreGive(s_detector_mux);
     return ESP_OK;
 }
 

@@ -48,6 +48,7 @@ static void close_btn_event_handler(lv_event_t* e);
 static void user_mgr_populate_task(void* arg);
 static void delete_user_task(void* arg);
 static void reenroll_user_task(void* arg);
+extern "C" void start_enrollment_task(void *pvParam);
 
 /* Context structs for background action tasks (BUG-3) */
 typedef struct { uint32_t user_id; } delete_ctx_t;
@@ -409,26 +410,23 @@ static void reenroll_user_task(void* arg) {
     uint32_t uid = ctx->user_id;
     free(ctx);
 
-    ESP_LOGI(TAG, "[BG] Re-enrolling user ID: %u", (unsigned int)uid);
+    ESP_LOGI(TAG, "[BG] Re-enrolling user ID: %u (preserving existing record)", (unsigned int)uid);
 
     user_t user;
     bool fetch_ok = (db_get_user_by_id(uid, &user) == ESP_OK);
-    bool del_ok   = fetch_ok && (db_delete_user(uid) == ESP_OK);
 
-    if (del_ok) {
-        recognizer_load_cache();
+    if (fetch_ok) {
+        /* Do NOT delete the user! Queue user for re-enrollment so existing record remains safe */
         ble_registration_add_pending_student(user.name, user.student_id, user.role, user.phone_number);
     }
 
     if (ui_acquire()) {
-        if (del_ok) {
+        if (fetch_ok) {
             ui_show_notification(NOTIFY_SUCCESS, "Re-enrollment", "Student queued. Opening Enrollment screen...", 2500);
             ui_close_user_manager();
-            ui_show_enrollment_screen();
-        } else if (!fetch_ok) {
-            ui_show_notification(NOTIFY_ERROR, "Re-enrollment", "Failed to load user details", 2000);
+            xTaskCreate(start_enrollment_task, "enrollment", TASK_DETECTION_STACK_SIZE, NULL, 5, NULL);
         } else {
-            ui_show_notification(NOTIFY_ERROR, "Re-enrollment", "Failed to delete existing user", 2000);
+            ui_show_notification(NOTIFY_ERROR, "Re-enrollment", "Failed to load user details", 2000);
         }
         ui_release();
     }

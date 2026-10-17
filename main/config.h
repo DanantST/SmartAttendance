@@ -67,19 +67,20 @@ extern "C" {
 /* Face detection thresholds */
 #define FACE_DETECT_CONFIDENCE_MIN  0.6f             // Minimum detection confidence
 #define FACE_MIN_SIZE_PX            30               // Minimum face bounding box size in pixels
-#define SCAN_SHARPNESS_MIN          10.0f            // Minimum sharpness to accept frame into scan window
-#define SCAN_BRIGHTNESS_MIN         25.0f            // Min average luminance for scan frame
-#define SCAN_BRIGHTNESS_MAX         230.0f           // Max average luminance for scan frame
-#define SCAN_GLARE_RATIO_MAX        0.08f            // Max fraction of pixels with luma > 240 (glare/overexposure)
-#define SCAN_MOUTH_RATIO_MAX        0.82f            // Max mouth vertical elongation ratio (drops open-mouth/jaw-drop frames)
+#define SCAN_SHARPNESS_MIN          5.0f             // Minimum sharpness to accept frame into scan window (SC2336 QVGA indoor)
+#define SCAN_BRIGHTNESS_MIN         15.0f            // Min average luminance for scan frame
+#define SCAN_BRIGHTNESS_MAX         245.0f           // Max average luminance for scan frame
+#define SCAN_GLARE_RATIO_MAX        0.15f            // Max fraction of pixels with luma > 240 (glare/overexposure)
+#define SCAN_MOUTH_RATIO_MAX        0.85f            // Max mouth vertical elongation ratio (drops open-mouth/jaw-drop frames)
 
 /* Multi-frame enrollment */
 #define ENROLL_FRAMES_TOTAL         30               // Total frames to capture
 #define ENROLL_FRAMES_KEEP          15               // Top quality frames to keep
-#define ENROLL_SHARPNESS_MIN        15.0f            // Minimum Laplacian variance
-#define ENROLL_BRIGHTNESS_MIN       30               // 0-255, min average luminance
-#define ENROLL_BRIGHTNESS_MAX       220              // Max average luminance
-#define ENROLL_YAW_MAX_DEG          30.0f            // Max head yaw angle
+#define ENROLL_SHARPNESS_MIN        5.0f             // Minimum Laplacian variance
+#define ENROLL_BRIGHTNESS_MIN       15               // 0-255, min average luminance
+#define ENROLL_BRIGHTNESS_MAX       245              // Max average luminance
+#define ENROLL_YAW_MAX_DEG          35.0f            // Max head yaw angle
+
 
 /* ==================== Multi-Frame Attendance Scan Configuration ==================== */
 /* Temporal Pattern Fusion & Consensus Voting — Plan v4 Final                        */

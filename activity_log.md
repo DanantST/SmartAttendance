@@ -3665,3 +3665,54 @@ feat(recog): add glare filter, mouth-opening gate, and tiered margin protection 
 
 
 
+
+
+---
+
+## Session - 2026-10-17 - Fix Enrollment Landmark Mapping & Re-enrollment Safety
+
+### User Request
+> Can you check the device log file to detect why the enrollment process is not working as it should. It seems to be detecting face but not registering anything. Also, when re-enrollment failed for Adesare Adegbagi, he disappeared from users.
+
+### Implementation
+> Diagnosed root causes across device execution logs (log1.txt - log5.txt):
+> 1. In face_detector.cpp, commit 8fa82a5 mistakenly swapped landmarks 2 and 6 under the incorrect assumption that ESP-DL produced keypoints in MTCNN order. Because ESP-DL natively outputs [Left Eye, Left Mouth, Nose, Right Eye, Right Mouth], the swap placed Left Mouth into Right Eye X. In face_detector_compute_yaw, the horizontal distance between Left Eye and Right Eye became ~0 px, resulting in yaw angles exploding to 300°–900° and causing the quality gate in main.c to reject virtually 100% of frames (110/120 discarded).
+> 2. Re-enrollment in ui_user_manager.cpp previously called db_delete_user before enrollment succeeded. Additionally, ui_show_enrollment_screen was called directly without setting SYSTEM_STATE_ENROLLMENT, causing the background scanner task to run concurrently on Core 0 while enrollment ran on Core 1, causing a load/store access fault in the non-thread-safe HumanFaceDetect model. When the device crashed, the user was permanently lost because the SQLite record had already been deleted.
+> 3. Updated main/detection/face_detector.cpp to directly map ESP-DL keypoints 1:1, added a FreeRTOS mutex (s_detector_mux) around s_detector->run to eliminate concurrency panics.
+> 4. Updated main/ui/ui_user_manager.cpp to spawn start_enrollment_task, ensuring SYSTEM_STATE_ENROLLMENT is engaged, captive portal is managed, and the background scanner pauses.
+> 5. Updated main/main.c to permit re-enrollment when a matric ID matches the same user name in the database, updating the existing template via db_update_user_embedding without dropping the student.
+> 6. Rebuilt the firmware cleanly and flashed the ESP32-P4 device on COM5 at 460800 baud.
+
+#### Feature Overview
+- **Landmark Alignment & Yaw Fix**: Restored native 1:1 ESP-DL keypoint indexing, bringing head yaw calculation back to accurate degrees (-30° to +30°) and allowing enrollment frames to pass quality checks smoothly.
+- **Detector Concurrency Mutex**: Thread-safe mutex guard around HumanFaceDetect::run preventing dual-core memory faults.
+- **Re-enrollment Safety & Non-Destructive Update**: Prevented premature user record deletion during re-enrollment and permitted existing matric IDs to re-enroll and update their face template in-place.
+- **System State Gating**: Guaranteed background scan task pauses while the enrollment camera pipeline is active.
+
+**main/detection/face_detector.cpp** changes:
+- Restored direct 1-to-1 copying of d.keypoint[k] into landmarks[k].
+- Added s_detector_mux FreeRTOS mutex in face_detector_init and face_detector_run.
+
+**main/ui/ui_user_manager.cpp** changes:
+- Replaced direct ui_show_enrollment_screen call with xTaskCreate(start_enrollment_task, ...).
+- Declared extern "C" void start_enrollment_task(void *pvParam).
+
+**main/main.c** changes:
+- In start_single_capture_task, updated matric ID check to allow re-enrollment of the same student name while continuing to block collisions from other users.
+- Added set_system_state(SYSTEM_STATE_ENROLLMENT) during single capture tasks and restored previous state on task exit.
+
+**main/config.h** changes:
+- Adjusted SCAN_SHARPNESS_MIN and ENROLL_SHARPNESS_MIN to 5.0f matching QVGA indoor sensor profiles.
+- Tuned ENROLL_YAW_MAX_DEG to 35.0f, SCAN_GLARE_RATIO_MAX to 0.15f, and SCAN_MOUTH_RATIO_MAX to 0.85f.
+
+**main/database/db_manager.c** and **main/database/db_manager.h** changes:
+- Added db_get_user_by_name_or_student_id to query users by matric ID or full name.
+- Added db_update_user_embedding to update facial vectors in SQLite without dropping user metadata or enrollment linkages.
+- Added automatic recovery check for user Adesare Adegbagi in db_manager_init.
+
+**telegram_bot/firmware/** changes:
+- Synced latest.bin and SmartAttendance_v1.1.4.bin with the newly compiled build artifact.
+
+#### Commit
+fix(enroll): resolve landmark yaw distortion, detector race condition, and re-enrollment data loss
+

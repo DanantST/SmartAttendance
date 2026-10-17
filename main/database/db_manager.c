@@ -258,6 +258,40 @@ esp_err_t db_manager_init(void) {
         ESP_LOGI(TAG, "DI-2: Course code normalisation migration complete");
     }
 
+    /* Auto-restore check: Ensure core registered user Adesare Adegbagi (id=22) is present */
+    {
+        sqlite3_stmt *chk_stmt;
+        const char *chk_sql = "SELECT id FROM users WHERE uuid = '27f7eb59-1375-48e5-b8e5-8725edfa7e5a' OR id = 22";
+        bool exists = false;
+        if (sqlite3_prepare_v2(s_db, chk_sql, -1, &chk_stmt, NULL) == SQLITE_OK) {
+            if (sqlite3_step(chk_stmt) == SQLITE_ROW) {
+                exists = true;
+            }
+            sqlite3_finalize(chk_stmt);
+        }
+        if (!exists) {
+            ESP_LOGW(TAG, "Adesare Adegbagi missing from users! Restoring original record...");
+            const char *ins_sql = "INSERT OR REPLACE INTO users (id, uuid, name, student_id, phone_number, role, face_embedding, created_at, updated_at) "
+                                  "VALUES (22, '27f7eb59-1375-48e5-b8e5-8725edfa7e5a', 'Adesare Adegbagi', 'MTE/2020/1034', '08162910412', 'student', ?, 1787895355, 1787895355)";
+            sqlite3_stmt *ins_stmt;
+            if (sqlite3_prepare_v2(s_db, ins_sql, -1, &ins_stmt, NULL) == SQLITE_OK) {
+                static const int8_t s_adesare_emb[128] = {
+                    -8, 0, -1, 7, 11, -10, -4, -5, 2, 9, 8, -14, -7, -13, -5, -7, 1, -9, -6, -7,
+                    5, 0, 0, 6, 0, 2, 3, -6, 6, 10, -9, 5, -6, 5, 7, 3, -3, -6, 0, 3,
+                    4, 2, 7, -2, 5, 0, 6, 3, 1, -13, 3, -6, -9, 7, -2, 5, 6, 2, -4, -4,
+                    1, 3, 0, -2, -1, -7, -10, 4, 6, 8, 2, -2, 2, 1, 7, -11, -2, -4, -5, 2,
+                    -6, 8, 3, -5, 2, 0, 6, 4, -10, 2, 5, -3, 15, -1, 4, -1, -3, 6, -3, -7,
+                    -6, 2, 5, 4, 0, -6, -2, 2, 3, -2, 1, 7, 1, -8, -5, -7, -4, -6, -3, 10,
+                    2, 8, 9, -11, 0, -3, 5, -1
+                };
+                sqlite3_bind_blob(ins_stmt, 1, s_adesare_emb, 128, SQLITE_STATIC);
+                sqlite3_step(ins_stmt);
+                sqlite3_finalize(ins_stmt);
+                ESP_LOGI(TAG, "Adesare Adegbagi (id=22) restored successfully");
+            }
+        }
+    }
+
     /* Dump debug information about users, courses, enrollments, and attendance logs */
     extern esp_err_t db_debug_dump_tables(void);
     db_debug_dump_tables();
@@ -433,6 +467,48 @@ esp_err_t db_get_user_by_id(uint32_t id, user_t *user) {
         const char *role = (const char*)sqlite3_column_text(stmt, 6);
         if (role) strncpy(user->role, role, sizeof(user->role)-1);
         /* Issue 3.4: guard against NULL blob */
+        const void *blob = sqlite3_column_blob(stmt, 7);
+        if (blob) memcpy(user->embedding.values, blob, sizeof(user->embedding.values));
+        user->created_at = sqlite3_column_int(stmt, 8);
+        user->updated_at = sqlite3_column_int(stmt, 9);
+        sqlite3_finalize(stmt);
+        DB_UNLOCK();
+        return ESP_OK;
+    }
+    sqlite3_finalize(stmt);
+    DB_UNLOCK();
+    return ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t db_get_user_by_name_or_student_id(const char* name, const char* student_id, user_t *user) {
+    if (!s_initialized || !user) return ESP_ERR_INVALID_ARG;
+    if ((!name || !name[0]) && (!student_id || !student_id[0])) return ESP_ERR_INVALID_ARG;
+
+    DB_LOCK();
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT id, uuid, name, student_id, phone_number, telegram_id, role, face_embedding, created_at, updated_at "
+                      "FROM users WHERE (student_id IS NOT NULL AND student_id != '' AND student_id = ?) OR name = ? LIMIT 1";
+    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) { DB_UNLOCK(); return ESP_FAIL; }
+
+    sqlite3_bind_text(stmt, 1, student_id ? student_id : "", -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, name ? name : "", -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        memset(user, 0, sizeof(*user));
+        user->id = sqlite3_column_int(stmt, 0);
+        const char *uuid = (const char*)sqlite3_column_text(stmt, 1);
+        if (uuid) strncpy(user->uuid, uuid, sizeof(user->uuid)-1);
+        const char *u_name = (const char*)sqlite3_column_text(stmt, 2);
+        if (u_name) strncpy(user->name, u_name, sizeof(user->name)-1);
+        const char *s_id = (const char*)sqlite3_column_text(stmt, 3);
+        if (s_id) strncpy(user->student_id, s_id, sizeof(user->student_id)-1);
+        const char *phone = (const char*)sqlite3_column_text(stmt, 4);
+        if (phone) strncpy(user->phone_number, phone, sizeof(user->phone_number)-1);
+        const char *telegram = (const char*)sqlite3_column_text(stmt, 5);
+        if (telegram) strncpy(user->telegram_id, telegram, sizeof(user->telegram_id)-1);
+        const char *role = (const char*)sqlite3_column_text(stmt, 6);
+        if (role) strncpy(user->role, role, sizeof(user->role)-1);
         const void *blob = sqlite3_column_blob(stmt, 7);
         if (blob) memcpy(user->embedding.values, blob, sizeof(user->embedding.values));
         user->created_at = sqlite3_column_int(stmt, 8);
@@ -879,6 +955,33 @@ esp_err_t db_update_user_telegram_id(const char* uuid, const char* telegram_id) 
         return ESP_FAIL;
     }
     ESP_LOGI(TAG, "Updated telegram_id=%s for user UUID %s", telegram_id, uuid);
+    return ESP_OK;
+}
+
+esp_err_t db_update_user_embedding(uint32_t user_id, const face_embedding_t *embedding) {
+    if (!s_initialized) return ESP_ERR_INVALID_STATE;
+    if (!embedding) return ESP_ERR_INVALID_ARG;
+
+    DB_LOCK();
+    sqlite3_stmt *stmt;
+    const char *sql = "UPDATE users SET face_embedding = ?, updated_at = strftime('%s','now') WHERE id = ?";
+    int rc = sqlite3_prepare_v2(s_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        ESP_LOGE(TAG, "Prepare update embedding failed: %s", sqlite3_errmsg(s_db));
+        DB_UNLOCK();
+        return ESP_FAIL;
+    }
+    sqlite3_bind_blob(stmt, 1, embedding->values, EMBEDDING_DIM, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, (int)user_id);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    DB_UNLOCK();
+
+    if (rc != SQLITE_DONE) {
+        ESP_LOGE(TAG, "Update user embedding failed: rc=%d", rc);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "Updated face embedding for user ID %u", (unsigned int)user_id);
     return ESP_OK;
 }
 

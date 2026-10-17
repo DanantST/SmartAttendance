@@ -65,6 +65,7 @@ esp_err_t db_insert_user(user_t *user);
 esp_err_t db_insert_attendance_log(attendance_log_t *log);
 esp_err_t db_mark_logs_synced(uint32_t *ids, size_t count);
 esp_err_t db_get_user_by_id(uint32_t id, user_t *user);
+esp_err_t db_get_user_by_name_or_student_id(const char* name, const char* student_id, user_t *user);
 esp_err_t db_get_all_users(user_t **users, int *count);
 uint32_t db_get_current_schedule_id(void);
 void db_manager_flush(void);
@@ -121,6 +122,7 @@ esp_err_t db_delete_user_by_uuid(const char* uuid);
  * @brief Update the telegram_id of a user by UUID
  */
 esp_err_t db_update_user_telegram_id(const char* uuid, const char* telegram_id);
+esp_err_t db_update_user_embedding(uint32_t user_id, const face_embedding_t *embedding);
 esp_err_t db_link_lecturer_course_by_uuid(const char* lecturer_uuid, int course_id);
 
 typedef struct {

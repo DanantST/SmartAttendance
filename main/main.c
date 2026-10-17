@@ -1312,6 +1312,10 @@ static esp_err_t process_enrollment_frames_for_user(user_t* new_user) {
 
         valid_count++;
         ESP_LOGI(TAG, "Accepted sample %d/30 (sharpness=%.1f, brightness=%.1f, yaw=%.1f)", valid_count, sharpness, brightness, yaw);
+        if (ui_acquire()) {
+            ui_enrollment_set_capture_progress(valid_count, ENROLL_FRAMES_TOTAL);
+            ui_release();
+        }
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 
@@ -1532,10 +1536,30 @@ static esp_err_t process_enrollment_frames_for_user(user_t* new_user) {
         user_t *existing_user = NULL;
         float existing_confidence = 0.0f;
         recognizer_identify(&final_embedding, &existing_user, &existing_confidence);
+        bool is_reenrollment = false;
         if (existing_user != NULL && existing_confidence >= RECOGNITION_THRESHOLD) {
-            ESP_LOGW(TAG, "Face already enrolled under user: %s (confidence: %.2f)", existing_user->name, existing_confidence);
-            ret = ESP_ERR_INVALID_STATE;
-            goto cleanup;
+            /* If the face matches the user we are enrolling/re-enrolling (by student_id or name), permit it */
+            if ((new_user->student_id[0] && strcmp(existing_user->student_id, new_user->student_id) == 0) ||
+                (new_user->name[0] && strcmp(existing_user->name, new_user->name) == 0)) {
+                ESP_LOGI(TAG, "Re-enrollment detected: matched existing user %s (id=%d) — updating template",
+                         existing_user->name, (int)existing_user->id);
+                new_user->id = existing_user->id;
+                strncpy(new_user->uuid, existing_user->uuid, sizeof(new_user->uuid) - 1);
+                is_reenrollment = true;
+            } else {
+                ESP_LOGW(TAG, "Face already enrolled under user: %s (confidence: %.2f)", existing_user->name, existing_confidence);
+                ret = ESP_ERR_INVALID_STATE;
+                goto cleanup;
+            }
+        } else {
+            /* Also check by student_id or name if user already exists in DB */
+            user_t db_user;
+            if (db_get_user_by_name_or_student_id(new_user->name, new_user->student_id, &db_user) == ESP_OK) {
+                ESP_LOGI(TAG, "Re-enrollment of existing DB user %s (id=%d) — updating template", db_user.name, (int)db_user.id);
+                new_user->id = db_user.id;
+                strncpy(new_user->uuid, db_user.uuid, sizeof(new_user->uuid) - 1);
+                is_reenrollment = true;
+            }
         }
 
         /* Populate new_user record with representative embedding and metadata */
@@ -1547,12 +1571,20 @@ static esp_err_t process_enrollment_frames_for_user(user_t* new_user) {
         new_user->enroll_rejected = (uint8_t)(rejected_count + outlier_count);
         new_user->model_version = 1;
         new_user->embedding_dim = 128;
-        generate_uuid_hex(new_user->uuid, sizeof(new_user->uuid));
 
-        /* Store ONLY single representative embedding into database */
-        ret = db_insert_user(new_user);
+        if (is_reenrollment && new_user->id > 0) {
+            ret = db_update_user_embedding(new_user->id, &final_embedding);
+            if (ret == ESP_OK) {
+                recognizer_load_cache(); /* Refresh cache with updated embedding */
+            }
+        } else {
+            generate_uuid_hex(new_user->uuid, sizeof(new_user->uuid));
+            ret = db_insert_user(new_user);
+            if (ret == ESP_OK) {
+                recognizer_add_to_cache(new_user);
+            }
+        }
         if (ret == ESP_OK) {
-            recognizer_add_to_cache(new_user);
             vTaskDelay(pdMS_TO_TICKS(5));
 
             /* Step 8: Update UI with Quality Result Card (Redo option shown ONLY if POOR) */
@@ -1602,15 +1634,26 @@ void start_single_capture_task(void *pvParam) {
     new_user.telegram_id[0] = '\0';
     strncpy(new_user.role,         reg_data.role,         sizeof(new_user.role)         - 1);
 
+    /* Ensure system state is in enrollment mode to pause background scanner */
+    system_state_t prev_sys_state = get_system_state();
+    set_system_state(SYSTEM_STATE_ENROLLMENT);
+
     /* Check if student ID is already registered in database */
-    if (db_student_id_exists(new_user.student_id)) {
-        if (ui_acquire()) {
-            ui_enrollment_set_status(false, "Matric ID already registered!");
-            ui_release();
+    user_t existing_by_id;
+    if (db_get_user_by_name_or_student_id("", new_user.student_id, &existing_by_id) == ESP_OK) {
+        /* If matric ID belongs to a different person, reject duplicate ID */
+        if (strcasecmp(existing_by_id.name, new_user.name) != 0) {
+            if (ui_acquire()) {
+                ui_enrollment_set_status(false, "Matric ID already registered!");
+                ui_release();
+            }
+            ble_registration_set_result(false, 0);
+            if (prev_sys_state != SYSTEM_STATE_ENROLLMENT) set_system_state(prev_sys_state);
+            vTaskDelete(NULL);
+            return;
         }
-        ble_registration_set_result(false, 0);
-        vTaskDelete(NULL);
-        return;
+        ESP_LOGI(TAG, "Re-enrollment for %s (Matric ID %s) approved — updating facial template",
+                 new_user.name, new_user.student_id);
     }
 
     esp_err_t ret = process_enrollment_frames_for_user(&new_user);
@@ -1655,7 +1698,9 @@ void start_single_capture_task(void *pvParam) {
         ui_release();
     }
 
-    /* (Audio guidance removed 2026-06-11) */
+    if (prev_sys_state != SYSTEM_STATE_ENROLLMENT) {
+        set_system_state(prev_sys_state);
+    }
 
     vTaskDelete(NULL);
 }
