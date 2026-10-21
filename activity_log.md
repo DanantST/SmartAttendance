@@ -3760,3 +3760,46 @@ fix(enroll): resolve landmark yaw distortion, detector race condition, and re-en
 
 #### Commit
 docs: add comprehensive system user manual PDF covering enrollment, attendance, scheduling, charging, and management
+
+
+---
+
+## Session - 2026-10-21 - Admin Operator & Technician Manual Separation
+
+### User Request
+> Can you compose another version of user manual for the admin operator. The new version should not contain any information unnecessary for a layman. The new version should not contain information that is meant for a builder, developer or technician. It should only contain information relevant for usage.
+> Rename the first version to technician manual and provide any other information useful for the technician in the first version.
+
+### Implementation
+> 1. Restructured manual documentation into two dedicated, role-specific publications:
+>    - **Admin Operator User Manual** (docs/SmartAttendance_User_Manual.pdf): Fully rewritten for everyday non-technical users, lecturers, and departmental officers. Stripped all developer jargon (no GPIOs, I2C addresses, C++ code, or registers). Focuses strictly on operational workflows: device parts, powering & charging, battery telemetry icons, Setup Wizard, daily classroom attendance scanning, student enrollment (on-device & phone portal), lecture scheduling via Telegram, student management, report export to Excel CSV, and everyday care.
+>    - **Technician & Engineering Manual** (docs/SmartAttendance_Technician_Manual.pdf): Renamed and expanded with deep hardware engineering specifications: ESP32-P4 Hex-PSRAM @ 200MHz, LDO3 (2.5V) & LDO4 (3.3V) power sequencing, full hardware pinout matrix, EK79007 MIPI-DSI timing, Goodix GT911 manual GPIO40/42 I2C address locking sequence (0x5D), SC2336 24-pin CSI driver configuration, double-buffering DMA architecture (s_detection_fb_buf), ESP-DL neural inference & MobileFaceNet 128D int8 vectors, multi-frame consensus & dynamic margin delta, STC8 gas gauge communication, FreeRTOS task priorities and stack sizing, 16MB flash partition table (partitions.csv), dual-bank OTA flashing, SQLite3 schema, and board-level test points.
+> 2. Created dedicated Python ReportLab generator scripts:
+>    - docs/generate_operator_manual.py
+>    - docs/generate_technician_manual.py
+> 3. Removed obsolete docs/generate_manual.py.
+> 4. Compiled both PDF manuals cleanly and verified page layouts and formatting.
+> 5. Updated activity_log.md, committed changes following conventional commits, and pushed to origin master.
+
+#### Feature Overview
+- **Dedicated Layman Operator Manual**: Intuitive 8-page user guide covering device parts, battery charging, enrollment, classroom attendance, scheduling, and Excel reports with zero technical jargon.
+- **Comprehensive Technician Reference**: In-depth 8-page hardware engineering reference covering board schematics, pinout matrix, MIPI CSI/DSI drivers, touch timing, neural inference, FreeRTOS tasks, and board diagnostics.
+- **Reproducible Script Automation**: Created docs/generate_operator_manual.py and docs/generate_technician_manual.py.
+
+**docs/SmartAttendance_User_Manual.pdf** changes:
+- Replaced technical manual with dedicated non-technical Admin Operator Manual.
+
+**docs/SmartAttendance_Technician_Manual.pdf** changes:
+- Created expanded Technician & Engineering Manual PDF.
+
+**docs/generate_operator_manual.py** changes:
+- Created script to generate the Admin Operator manual.
+
+**docs/generate_technician_manual.py** changes:
+- Created script to generate the Technician engineering manual.
+
+**docs/generate_manual.py** changes:
+- Removed obsolete single generator.
+
+#### Commit
+docs: separate operator manual from technician manual and expand engineering reference
