@@ -3716,3 +3716,47 @@ feat(recog): add glare filter, mouth-opening gate, and tiered margin protection 
 #### Commit
 fix(enroll): resolve landmark yaw distortion, detector race condition, and re-enrollment data loss
 
+
+
+---
+
+## Session - 2026-10-21 - Comprehensive System User Manual PDF
+
+### User Request
+> I need you to compose a comprehensive user manual .pdf file for this device and push it to the github repository.
+> the user manual is for the entire system covering enrollment, attendance, scheduling, management, charging, and all other aspects and procedures
+
+### Implementation
+> 1. Analyzed full system architecture, hardware schematics, firmware configurations, UI logic, battery charging & fuel gauge telemetry, edge vision pipeline, and Telegram bot APIs across the SmartAttendance workspace.
+> 2. Developed a Python ReportLab generation script (docs/generate_manual.py) implementing a dynamic two-pass NumberedCanvas for publication-grade headers, footers, and page numbers.
+> 3. Authored an exhaustive 14-chapter technical and operational user manual covering:
+>    - Chapter 1: System Overview & Architecture (Edge AI philosophy, sub-second recognition, block diagrams)
+>    - Chapter 2: Hardware Architecture & Pin Interfaces (ESP32-P4 SoC, MIPI-DSI display bridge, GT911 touch, SC2336 camera, GPIO mapping)
+>    - Chapter 3: Power Architecture, Battery Management & Charging (USB-C 5V/3A, LiPo management, STC8 gas gauge, cyan lightning bolt charging indicator, 15% warning, 5% emergency auto-shutdown, calibration logging)
+>    - Chapter 4: Commissioning & Initial Setup (MicroSD FAT32 directory structure, model files, setup wizard, Master Admin PIN, RTC/SNTP)
+>    - Chapter 5: Biometric Face Recognition Engine (ESP-DL, 5-point landmark alignment, MobileFaceNet 128D embeddings, multi-frame consensus, tiered dynamic margin gate)
+>    - Chapter 6: Facial Enrollment Procedures (On-device touch UI, SoftAP Web Portal register.html, 8-step statistically robust algorithm with K-Means pose clustering, quality scorecard)
+>    - Chapter 7: Lecture Scheduling & Course Session Management (Telegram bot /schedule 5-step wizard, FastAPI cloud sync API, automatic session activation)
+>    - Chapter 8: Daily Attendance Scanning Operations (Live viewfinder, reticle color codes, sub-second verification, 15-min duplicate debounce, anti-spoofing filters)
+>    - Chapter 9: User Database & Roster Administration (Browsing, searching, non-destructive in-place re-enrollment, user deletion/archival)
+>    - Chapter 10: Attendance Records, Reports & CSV Export (On-screen logs, MicroSD CSV export, cloud push sync)
+>    - Chapter 11: Dual Telegram Bot Ecosystem (Student check-in push alerts, lecturer portal, admin remote console commands)
+>    - Chapter 12: System Settings, Maintenance & OTA Updates (Display PWM, Wi-Fi configuration, dual-bank A/B OTA firmware upgrades)
+>    - Chapter 13: Troubleshooting & Fault Diagnostics (Hardware recovery, camera, touch, SD mount, error code glossary)
+>    - Chapter 14: Technical Specifications & Safety Ratings (Electrical limits, temperature, mounting, cleaning)
+> 4. Compiled the script into docs/SmartAttendance_User_Manual.pdf (13 pages, publication-grade layout with custom typography, tables, and callouts).
+> 5. Staged, committed, and pushed the manual and generation script to GitHub.
+
+#### Feature Overview
+- **Complete System Documentation**: Comprehensive 14-chapter manual detailing hardware, power/charging, edge AI biometrics, enrollment workflows, lecture scheduling, attendance scanning, and Telegram bot synchronization.
+- **Publication-Grade PDF Artifact**: 13-page formatted PDF with running headers, footers, dynamic page counts, custom tables, and visual callouts generated at docs/SmartAttendance_User_Manual.pdf.
+- **Reproducible Build Script**: Self-contained generation script at docs/generate_manual.py.
+
+**docs/SmartAttendance_User_Manual.pdf** changes:
+- Created 13-page comprehensive user & administration manual PDF.
+
+**docs/generate_manual.py** changes:
+- Created ReportLab PDF compilation script with NumberedCanvas and styling rules.
+
+#### Commit
+docs: add comprehensive system user manual PDF covering enrollment, attendance, scheduling, charging, and management
