@@ -1,18 +1,30 @@
 """
 SmartAttendance Admin Operator & User Manual Generator (Layman Edition).
-Generates an intuitive, non-technical, publication-grade manual exclusively focused on
-daily operational procedures, administrative workflows, and practical user guidance:
-- Overview of device parts and controls
-- Powering on, battery levels, and charging instructions
-- Initial Setup Wizard (Setting Admin PIN, Date/Time, Department info)
-- Daily attendance scanning operations for lectures and events
+Formatted in Times New Roman typography with 12pt body text.
+Exclusively covers practical operational procedures, administrative workflows, and user guidance:
+- Device hardware controls:
+  * Slide power switch on the left side (slide UP to power ON, DOWN to power OFF)
+  * USB Type-C charging slot on left side below power switch (5V 2A-3A recommended)
+  * MicroSD memory card on the BOTTOM slot (CRITICAL: DO NOT REMOVE!)
+  * Camera lens at the TOP of the screen
+- Powering on, battery color indicators:
+  * Cyan Blue (#00CFFF) with lightning bolt when charging
+  * White / Black during normal operation (15% - 100%)
+  * Vivid Red (#FF4444) when battery is low (< 15%)
+  * Automatic protective shutdown at 5% (saves all data safely)
+  * No green battery color, no bar meter
+- Contactless facial verification with 100% visual feedback:
+  * Green reticle & green bottom banner on success (no speaker / no audio)
+  * Orange banner for duplicate scans (15-minute debounce)
+  * Red text for unrecognized faces
+  * 5 quick Camera Profile buttons (Auto, Outdoor, Indoor, Bright, Low Light)
+- Initial Setup Wizard (Setting Admin PIN, Department info, Date/Time, Wi-Fi)
 - Enrolling students & staff (On-device touch screen and Smartphone Wi-Fi portal)
-- Managing registered users, updating appearances, and student search
+- Managing registered users, updating face scans for new looks, and student search
 - Scheduling classes via the Telegram Bot (@MyUniAttendance_Bot)
 - Viewing attendance records and exporting reports to Excel CSV
-- Sound volume, screen brightness, and Wi-Fi connection
+- Screen brightness, light/dark theme switch, and Wi-Fi connection
 - Everyday troubleshooting, screen cleaning, and FAQs
-Contains ZERO developer/technician jargon (no registers, baud rates, GPIOs, C++ code, or schematics).
 """
 
 import os
@@ -25,16 +37,43 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase.pdfmetrics import registerFontFamily
 
-# Friendly, clean, modern corporate palette
-C_PRIMARY = colors.HexColor("#1E3A8A")    # Classic Royal Navy
-C_SECONDARY = colors.HexColor("#0284C7")  # Friendly Sky Blue
+# Typography Setup: Genuine Times New Roman with Core Fallback
+win_fonts = "C:\\Windows\\Fonts"
+if os.path.exists(os.path.join(win_fonts, "times.ttf")):
+    pdfmetrics.registerFont(TTFont("TimesNewRoman", os.path.join(win_fonts, "times.ttf")))
+    pdfmetrics.registerFont(TTFont("TimesNewRoman-Bold", os.path.join(win_fonts, "timesbd.ttf")))
+    pdfmetrics.registerFont(TTFont("TimesNewRoman-Italic", os.path.join(win_fonts, "timesi.ttf")))
+    pdfmetrics.registerFont(TTFont("TimesNewRoman-BoldItalic", os.path.join(win_fonts, "timesbi.ttf")))
+    registerFontFamily(
+        "TimesNewRoman",
+        normal="TimesNewRoman",
+        bold="TimesNewRoman-Bold",
+        italic="TimesNewRoman-Italic",
+        boldItalic="TimesNewRoman-BoldItalic"
+    )
+    F_NORMAL = "TimesNewRoman"
+    F_BOLD = "TimesNewRoman-Bold"
+    F_ITALIC = "TimesNewRoman-Italic"
+    F_BOLD_ITALIC = "TimesNewRoman-BoldItalic"
+else:
+    F_NORMAL = "Times-Roman"
+    F_BOLD = "Times-Bold"
+    F_ITALIC = "Times-Italic"
+    F_BOLD_ITALIC = "Times-BoldItalic"
+
+# Clean corporate palette
+C_PRIMARY = colors.HexColor("#1E3A8A")    # Classic Navy
+C_SECONDARY = colors.HexColor("#0284C7")  # Technical Blue
 C_DARK = colors.HexColor("#0F172A")       # Soft Charcoal
-C_BODY = colors.HexColor("#334155")       # Readable Slate Body
-C_MUTED = colors.HexColor("#64748B")      # Muted Gray
-C_BG_LIGHT = colors.HexColor("#F8FAFC")   # Crisp Soft Background
-C_BORDER = colors.HexColor("#E2E8F0")     # Light Divider
-C_CARD_BG = colors.HexColor("#F1F5F9")    # Step Card Background
+C_BODY = colors.HexColor("#1E293B")       # Dark Slate Body
+C_MUTED = colors.HexColor("#64748B")      # Muted Slate
+C_BG_LIGHT = colors.HexColor("#F8FAFC")   # Light Background
+C_BORDER = colors.HexColor("#CBD5E1")     # Border
+C_CARD_BG = colors.HexColor("#F1F5F9")    # Card Background
 
 # Semantic Callout Palette
 C_SUCCESS_BORDER = colors.HexColor("#10B981")
@@ -71,7 +110,7 @@ class OperatorNumberedCanvas(canvas.Canvas):
 
     def draw_header_footer(self, total_pages):
         self.saveState()
-        self.setFont("Helvetica", 8.5)
+        self.setFont(F_NORMAL, 9)
         self.setFillColor(C_MUTED)
 
         # Header
@@ -82,7 +121,7 @@ class OperatorNumberedCanvas(canvas.Canvas):
         self.line(MARGIN, PAGE_HEIGHT - 28, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 28)
 
         # Footer
-        footer_left = "Daily Usage, Enrollment, Scheduling, Reports & Charging Instructions"
+        footer_left = "Daily Usage, Enrollment, Scheduling, Reports & Battery Management"
         footer_right = f"Page {self._pageNumber} of {total_pages}"
         self.drawString(MARGIN, 20, footer_left)
         self.drawRightString(PAGE_WIDTH - MARGIN, 20, footer_right)
@@ -95,72 +134,73 @@ def get_styles():
     base = getSampleStyleSheet()
     return {
         "CoverTag": ParagraphStyle(
-            "CoverTag", parent=base["Normal"], fontName="Helvetica-Bold",
-            fontSize=10, leading=14, textColor=C_SECONDARY, spaceAfter=6,
+            "CoverTag", parent=base["Normal"], fontName=F_BOLD,
+            fontSize=11, leading=15, textColor=C_SECONDARY, spaceAfter=6,
         ),
         "CoverTitle": ParagraphStyle(
-            "CoverTitle", parent=base["Normal"], fontName="Helvetica-Bold",
+            "CoverTitle", parent=base["Normal"], fontName=F_BOLD,
             fontSize=26, leading=32, textColor=C_PRIMARY, spaceAfter=8,
         ),
         "CoverSubtitle": ParagraphStyle(
-            "CoverSubtitle", parent=base["Normal"], fontName="Helvetica",
-            fontSize=13, leading=18, textColor=C_DARK, spaceAfter=14,
+            "CoverSubtitle", parent=base["Normal"], fontName=F_NORMAL,
+            fontSize=14, leading=19, textColor=C_DARK, spaceAfter=14,
         ),
         "CoverMeta": ParagraphStyle(
-            "CoverMeta", parent=base["Normal"], fontName="Helvetica",
-            fontSize=8.5, leading=13, textColor=C_BODY,
+            "CoverMeta", parent=base["Normal"], fontName=F_NORMAL,
+            fontSize=10, leading=14, textColor=C_BODY,
         ),
         "CoverMetaBold": ParagraphStyle(
-            "CoverMetaBold", parent=base["Normal"], fontName="Helvetica-Bold",
-            fontSize=8.5, leading=13, textColor=C_PRIMARY,
+            "CoverMetaBold", parent=base["Normal"], fontName=F_BOLD,
+            fontSize=10, leading=14, textColor=C_PRIMARY,
         ),
         "H1": ParagraphStyle(
-            "H1", parent=base["Heading1"], fontName="Helvetica-Bold",
-            fontSize=15, leading=19, textColor=C_PRIMARY, spaceBefore=11, spaceAfter=5, keepWithNext=True,
+            "H1", parent=base["Heading1"], fontName=F_BOLD,
+            fontSize=17, leading=22, textColor=C_PRIMARY, spaceBefore=12, spaceAfter=6, keepWithNext=True,
         ),
         "H2": ParagraphStyle(
-            "H2", parent=base["Heading2"], fontName="Helvetica-Bold",
-            fontSize=11.5, leading=15, textColor=C_SECONDARY, spaceBefore=8, spaceAfter=4, keepWithNext=True,
+            "H2", parent=base["Heading2"], fontName=F_BOLD,
+            fontSize=13, leading=17, textColor=C_SECONDARY, spaceBefore=9, spaceAfter=4, keepWithNext=True,
         ),
         "H3": ParagraphStyle(
-            "H3", parent=base["Heading3"], fontName="Helvetica-Bold",
-            fontSize=9.5, leading=13, textColor=C_DARK, spaceBefore=6, spaceAfter=3, keepWithNext=True,
+            "H3", parent=base["Heading3"], fontName=F_BOLD,
+            fontSize=11.5, leading=15, textColor=C_DARK, spaceBefore=7, spaceAfter=3, keepWithNext=True,
         ),
+        # Requested: Font size 12 for the body text in Times New Roman
         "Body": ParagraphStyle(
-            "Body", parent=base["Normal"], fontName="Helvetica",
-            fontSize=8.8, leading=13, textColor=C_BODY, spaceAfter=4.5,
+            "Body", parent=base["Normal"], fontName=F_NORMAL,
+            fontSize=12, leading=16, textColor=C_BODY, spaceAfter=5,
         ),
         "Bullet": ParagraphStyle(
-            "Bullet", parent=base["Normal"], fontName="Helvetica",
-            fontSize=8.8, leading=13, textColor=C_BODY, leftIndent=12, firstLineIndent=-9, spaceAfter=3,
+            "Bullet", parent=base["Normal"], fontName=F_NORMAL,
+            fontSize=12, leading=16, textColor=C_BODY, leftIndent=14, firstLineIndent=-10, spaceAfter=3.5,
         ),
         "TableHeader": ParagraphStyle(
-            "TableHeader", parent=base["Normal"], fontName="Helvetica-Bold",
-            fontSize=8.5, leading=12, textColor=colors.white,
+            "TableHeader", parent=base["Normal"], fontName=F_BOLD,
+            fontSize=9.5, leading=13, textColor=colors.white,
         ),
         "TableCell": ParagraphStyle(
-            "TableCell", parent=base["Normal"], fontName="Helvetica",
-            fontSize=8, leading=11.5, textColor=C_BODY,
+            "TableCell", parent=base["Normal"], fontName=F_NORMAL,
+            fontSize=9, leading=12.5, textColor=C_BODY,
         ),
         "TableCellBold": ParagraphStyle(
-            "TableCellBold", parent=base["Normal"], fontName="Helvetica-Bold",
-            fontSize=8, leading=11.5, textColor=C_DARK,
+            "TableCellBold", parent=base["Normal"], fontName=F_BOLD,
+            fontSize=9, leading=12.5, textColor=C_DARK,
         ),
         "CalloutBold": ParagraphStyle(
-            "CalloutBold", parent=base["Normal"], fontName="Helvetica-Bold",
-            fontSize=8.5, leading=12, textColor=C_PRIMARY,
+            "CalloutBold", parent=base["Normal"], fontName=F_BOLD,
+            fontSize=11, leading=15, textColor=C_PRIMARY,
         ),
         "CalloutText": ParagraphStyle(
-            "CalloutText", parent=base["Normal"], fontName="Helvetica",
-            fontSize=8.3, leading=12, textColor=C_DARK,
+            "CalloutText", parent=base["Normal"], fontName=F_NORMAL,
+            fontSize=10.5, leading=14.5, textColor=C_DARK,
         ),
         "TOCItem": ParagraphStyle(
-            "TOCItem", parent=base["Normal"], fontName="Helvetica",
-            fontSize=8.5, leading=13, textColor=C_DARK,
+            "TOCItem", parent=base["Normal"], fontName=F_NORMAL,
+            fontSize=10, leading=14, textColor=C_DARK,
         ),
         "TOCItemBold": ParagraphStyle(
-            "TOCItemBold", parent=base["Normal"], fontName="Helvetica-Bold",
-            fontSize=9, leading=13, textColor=C_PRIMARY,
+            "TOCItemBold", parent=base["Normal"], fontName=F_BOLD,
+            fontSize=10.5, leading=14, textColor=C_PRIMARY,
         ),
     }
 
@@ -185,7 +225,7 @@ def make_callout(box_type, title, content, styles):
         ("BACKGROUND", (0, 0), (-1, -1), bg),
         ("BOX", (0, 0), (-1, -1), 0.5, C_BORDER),
         ("LINEBEFORE", (0, 0), (0, -1), 3.5, border),
-        ("PADDING", (0, 0), (-1, -1), 5),
+        ("PADDING", (0, 0), (-1, -1), 6),
     ]))
     return t
 
@@ -204,17 +244,17 @@ def build_operator_story():
         styles["CoverSubtitle"]
     ))
 
-    story.append(HRFlowable(width="100%", thickness=3, color=C_SECONDARY, spaceBefore=2, spaceAfter=14))
+    story.append(HRFlowable(width="100%", thickness=2.5, color=C_SECONDARY, spaceBefore=2, spaceAfter=14))
 
     highlights = [
         "<b>Simple Touchscreen Operation:</b> 7-inch color display designed for intuitive everyday classroom use.",
-        "<b>Fast & Hygienic Attendance:</b> Automatic facial recognition in under 1 second without touching the device.",
+        "<b>Fast & Hygienic Attendance:</b> Sub-second contactless facial verification with on-screen visual confirmation.",
         "<b>Works Anywhere:</b> Operates 100% offline without internet; optional Wi-Fi syncs records seamlessly.",
         "<b>Quick Student Registration:</b> Register students directly on screen or from your smartphone via Wi-Fi.",
         "<b>Automated Class Scheduling:</b> Lecturers schedule classes easily through the official Telegram Bot.",
         "<b>Portable Battery Power:</b> Built-in rechargeable battery provides 4 to 6 hours of continuous scanning.",
         "<b>Instant Reports:</b> Export attendance directly to an Excel-compatible CSV file on the memory card.",
-        "<b>Telegram Push Alerts:</b> Students receive an immediate confirmation message when marked present.",
+        "<b>Telegram Push Alerts:</b> Students receive an immediate confirmation message on their phones when marked present.",
     ]
     cov_p = [Paragraph(f"• {h}", styles["Body"]) for h in highlights]
     t_cov = Table([[cov_p]], colWidths=[USABLE_WIDTH])
@@ -224,7 +264,7 @@ def build_operator_story():
         ("PADDING", (0, 0), (-1, -1), 9),
     ]))
     story.append(t_cov)
-    story.append(Spacer(1, 20))
+    story.append(Spacer(1, 18))
 
     meta = [
         [
@@ -240,8 +280,8 @@ def build_operator_story():
             Paragraph("@MyUniAttendance_Bot", styles["CoverMeta"]),
         ],
         [
-            Paragraph("<b>Document Version:</b>", styles["CoverMetaBold"]),
-            Paragraph("2.1.0 (Operator Edition)", styles["CoverMeta"]),
+            Paragraph("<b>Typography:</b>", styles["CoverMetaBold"]),
+            Paragraph("Times New Roman (12pt Body)", styles["CoverMeta"]),
             Paragraph("<b>Publication Date:</b>", styles["CoverMetaBold"]),
             Paragraph("October 2026", styles["CoverMeta"]),
         ],
@@ -249,15 +289,15 @@ def build_operator_story():
     t_meta = Table(meta, colWidths=[110, 160, 120, 150])
     t_meta.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("PADDING", (0, 0), (-1, -1), 2.5),
+        ("PADDING", (0, 0), (-1, -1), 3),
     ]))
     story.append(t_meta)
-    story.append(Spacer(1, 15))
+    story.append(Spacer(1, 14))
 
     story.append(make_callout(
         "tip",
         "About This Manual",
-        "This guide is written specifically for day-to-day operators. It explains how to set up the device, enroll students, run attendance sessions, schedule classes, and charge the unit without complicated engineering terms. If you need hardware repair or circuit pinout details, consult the separate Technician Manual.",
+        "This guide is written specifically for day-to-day operators. It explains how to operate the slide switch, check battery colors, charge the device, enroll students, run attendance sessions, schedule classes, and manage reports. For circuit schematics and developer flashing guides, refer to the separate Technician Manual.",
         styles
     ))
 
@@ -268,15 +308,15 @@ def build_operator_story():
     story.append(HRFlowable(width="100%", thickness=1.5, color=C_PRIMARY, spaceBefore=2, spaceAfter=8))
 
     chapters = [
-        ("Chapter 1: Getting to Know Your Terminal", "Device parts, touchscreen controls, camera lens, ports, and buttons"),
-        ("Chapter 2: Powering On, Battery Levels & Charging", "Turning on/off, understanding battery icons, charging times, battery care"),
+        ("Chapter 1: Getting to Know Your Terminal", "Exterior controls, slide power switch, USB-C slot, camera lens, memory card slot"),
+        ("Chapter 2: Powering On, Battery Levels & Charging", "Slide switch operation, battery color indicators (cyan/white/red), 5V 2-3A charging"),
         ("Chapter 3: First-Time Setup Wizard", "Setting your 4-digit Admin PIN, department name, clock, and Wi-Fi connection"),
-        ("Chapter 4: Daily Attendance Scanning in the Classroom", "Taking attendance, screen colors (green/amber/red), chime, duplicate prevention"),
+        ("Chapter 4: Daily Attendance Scanning in the Classroom", "Taking attendance, visual feedback banner, reticle colors, camera profiles (Outdoor/Indoor)"),
         ("Chapter 5: Enrolling New Students & Staff", "On-screen registration, smartphone Wi-Fi portal, lighting tips for best quality"),
         ("Chapter 6: Managing Registered Students", "Searching student roster, updating face scans for new looks, removing users"),
         ("Chapter 7: Scheduling Lectures via Telegram", "Using the @MyUniAttendance_Bot 5-step wizard to schedule classes automatically"),
         ("Chapter 8: Viewing & Exporting Attendance Reports", "Checking today's roll on screen, saving Excel-compatible CSV files to memory card"),
-        ("Chapter 9: System Settings & Personalization", "Adjusting screen brightness, sound chime volume, Wi-Fi passwords, changing PIN"),
+        ("Chapter 9: System Settings & Personalization", "Adjusting screen brightness, light/dark theme switch, Wi-Fi passwords, changing PIN"),
         ("Chapter 10: Simple Troubleshooting & FAQs", "Common questions, what to do if a face is not recognized, cleaning the screen"),
     ]
 
@@ -289,11 +329,11 @@ def build_operator_story():
     t_table = Table(t_toc, colWidths=[205, 335])
     t_table.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("PADDING", (0, 0), (-1, -1), 3.5),
+        ("PADDING", (0, 0), (-1, -1), 4),
         ("LINEBELOW", (0, 0), (-1, -1), 0.5, C_BG_LIGHT),
     ]))
     story.append(t_table)
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 10))
 
     story.append(Paragraph("Quick Overview: How the System Works", styles["H2"]))
     story.append(Paragraph(
@@ -302,9 +342,10 @@ def build_operator_story():
     ))
     daily_overview = [
         "<b>1. Bring to Class:</b> Place the device on the lecturer's desk or mount it by the classroom entrance.",
-        "<b>2. Automatic Session:</b> If the class was scheduled via Telegram, the device automatically shows the active course name on screen. If not, tap the screen to select your course.",
-        "<b>3. Students Walk By:</b> Students pause for just one second in front of the screen. A green box appears with a friendly chime confirming their name.",
-        "<b>4. Instant Records:</b> Attendance is saved immediately into the memory card. Students receive a Telegram alert on their phones, and the lecturer gets a complete attendance sheet after class.",
+        "<b>2. Power On:</b> Slide the power switch on the left side <b>UP</b>. The device boots in about 5 seconds.",
+        "<b>3. Automatic Session:</b> If the class was scheduled via Telegram, the device automatically shows the active course name on screen. If not, tap the screen to select your course.",
+        "<b>4. Students Walk By:</b> Students pause for just one second in front of the screen. A green box and green visual confirmation banner appear confirming their name.",
+        "<b>5. Instant Records:</b> Attendance is saved immediately into the memory card. Students receive a Telegram alert on their phones, and the lecturer gets a complete attendance sheet after class.",
     ]
     for d in daily_overview:
         story.append(Paragraph(f"• {d}", styles["Bullet"]))
@@ -315,54 +356,49 @@ def build_operator_story():
     story.append(Paragraph("Chapter 1: Getting to Know Your Terminal", styles["H1"]))
     story.append(HRFlowable(width="100%", thickness=1, color=C_PRIMARY, spaceBefore=2, spaceAfter=6))
     story.append(Paragraph(
-        "Before your first session, familiarize yourself with the exterior parts and controls of the terminal:",
+        "Familiarize yourself with the exterior parts and verified physical controls of the terminal:",
         styles["Body"]
     ))
 
     parts = [
-        [Paragraph("<b>Component</b>", styles["TableHeader"]), Paragraph("<b>Location</b>", styles["TableHeader"]), Paragraph("<b>Function in Daily Usage</b>", styles["TableHeader"])],
+        [Paragraph("<b>Component</b>", styles["TableHeader"]), Paragraph("<b>Location</b>", styles["TableHeader"]), Paragraph("<b>Operational Function & Instructions</b>", styles["TableHeader"])],
         [
-            Paragraph("7.0″ Touchscreen", styles["TableCellBold"]),
-            Paragraph("Front Face", styles["TableCell"]),
-            Paragraph("High-definition color display. Shows the live camera view, student names, menus, and attendance counters.", styles["TableCell"]),
+            Paragraph("Power Slide Switch", styles["TableCellBold"]),
+            Paragraph("Left Side (Upper)", styles["TableCell"]),
+            Paragraph("Mechanical slide switch: <b>Slide UP to power ON</b>. <b>Slide DOWN to power OFF</b>. Provides instant hardware power control.", styles["TableCell"]),
+        ],
+        [
+            Paragraph("USB-C Charging Slot", styles["TableCellBold"]),
+            Paragraph("Left Side (Below Switch)", styles["TableCell"]),
+            Paragraph("Standard USB Type-C port for charging and power. <b>Recommended power rating: 5V, 2A to 3A</b>. Compatible with standard phone fast chargers.", styles["TableCell"]),
         ],
         [
             Paragraph("Camera Lens", styles["TableCellBold"]),
-            Paragraph("Top / Side Ribbon", styles["TableCell"]),
-            Paragraph("Scans student faces automatically. Keep lens clean and free of fingerprints.", styles["TableCell"]),
+            Paragraph("Top of Screen", styles["TableCell"]),
+            Paragraph("Integrated high-definition camera facing outward toward students. Keep the lens clean and free of fingerprints.", styles["TableCell"]),
         ],
         [
-            Paragraph("Status Bar", styles["TableCellBold"]),
-            Paragraph("Top Edge of Screen", styles["TableCell"]),
-            Paragraph("Displays current time, active course name, Wi-Fi connection icon, and battery percentage.", styles["TableCell"]),
-        ],
-        [
-            Paragraph("Power Button", styles["TableCellBold"]),
-            Paragraph("Side Edge", styles["TableCell"]),
-            Paragraph("Press and hold for 2 seconds to turn the device ON or OFF.", styles["TableCell"]),
-        ],
-        [
-            Paragraph("USB-C Charging Port", styles["TableCellBold"]),
-            Paragraph("Side Edge", styles["TableCell"]),
-            Paragraph("Connect the included 5V/3A wall charger to recharge the built-in battery or provide continuous power.", styles["TableCell"]),
+            Paragraph("7.0″ Touchscreen", styles["TableCellBold"]),
+            Paragraph("Front Face", styles["TableCell"]),
+            Paragraph("Crisp 7-inch color display. Shows live camera view, visual confirmation banner, camera profiles, clock, and battery level.", styles["TableCell"]),
         ],
         [
             Paragraph("Memory Card Slot", styles["TableCellBold"]),
-            Paragraph("Rear / Side Slot", styles["TableCell"]),
-            Paragraph("Holds the MicroSD memory card storing student records, attendance logs, and exported CSV files.", styles["TableCell"]),
+            Paragraph("Bottom Slot", styles["TableCell"]),
+            Paragraph("Houses the MicroSD card holding student records, attendance logs, and AI models. <font color='#EF4444'><b>CRITICAL: DO NOT REMOVE!</b></font> Removing the card halts attendance functions.", styles["TableCell"]),
         ],
         [
-            Paragraph("Internal Speaker", styles["TableCellBold"]),
-            Paragraph("Rear Housing", styles["TableCell"]),
-            Paragraph("Plays a pleasant chime when attendance is successfully recorded or an alert if an error occurs.", styles["TableCell"]),
+            Paragraph("Status Bar", styles["TableCellBold"]),
+            Paragraph("Top Edge of Display", styles["TableCell"]),
+            Paragraph("Displays current time, active course code, Wi-Fi connection indicator, and battery percentage with charging status.", styles["TableCell"]),
         ],
     ]
-    t_parts = Table(parts, colWidths=[110, 100, 330])
+    t_parts = Table(parts, colWidths=[120, 110, 310])
     t_parts.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), C_PRIMARY),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, C_BG_LIGHT]),
         ("GRID", (0, 0), (-1, -1), 0.5, C_BORDER),
-        ("PADDING", (0, 0), (-1, -1), 3.5),
+        ("PADDING", (0, 0), (-1, -1), 4),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
     ]))
     story.append(t_parts)
@@ -372,51 +408,49 @@ def build_operator_story():
     story.append(HRFlowable(width="100%", thickness=1, color=C_PRIMARY, spaceBefore=2, spaceAfter=6))
 
     power_steps = [
-        "<b>Turning On:</b> Press and hold the power button for <b>2 seconds</b>. The screen lights up with the SmartAttendance logo and enters the main scanner screen in about 5 seconds.",
-        "<b>Turning Off:</b> Open the Menu, tap <b>[Power Off]</b>, and confirm. Alternatively, press and hold the power button for 3 seconds.",
-        "<b>Charging the Device:</b> Plug the provided USB-C power adapter into any standard wall outlet (100V – 240V) and connect the cable to the terminal. A full recharge takes approximately <b>2.5 to 3.5 hours</b>.",
-        "<b>Continuous Power:</b> You can use the device continuously while it is plugged into the charger during long lecture days without harming the battery.",
+        "<b>Turning On:</b> Slide the switch on the left side <b>UP</b>. The screen lights up immediately and loads the main scanner in ~5 seconds.",
+        "<b>Turning Off:</b> Slide the switch on the left side <b>DOWN</b> to completely power off the unit.",
+        "<b>Charging the Device:</b> Plug a certified <b>5V 2A–3A USB Type-C charger</b> into the charging slot on the left side (located right below the power switch). A full charge takes approximately <b>2.5 to 3.5 hours</b>.",
+        "<b>Continuous Power:</b> You can keep the USB-C charger connected during long lecture days. The device supports pass-through charging without battery degradation.",
     ]
     for ps in power_steps:
         story.append(Paragraph(f"• {ps}", styles["Bullet"]))
 
     story.append(Spacer(1, 4))
-    story.append(Paragraph("Understanding the Battery Indicator", styles["H2"]))
+    story.append(Paragraph("Understanding the Battery Color Indicators (No Bars / No Green)", styles["H2"]))
+    story.append(Paragraph(
+        "The battery status in the top-right corner uses clean <b>numerical percentages and color indicators</b> (no multi-colored bars, and no green indicator):",
+        styles["Body"]
+    ))
 
     batt_table = [
-        [Paragraph("<b>Screen Icon</b>", styles["TableHeader"]), Paragraph("<b>Color</b>", styles["TableHeader"]), Paragraph("<b>Battery Level</b>", styles["TableHeader"]), Paragraph("<b>What You Should Do</b>", styles["TableHeader"])],
+        [Paragraph("<b>Status / Mode</b>", styles["TableHeader"]), Paragraph("<b>Screen Display</b>", styles["TableHeader"]), Paragraph("<b>Color Indicator</b>", styles["TableHeader"]), Paragraph("<b>What It Means & What You Should Do</b>", styles["TableHeader"])],
         [
-            Paragraph("Lightning Bolt", styles["TableCellBold"]),
-            Paragraph("<font color='#0284C7'><b>Cyan Blue</b></font>", styles["TableCell"]),
-            Paragraph("Charging in progress", styles["TableCell"]),
-            Paragraph("Device is connected to power and charging safely. You can continue taking attendance.", styles["TableCell"]),
+            Paragraph("Charging Connected", styles["TableCellBold"]),
+            Paragraph("Lightning Bolt Icon + Percentage (e.g. <code>[bolt] 74%</code>)", styles["TableCell"]),
+            Paragraph("<font color='#00CFFF'><b>Glowing Cyan Blue (#00CFFF)</b></font>", styles["TableCell"]),
+            Paragraph("The device is actively charging from the USB-C slot. Both the lightning bolt icon and percentage text glow in bright cyan blue.", styles["TableCell"]),
         ],
         [
-            Paragraph("Solid Battery (4 Bars)", styles["TableCellBold"]),
-            Paragraph("White / Green", styles["TableCell"]),
-            Paragraph("90% to 100% Full", styles["TableCell"]),
-            Paragraph("Battery is fully charged. Excellent for portable classroom use (4 to 6 hours runtime).", styles["TableCell"]),
+            Paragraph("Normal Battery (15% – 100%)", styles["TableCellBold"]),
+            Paragraph("Battery Icon + Percentage (e.g. <code>88%</code>)", styles["TableCell"]),
+            Paragraph("<b>White</b> (Dark Theme) / <b>Black</b> (Light Theme)", styles["TableCell"]),
+            Paragraph("Standard discharging mode. Battery is healthy and ready for active attendance scanning. (Lasts ~4 to 6 hours continuous).", styles["TableCell"]),
         ],
         [
-            Paragraph("Half Battery (2 Bars)", styles["TableCellBold"]),
-            Paragraph("White", styles["TableCell"]),
-            Paragraph("30% to 59% Medium", styles["TableCell"]),
-            Paragraph("Sufficient battery remaining for 1 to 2 typical lecture sessions.", styles["TableCell"]),
+            Paragraph("Low Battery (< 15%)", styles["TableCellBold"]),
+            Paragraph("Battery Icon + Percentage (e.g. <code>12%</code>)", styles["TableCell"]),
+            Paragraph("<font color='#FF4444'><b>Vivid Red (#FF4444)</b></font>", styles["TableCell"]),
+            Paragraph("Both the icon and percentage turn solid red. A notification banner warns that the battery is low. Plug in the USB-C charger soon.", styles["TableCell"]),
         ],
         [
-            Paragraph("Low Battery (1 Bar)", styles["TableCellBold"]),
-            Paragraph("<font color='#D97706'><b>Amber</b></font>", styles["TableCell"]),
-            Paragraph("10% to 15% Low", styles["TableCell"]),
-            Paragraph("A low battery notification appears. Plug the device into its charger as soon as possible.", styles["TableCell"]),
-        ],
-        [
-            Paragraph("Empty Battery", styles["TableCellBold"]),
-            Paragraph("<font color='#EF4444'><b>Flashing Red</b></font>", styles["TableCell"]),
-            Paragraph("Below 10% Critical", styles["TableCell"]),
-            Paragraph("Connect charger immediately. <b>At 5%, the device safely saves all data and turns off automatically.</b>", styles["TableCell"]),
+            Paragraph("Critical Cutoff (5%)", styles["TableCellBold"]),
+            Paragraph("Flashing Red Alert", styles["TableCell"]),
+            Paragraph("<font color='#FF4444'><b>Red / Auto-Protect</b></font>", styles["TableCell"]),
+            Paragraph("<b>At 5%, the terminal automatically saves all attendance records to the memory card and safely shuts down</b> to prevent data loss.", styles["TableCell"]),
         ],
     ]
-    t_batt = Table(batt_table, colWidths=[95, 80, 115, 250])
+    t_batt = Table(batt_table, colWidths=[95, 120, 110, 215])
     t_batt.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), C_PRIMARY),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, C_BG_LIGHT]),
@@ -432,12 +466,12 @@ def build_operator_story():
     story.append(Paragraph("Chapter 3: First-Time Setup Wizard", styles["H1"]))
     story.append(HRFlowable(width="100%", thickness=1, color=C_PRIMARY, spaceBefore=2, spaceAfter=6))
     story.append(Paragraph(
-        "When you turn on a brand-new device for the first time, a simple 4-step wizard guides you through initial setup:",
+        "When you power on a fresh terminal, a simple 4-step wizard welcomes you:",
         styles["Body"]
     ))
 
     wizard_steps = [
-        "<b>Step 1: Set Your Master Admin PIN:</b> Choose a memorable <b>4-digit PIN</b> (default initial code is <code>1234</code>). This PIN protects student management, reports, and settings from unauthorized tampering. Do not share this PIN with students.",
+        "<b>Step 1: Set Your Master Admin PIN:</b> Choose a secure <b>4-digit PIN</b> (default initial code is <code>1234</code>). This PIN protects student management, reports, and settings from unauthorized tampering. Do not share this PIN with students.",
         "<b>Step 2: Enter School / Department Details:</b> Type your Department Name (e.g., <i>Computer Science</i>) and Terminal Location (e.g., <i>Lecture Hall B</i>). These names appear on all exported attendance reports.",
         "<b>Step 3: Set Date & Time:</b> Confirm the current time and date. If you connect to Wi-Fi, the device sets its clock automatically over the internet.",
         "<b>Step 4: Connect to Campus Wi-Fi (Optional):</b> Select your Wi-Fi network and type the password. If your classroom does not have Wi-Fi, tap <b>[Skip]</b> — the device works 100% offline!",
@@ -449,22 +483,22 @@ def build_operator_story():
     story.append(Paragraph("Chapter 4: Daily Attendance Scanning in the Classroom", styles["H1"]))
     story.append(HRFlowable(width="100%", thickness=1, color=C_PRIMARY, spaceBefore=2, spaceAfter=6))
     story.append(Paragraph(
-        "During class, the device runs in automatic scanning mode. Taking attendance is completely contactless:",
+        "During class, the device runs in automatic scanning mode. Taking attendance is completely contactless and visual (the system does not use audio or sound chimes):",
         styles["Body"]
     ))
 
     scan_steps = [
-        "<b>1. Student Positioning:</b> The student approaches the terminal and pauses about <b>2 to 3 feet</b> (arm's length) in front of the screen, looking directly at the camera.",
-        "<b>2. Automatic Recognition (< 1 Second):</b> The device instantly finds their face and verifies their identity against the registered student roster.",
-        "<b>3. Understanding Screen Reticle Colors:</b><br/>"
-        "• <font color='#10B981'><b>GREEN BOX + CHIME:</b></font> <b>Success!</b> The screen displays: <code>\"Welcome, [Student Name]! Present at 09:15 AM\"</code>.<br/>"
-        "• <font color='#F59E0B'><b>AMBER BOX:</b></font> <b>Verifying:</b> The student should hold still for a moment.<br/>"
-        "• <font color='#EF4444'><b>RED BOX:</b></font> <b>Unrecognized:</b> The face is not registered in the system, or the student needs to adjust their posture.",
-        "<b>4. Helpful On-Screen Guidance Prompts:</b><br/>"
+        "<b>1. Student Positioning:</b> The student approaches the terminal and pauses about <b>2 to 3 feet</b> (arm's length) in front of the screen, looking toward the camera lens at the top of the display.",
+        "<b>2. Sub-Second Facial Verification:</b> The device tracks the face with a green reticle box and verifies their identity in under 1 second.",
+        "<b>3. Understanding Visual Screen Confirmations:</b><br/>"
+        "• <font color='#10B981'><b>GREEN RETICLE & GREEN BANNER:</b></font> <b>Success!</b> The bottom feedback banner turns deep green with: <code>\"Welcome, [Student Name]! Recorded at 09:15 AM\"</code>.<br/>"
+        "• <font color='#F59E0B'><b>ORANGE BANNER:</b></font> <b>Duplicate Scan:</b> Shows <code>\"Already Recorded: [Student Name]\"</code> if scanned again within 15 minutes.<br/>"
+        "• <font color='#EF4444'><b>RED TEXT ('Unknown'):</b></font> The face is not registered in the system, or the student needs to step closer.",
+        "<b>4. Helpful Guidance Prompts on Screen:</b><br/>"
         "• <i>\"Please close mouth & look straight\"</i> — student is laughing, talking, or yawning.<br/>"
-        "• <i>\"Glare detected — adjust angle from light\"</i> — sunlight or a bright lamp is shining directly behind or onto the face.<br/>"
+        "• <i>\"Glare detected — adjust angle from light\"</i> — sunlight or a bright lamp is reflecting into the lens.<br/>"
         "• <i>\"Blurry image — please hold still\"</i> — student is walking past too quickly.",
-        "<b>5. Duplicate Scan Prevention:</b> If a student scans their face again during the same lecture within 15 minutes, the screen says <code>\"Already Recorded\"</code>. They will not be counted twice.",
+        "<b>5. Camera Profile Buttons (Right Panel):</b> If classroom lighting changes, tap any of the 5 quick profile buttons on the right side of the screen: <b>Auto</b>, <b>Outdoor</b>, <b>Indoor</b>, <b>Bright</b>, or <b>Low Light</b> for instant exposure optimization.",
     ]
     for ss in scan_steps:
         story.append(Paragraph(f"• {ss}", styles["Bullet"]))
@@ -639,7 +673,7 @@ def build_operator_story():
     report_features = [
         "<b>Viewing On-Screen Reports:</b> Open the Menu, select <b>Attendance Reports</b>, and enter your Admin PIN. Choose today's date or select a course code to see the total number of students registered, present count, absent count, and attendance percentage.",
         "<b>Exporting to Excel (CSV File):</b> Tap the blue <b>[Export CSV to SD]</b> button. The device writes an Excel-compatible spreadsheet file directly to the memory card under <code>/sdcard/reports/</code>.",
-        "<b>Opening the File on Your Computer:</b> Remove the MicroSD card (or connect via USB) and open the file in Microsoft Excel, Google Sheets, or WPS Office. The sheet shows Student Name, Matric Number, Course Code, Exact Verification Time, and Status (PRESENT).",
+        "<b>Accessing Exported Files:</b> Connect the terminal via USB to your computer (or access via the web portal) and open the file in Microsoft Excel, Google Sheets, or WPS Office. The sheet shows Student Name, Matric Number, Course Code, Exact Verification Time, and Status (PRESENT).",
         "<b>Automatic Telegram Class Summary:</b> When the lecture session ends, the Telegram bot automatically sends the lecturer a message with total attendance numbers and attaches the full CSV roll sheet directly to their Telegram chat!",
     ]
     for rf in report_features:
@@ -661,9 +695,9 @@ def build_operator_story():
             Paragraph("Keep at 60% – 70% indoors to save battery while keeping the display clear.", styles["TableCell"]),
         ],
         [
-            Paragraph("Sound Volume", styles["TableCellBold"]),
-            Paragraph("Drag Volume slider; tap [Test Sound]", styles["TableCell"]),
-            Paragraph("Set louder (80% – 100%) in noisy lecture theatres so students clearly hear the confirmation chime.", styles["TableCell"]),
+            Paragraph("Theme Switch", styles["TableCellBold"]),
+            Paragraph("Toggle the Light / Dark theme switch", styles["TableCell"]),
+            Paragraph("Dark theme is default (optimal for indoor halls and reduced battery power draw).", styles["TableCell"]),
         ],
         [
             Paragraph("Wi-Fi Setup", styles["TableCellBold"]),
@@ -689,8 +723,8 @@ def build_operator_story():
     story.append(Spacer(1, 8))
     story.append(make_callout(
         "info",
-        "Screen Auto-Dim Feature",
-        "To maximize battery runtime during long exams or seminars, the screen will gently dim after 2 minutes of inactivity. When a student approaches the camera, it instantly brightens to full view.",
+        "Memory Card Protection",
+        "The MicroSD card inserted into the bottom slot contains the entire offline student database and facial recognition models. Never remove the memory card during operation. If the card is removed, the device will display an error and halt scanning until re-inserted.",
         styles
     ))
 
@@ -708,18 +742,18 @@ def build_operator_story():
         [Paragraph("<b>Problem Encountered</b>", styles["TableHeader"]), Paragraph("<b>Common Cause</b>", styles["TableHeader"]), Paragraph("<b>Easy Solution for the Operator</b>", styles["TableHeader"])],
         [
             Paragraph("Device will not turn on", styles["TableCellBold"]),
-            Paragraph("Battery is completely drained.", styles["TableCell"]),
-            Paragraph("Plug in the included 5V/3A USB-C wall charger. Wait 5 minutes, then press and hold the power button for 2 seconds.", styles["TableCell"]),
+            Paragraph("1. Switch is DOWN.<br/>2. Battery is drained.", styles["TableCell"]),
+            Paragraph("Ensure the slide switch on the left side is pushed <b>UP</b>. If battery is dead, plug in the 5V 2-3A USB-C charger below the switch.", styles["TableCell"]),
         ],
         [
-            Paragraph("Student's face shows Red Box ('Unknown')", styles["TableCellBold"]),
+            Paragraph("Student's face shows Red ('Unknown')", styles["TableCellBold"]),
             Paragraph("1. Not enrolled.<br/>2. Changed appearance.<br/>3. Heavy sunglasses/hat.", styles["TableCell"]),
             Paragraph("Ask student to remove sunglasses or low hats. If they changed hairstyle or grew a beard, use <b>Re-enroll Face</b> in User Management.", styles["TableCell"]),
         ],
         [
             Paragraph("Screen says 'Glare detected'", styles["TableCellBold"]),
             Paragraph("Direct sunlight or lamp shining into lens.", styles["TableCell"]),
-            Paragraph("Turn the terminal slightly away from sunny windows or bare ceiling spotlights.", styles["TableCell"]),
+            Paragraph("Turn the terminal slightly away from sunny windows, or tap the <b>Bright</b> / <b>Outdoor</b> camera profile button on the right panel.", styles["TableCell"]),
         ],
         [
             Paragraph("Student says they didn't get counted", styles["TableCellBold"]),
@@ -750,9 +784,10 @@ def build_operator_story():
     story.append(Spacer(1, 8))
     story.append(Paragraph("Everyday Care & Maintenance Tips", styles["H2"]))
     care_tips = [
-        "<b>Screen Cleaning:</b> Always use a dry, soft microfiber cloth to clean the glass touchscreen. Never spray water, alcohol, or liquid cleaners directly onto the unit.",
-        "<b>Safe Storage:</b> When not in use, store the terminal in a clean, dry office drawer or protective padded bag. Keep away from excessive dust, direct sunlight, or extreme heat.",
-        "<b>Charging Safety:</b> Only use the provided 5V/3A USB-C power adapter. Do not leave the device charging on soft beds or enclosed cushions.",
+        "<b>Screen Cleaning:</b> Always use a dry, soft microfiber cloth to clean the glass touchscreen and camera lens. Never spray water, alcohol, or liquid cleaners directly onto the unit.",
+        "<b>Safe Storage:</b> When not in use, slide the power switch DOWN and store the terminal in a clean, dry office drawer or padded bag. Keep away from excessive dust or extreme heat.",
+        "<b>Charging Safety:</b> Use a certified 5V 2A–3A USB Type-C power adapter. Do not leave the device charging on soft beds or enclosed cushions.",
+        "<b>Memory Card Slot:</b> Keep the MicroSD memory card inserted in the bottom slot at all times.",
     ]
     for ct in care_tips:
         story.append(Paragraph(f"• {ct}", styles["Bullet"]))
@@ -760,7 +795,7 @@ def build_operator_story():
     story.append(Spacer(1, 12))
     story.append(HRFlowable(width="100%", thickness=1, color=C_SECONDARY, spaceBefore=4, spaceAfter=8))
     story.append(Paragraph(
-        "<font size='7.5' color='#64748B'>SmartAttendance™ Touchscreen Biometric Terminal — Official Administrator & Operator Guide. Document ID: SA-OP-MANUAL-2026-V2. Copyright © 2026 SmartAttendance Project Team. All rights reserved.</font>",
+        "<font size='8' color='#64748B'>SmartAttendance™ Touchscreen Biometric Terminal — Official Administrator & Operator Guide. Document ID: SA-OP-MANUAL-2026-V2.3. Copyright © 2026 SmartAttendance Project Team. All rights reserved.</font>",
         styles["Body"]
     ))
 
@@ -776,7 +811,7 @@ def generate_operator_pdf(output_path):
         topMargin=MARGIN, bottomMargin=MARGIN,
     )
     story = build_operator_story()
-    print(f"Building Admin Operator User Manual PDF at: {output_path} ...")
+    print(f"Building Admin Operator User Manual PDF (Times New Roman 12pt) at: {output_path} ...")
     doc.build(story, canvasmaker=OperatorNumberedCanvas)
     print("Admin Operator User Manual PDF build completed successfully.")
 
