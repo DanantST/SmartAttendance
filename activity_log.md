@@ -3846,3 +3846,48 @@ docs: separate operator manual from technician manual and expand engineering ref
 
 #### Commit
 docs: update manuals with verified hardware layout, visual feedback, and Times New Roman 12pt
+---
+
+## Session - 2026-10-21 - Navigation Alignment, 4-8 Digit PIN, Captive Portal, OTA & Repair Guide
+
+### User Request
+> I haven't observed any "Add User" button in the users app. The admin pin is 4-8 digits. The enrollment session pin is not 4 digits and wifi enrollment on some devices shows the "sign into network" option so they don't manually type ip address in their browser. You also omitted the ota update information. 
+> The technician manual should contain troubleshooting and repair guide.
+
+### Implementation
+> 1. Corrected user navigation and enrollment procedures:
+>    - Clarified that the Users app (`ui_user_manager.cpp`) is dedicated to viewing roster cards, re-enrolling faces, or deleting profiles, and does NOT have an "Add User" button.
+>    - Documented that on-device registration is performed via the dedicated **Enroll** app (`+` icon) on the 7-app desktop launcher (`ui_main.cpp`).
+> 2. Corrected PIN lengths across all chapters:
+>    - Master Admin PIN length is 4 to 8 numeric digits (NVS key `admin_pin`, default `1234`).
+>    - Enrollment Session PIN is a dynamic 6-digit PIN (`%06d`, generated in `ble_registration.c`).
+> 3. Documented Wi-Fi Captive Portal Behavior:
+>    - Detailed that connecting to `Attendance_Setup` triggers automatic "Sign into network" / "Log in to Wi-Fi" OS notifications on iOS/Android/Windows, automatically launching `register.html` without requiring users to manually type the IP address (with `http://192.168.4.1/register.html` as manual fallback).
+> 4. Added Over-The-Air (OTA) Updates Documentation:
+>    - Added a dedicated chapter in the Operator Manual covering dual-bank A/B fail-safe updates (`ota_0`/`ota_1`), Web Portal update via `/update`, and Telegram Bot remote updates via `/ota`.
+>    - Documented in the Technician Manual the dual-bank OTA state machine (`PENDING_VERIFY`, `VALID`, `INVALID`), `esp_ota` flash API calls, self-test verification, and automated watchdog/panic rollback.
+> 5. Expanded Technician Manual Hardware Troubleshooting & Repair Guide (Section 12):
+>    - Added Power Distribution Network (PDN) test points and multimeter voltage measurement table (`VBUS_IN` 5.0V, `VBAT` 3.0-4.2V, `VDD_3V3` 3.3V, `LDO3` 2.5V, `LDO4` 3.3V, `VBACKUP` 3.0V).
+>    - Detailed step-by-step repair guides for MIPI-DSI display artifacts, GT911 touch I2C arbitration deadlock recovery (9-clock SCL pulse), SC2336 camera SCCB 0x36 addressing & M12 lens focus tuning, SDMMC FAT32 & SQLite database integrity recovery, and ESP32-P4 ROM download mode flash recovery.
+>    - Added J7 diagnostic header pinout and test points matrix.
+> 6. Preserved Times New Roman typography with strict 12pt body text across both generated PDFs.
+
+#### Feature Overview
+- **Operator Manual Alignment**: Removed inaccurate "Add User" button reference; guided users to the Enroll desktop app; updated Admin PIN to 4-8 digits; updated session PIN to 6 digits; detailed captive portal automatic sign-in prompt; added full OTA chapter.
+- **Technician Manual Expansion**: Expanded Section 10 with OTA A/B rollback architecture; expanded Section 12 with multimeter PDN test points, component failure modes, I2C deadlock recovery, and board repair steps.
+- **Typography & PDF Generation**: Built both PDFs with Times New Roman 12pt body text (Operator Manual: 11 pages; Technician Manual: 13 pages).
+
+**docs/SmartAttendance_User_Manual.pdf** changes:
+- Re-generated 11-page Operator Manual reflecting launcher navigation, 4-8 digit PIN, 6-digit session PIN, captive portal behavior, and OTA update chapter.
+
+**docs/SmartAttendance_Technician_Manual.pdf** changes:
+- Re-generated 13-page Technician Manual with exhaustive dual-bank OTA rollback architecture and Section 12 Hardware Troubleshooting & Repair Guide.
+
+**docs/generate_operator_manual.py** changes:
+- Corrected enrollment app flow, Admin PIN length, 6-digit session PIN, captive portal prompt, and added Chapter 10 for OTA updates.
+
+**docs/generate_technician_manual.py** changes:
+- Expanded Section 10 OTA architecture and Section 12 Hardware Troubleshooting & Board Repair Guide.
+
+#### Commit
+docs: update manuals with accurate app navigation, 4-8 digit PIN, captive portal, OTA, and technician repair guide
